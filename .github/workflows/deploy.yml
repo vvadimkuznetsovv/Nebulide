@@ -8,25 +8,6 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Build Docker image
-        run: docker build -t clauder:latest .
-
-      - name: Save Docker image
-        run: docker save clauder:latest | gzip > clauder.tar.gz
-
-      - name: Copy image to server
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          port: ${{ secrets.SERVER_PORT }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SSH_PRIVATE_KEY }}
-          passphrase: ${{ secrets.SSH_PASSPHRASE }}
-          source: "clauder.tar.gz,docker-compose.yml"
-          target: "/tmp"
-
       - name: Deploy on server
         uses: appleboy/ssh-action@v1.0.3
         with:
@@ -36,11 +17,9 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           passphrase: ${{ secrets.SSH_PASSPHRASE }}
           script: |
-            echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S mv /tmp/clauder.tar.gz /opt/clauder/
-            echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S mv /tmp/docker-compose.yml /opt/clauder/
             cd /opt/clauder
-            echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S docker load < clauder.tar.gz
+            echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S git pull origin main
+            echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S docker compose build
             echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S docker compose down
             echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S docker compose up -d
-            echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S rm clauder.tar.gz
             echo "Deployed successfully"
