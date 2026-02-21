@@ -101,13 +101,20 @@ export default function Login() {
   return (
     <div style={{ minHeight: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', position: 'relative', overflow: 'hidden' }}>
 
-      {/* SVG Glass Distortion Filter (Chromium only) */}
+      {/* SVG Glass Distortion Filters (Chromium only) */}
       <svg xmlns="http://www.w3.org/2000/svg" width="0" height="0" style={{ position: 'absolute', overflow: 'hidden' }}>
         <defs>
+          {/* Desktop — strong refraction */}
           <filter id="glass-distortion" x="-10%" y="-10%" width="120%" height="120%">
             <feTurbulence type="fractalNoise" baseFrequency="0.006 0.006" numOctaves="3" seed="42" result="noise" />
             <feGaussianBlur in="noise" stdDeviation="2.5" result="blurred" />
             <feDisplacementMap in="SourceGraphic" in2="blurred" scale="120" xChannelSelector="R" yChannelSelector="G" />
+          </filter>
+          {/* Mobile — softer refraction */}
+          <filter id="glass-distortion-mobile" x="-10%" y="-10%" width="120%" height="120%">
+            <feTurbulence type="fractalNoise" baseFrequency="0.008 0.008" numOctaves="2" seed="42" result="noise" />
+            <feGaussianBlur in="noise" stdDeviation="3" result="blurred" />
+            <feDisplacementMap in="SourceGraphic" in2="blurred" scale="40" xChannelSelector="R" yChannelSelector="G" />
           </filter>
         </defs>
       </svg>

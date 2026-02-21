@@ -1147,15 +1147,26 @@
      MOBILE ADAPTATION
      ========================================== */
   @media (max-width: 640px) {
-    /* Shrink blobs on mobile */
-    .lava-blob-1 { width: 200px; height: 200px; filter: blur(22px); }
-    .lava-blob-2 { width: 170px; height: 170px; filter: blur(20px); }
-    .lava-blob-3 { width: 150px; height: 150px; filter: blur(18px); }
-    .lava-blob-4 { width: 130px; height: 130px; filter: blur(16px); }
-    .lava-blob-5 { width: 110px; height: 110px; filter: blur(14px); }
-    .lava-blob-6 { width: 160px; height: 160px; filter: blur(20px); }
-    .lava-blob-7 { width: 90px; height: 90px; filter: blur(12px); }
-    .lava-blob-8 { width: 80px; height: 80px; filter: blur(10px); }
+    /* Softer contrast on mobile */
+    .lava-lamp { filter: contrast(3); }
+
+    /* Mobile blobs — slightly smaller, spread across screen */
+    .lava-blob-1 { width: 180px; height: 180px; filter: blur(22px); top: 2%; left: 5%; }
+    .lava-blob-2 { width: 160px; height: 160px; filter: blur(20px); bottom: 5%; right: 5%; top: auto; }
+    .lava-blob-3 { width: 150px; height: 150px; filter: blur(18px); top: 40%; left: 10%; }
+    .lava-blob-4 { width: 130px; height: 130px; filter: blur(16px); top: 8%; right: 10%; left: auto; }
+    .lava-blob-5 { width: 120px; height: 120px; filter: blur(15px); bottom: 25%; left: 55%; top: auto; }
+    .lava-blob-6 { width: 170px; height: 170px; filter: blur(20px); top: 60%; left: 3%; }
+    .lava-blob-7 { width: 100px; height: 100px; filter: blur(13px); top: 25%; left: 60%; }
+    .lava-blob-8 { width: 95px; height: 95px; filter: blur(11px); bottom: 12%; right: 30%; top: auto; }
+
+    /* Glass distortion — use mobile SVG filter (softer but same look as PC) */
+    .glass-card::after {
+      -webkit-filter: url("#glass-distortion-mobile");
+      filter: url(#glass-distortion-mobile);
+      -webkit-backdrop-filter: blur(20px) saturate(180%) brightness(1.15);
+      backdrop-filter: blur(20px) saturate(180%) brightness(1.15);
+    }
 
     /* Login card mobile */
     .login-card {
