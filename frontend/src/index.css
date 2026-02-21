@@ -650,6 +650,362 @@
     border-color: rgba(248, 113, 113, 0.2);
   }
 
+  /* Workspace toolbar — panel settings */
+  .workspace-toolbar {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    overflow: hidden;
+    background: rgba(0, 0, 0, 0.12);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    transition: max-height 0.3s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.2s ease, padding 0.3s ease;
+  }
+  .workspace-toolbar-btn {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 12px;
+    border-radius: 10px;
+    font-size: 11px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.35);
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+  }
+  .workspace-toolbar-btn:hover {
+    color: rgba(255, 255, 255, 0.6);
+    background: rgba(255, 255, 255, 0.08);
+    border-color: rgba(255, 255, 255, 0.12);
+  }
+  .workspace-toolbar-btn.active {
+    color: rgba(255, 255, 255, 0.8);
+    background: rgba(127, 0, 255, 0.12);
+    border-color: rgba(127, 0, 255, 0.25);
+  }
+  .workspace-toolbar-btn.active:hover {
+    background: rgba(127, 0, 255, 0.18);
+    border-color: rgba(127, 0, 255, 0.35);
+  }
+
+  /* Drag & Drop — Panel header */
+  .panel-drag-header {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 10px;
+    background: rgba(0, 0, 0, 0.15);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    cursor: grab;
+    -webkit-user-select: none;
+    user-select: none;
+    touch-action: none;
+  }
+  .panel-drag-header:active {
+    cursor: grabbing;
+  }
+  .drag-grip {
+    display: flex;
+    align-items: center;
+    padding: 2px;
+    color: rgba(255, 255, 255, 0.3);
+    flex-shrink: 0;
+  }
+  .panel-drag-icon {
+    display: flex;
+    align-items: center;
+    color: rgba(255, 255, 255, 0.5);
+    flex-shrink: 0;
+  }
+  .panel-drag-title {
+    font-size: 11px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.5);
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .panel-close-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 6px;
+    color: rgba(255, 255, 255, 0.3);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    flex-shrink: 0;
+  }
+  .panel-close-btn:hover {
+    color: rgba(255, 255, 255, 0.7);
+    background: rgba(255, 255, 255, 0.1);
+  }
+
+  /* Drag & Drop — Droppable slots */
+  .droppable-slot {
+    position: relative;
+    border-radius: 24px;
+  }
+  .drop-zone-highlight {
+    position: absolute;
+    inset: 0;
+    border-radius: 24px;
+    border: 2px solid rgba(127, 0, 255, 0.4);
+    background: rgba(127, 0, 255, 0.08);
+    box-shadow: 0 0 20px rgba(127, 0, 255, 0.2), inset 0 0 20px rgba(127, 0, 255, 0.05);
+    pointer-events: none;
+    z-index: 50;
+    transition: opacity 0.2s ease;
+    animation: dropZonePulse 1.5s ease-in-out infinite;
+  }
+  @keyframes dropZonePulse {
+    0%, 100% { opacity: 0.7; }
+    50% { opacity: 1; }
+  }
+
+  /* Drag overlay — floating panel preview while dragging */
+  .drag-overlay-panel {
+    background: rgba(20, 10, 40, 0.85);
+    border: 1px solid rgba(127, 0, 255, 0.4);
+    border-radius: 16px;
+    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(20px);
+    box-shadow: 0 8px 32px rgba(127, 0, 255, 0.3), 0 0 0 1px rgba(127, 0, 255, 0.15);
+    min-width: 160px;
+    pointer-events: none;
+  }
+
+  /* Mobile — panel header */
+  .mobile-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 10px;
+    background: rgba(0, 0, 0, 0.15);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  }
+  .mobile-panel-header-btn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.4);
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    cursor: pointer;
+    transition: all 0.15s ease;
+  }
+  .mobile-panel-header-btn:hover,
+  .mobile-panel-header-btn:active {
+    color: rgba(255, 255, 255, 0.7);
+    background: rgba(255, 255, 255, 0.1);
+  }
+
+  /* Mobile — tab bar (draggable pills) */
+  .mobile-tab-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: rgba(255, 255, 255, 0.04);
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(20px);
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .mobile-tab-pill {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 14px;
+    border-radius: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.5);
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    cursor: grab;
+    white-space: nowrap;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
+    transition: all 0.15s ease;
+    flex-shrink: 0;
+  }
+  .mobile-tab-pill:active {
+    cursor: grabbing;
+    background: rgba(127, 0, 255, 0.12);
+    border-color: rgba(127, 0, 255, 0.25);
+    color: rgba(255, 255, 255, 0.8);
+  }
+
+  /* Mobile — drop zones (top/bottom) */
+  .mobile-drop-zone {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 80px;
+    border-radius: 16px;
+    border: 2px dashed rgba(255, 255, 255, 0.15);
+    background: rgba(255, 255, 255, 0.03);
+    color: rgba(255, 255, 255, 0.3);
+    font-size: 12px;
+    font-weight: 600;
+    transition: all 0.2s ease;
+  }
+  .mobile-drop-zone.active {
+    border-color: rgba(127, 0, 255, 0.5);
+    background: rgba(127, 0, 255, 0.1);
+    color: rgba(255, 255, 255, 0.7);
+    box-shadow: 0 0 20px rgba(127, 0, 255, 0.15);
+  }
+
+  /* Mobile — drag overlay for tab pills */
+  .mobile-tab-overlay {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 18px;
+    border-radius: 14px;
+    font-size: 13px;
+    font-weight: 600;
+    color: rgba(255, 255, 255, 0.9);
+    background: rgba(20, 10, 40, 0.9);
+    border: 1px solid rgba(127, 0, 255, 0.5);
+    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(20px);
+    box-shadow: 0 8px 32px rgba(127, 0, 255, 0.3);
+    pointer-events: none;
+  }
+
+  /* ==========================================
+     RESIZE HANDLES — react-resizable-panels
+     ========================================== */
+  .resize-handle {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    transition: background 0.15s ease;
+  }
+  .resize-handle-horizontal {
+    width: 8px;
+    cursor: col-resize;
+    margin: 0 -2px;
+    z-index: 5;
+  }
+  .resize-handle-vertical {
+    height: 8px;
+    cursor: row-resize;
+    margin: -2px 0;
+    z-index: 5;
+  }
+  .resize-handle-line {
+    position: absolute;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.08);
+    transition: all 0.15s ease;
+  }
+  .resize-handle-horizontal .resize-handle-line {
+    width: 2px;
+    height: 40px;
+    max-height: 60%;
+  }
+  .resize-handle-vertical .resize-handle-line {
+    height: 2px;
+    width: 40px;
+    max-width: 60%;
+  }
+  .resize-handle:hover .resize-handle-line {
+    background: rgba(127, 0, 255, 0.5);
+    box-shadow: 0 0 8px rgba(127, 0, 255, 0.3);
+  }
+  .resize-handle-horizontal:hover .resize-handle-line {
+    width: 3px;
+    height: 60px;
+    max-height: 80%;
+  }
+  .resize-handle-vertical:hover .resize-handle-line {
+    height: 3px;
+    width: 60px;
+    max-width: 80%;
+  }
+  .resize-handle[data-resize-handle-active],
+  .resize-handle[data-separator-active] {
+    /* Active drag state */
+  }
+  .resize-handle[data-resize-handle-active] .resize-handle-line,
+  .resize-handle[data-separator-active] .resize-handle-line {
+    background: rgba(127, 0, 255, 0.7);
+    box-shadow: 0 0 12px rgba(127, 0, 255, 0.5);
+  }
+  .resize-handle-horizontal[data-resize-handle-active] .resize-handle-line,
+  .resize-handle-horizontal[data-separator-active] .resize-handle-line {
+    width: 3px;
+    height: 80px;
+    max-height: 90%;
+  }
+  .resize-handle-vertical[data-resize-handle-active] .resize-handle-line,
+  .resize-handle-vertical[data-separator-active] .resize-handle-line {
+    height: 3px;
+    width: 80px;
+    max-width: 90%;
+  }
+
+  /* Touch: increase hit area */
+  @media (pointer: coarse) {
+    .resize-handle-horizontal { width: 16px; }
+    .resize-handle-vertical { height: 16px; }
+  }
+
+  /* ==========================================
+     EDGE DROP ZONES — drag panel to edge for new column
+     ========================================== */
+  .edge-drop-zone {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    width: 40px;
+    z-index: 50;
+    transition: all 0.2s ease;
+  }
+  .edge-drop-zone-left {
+    left: 0;
+    background: linear-gradient(90deg, rgba(127, 0, 255, 0.05), transparent);
+    border-right: 2px dashed rgba(127, 0, 255, 0.2);
+  }
+  .edge-drop-zone-right {
+    right: 0;
+    background: linear-gradient(-90deg, rgba(127, 0, 255, 0.05), transparent);
+    border-left: 2px dashed rgba(127, 0, 255, 0.2);
+  }
+  .edge-drop-zone.active {
+    width: 60px;
+    background: linear-gradient(90deg, rgba(127, 0, 255, 0.15), rgba(127, 0, 255, 0.03));
+    border-color: rgba(127, 0, 255, 0.5);
+    box-shadow: 0 0 20px rgba(127, 0, 255, 0.2);
+  }
+  .edge-drop-zone-right.active {
+    background: linear-gradient(-90deg, rgba(127, 0, 255, 0.15), rgba(127, 0, 255, 0.03));
+  }
+
+  /* Droppable panel wrapper */
+  .droppable-panel {
+    position: relative;
+    border-radius: 24px;
+  }
+
   /* Tab bar for right panel */
   .workspace-tab-bar {
     display: flex;
