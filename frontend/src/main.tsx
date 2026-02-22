@@ -4,15 +4,6 @@ import { Toaster } from 'react-hot-toast'
 import './index.css'
 import App from './App'
 
-// iOS virtual keyboard: adjust #root height to visible viewport.
-// Without this, panels hide behind the keyboard and user can't see input.
-function updateAppHeight() {
-  const h = window.visualViewport?.height ?? window.innerHeight;
-  document.documentElement.style.setProperty('--app-height', `${h}px`);
-}
-window.visualViewport?.addEventListener('resize', updateAppHeight);
-updateAppHeight();
-
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <App />

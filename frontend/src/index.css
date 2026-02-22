@@ -20,12 +20,8 @@
 
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
-  /* iOS keyboard fix: position:fixed prevents Safari from scrolling
-     the html element when an input is focused (virtual keyboard open).
-     --app-height is set by visualViewport resize listener in main.tsx. */
   html {
-    position: fixed;
-    inset: 0;
+    height: 100%;
     overflow: hidden;
     overscroll-behavior: none;
   }
@@ -38,7 +34,7 @@
     overflow: hidden;
     overscroll-behavior: none;
   }
-  #root { height: var(--app-height, 100%); }
+  #root { height: 100%; }
 
   input, textarea, select, button {
     font-family: inherit; color: inherit; background: none;

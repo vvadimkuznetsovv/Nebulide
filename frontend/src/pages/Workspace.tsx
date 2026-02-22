@@ -200,7 +200,7 @@ export default function Workspace() {
   };
 
   return (
-    <div className="h-full relative overflow-hidden">
+    <div className="h-dvh relative overflow-hidden">
       {/* === Lava lamp background === */}
       <svg xmlns="http://www.w3.org/2000/svg" width="0" height="0" style={{ position: 'absolute', overflow: 'hidden' }}>
         <defs>
