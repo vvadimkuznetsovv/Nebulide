@@ -44,6 +44,7 @@ export default function Workspace() {
 
   const {
     layout,
+    visibility,
     mergePanels,
     splitPanel,
     movePanelToEdge,
@@ -59,6 +60,9 @@ export default function Workspace() {
     sidebarOpen,
     setSidebarOpen,
   } = useWorkspaceStore();
+
+  // Check if any panel is visible (to show fallback sidebar toggle)
+  const anyPanelVisible = Object.entries(visibility).some(([, v]) => v);
 
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
 
@@ -256,6 +260,25 @@ export default function Workspace() {
             {/* Main layout area — recursive renderer */}
             <div className="flex-1 min-w-0 h-full">
               <LayoutRenderer node={layout} isFirst={true} />
+
+              {/* Fallback: sidebar toggle when all panels are hidden */}
+              {!anyPanelVisible && (
+                <div className="h-full flex items-center justify-center">
+                  <button
+                    type="button"
+                    className="global-panel-bar-sidebar-btn"
+                    onClick={() => setSidebarOpen(true)}
+                    title="Show sidebar"
+                    style={{ width: 48, height: 48 }}
+                  >
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                      <line x1="3" y1="6" x2="21" y2="6" />
+                      <line x1="3" y1="12" x2="21" y2="12" />
+                      <line x1="3" y1="18" x2="21" y2="18" />
+                    </svg>
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Edge drop zone — right */}
