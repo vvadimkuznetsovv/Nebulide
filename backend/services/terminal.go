@@ -1,6 +1,7 @@
 package services
 
 import (
+	"io"
 	"log"
 	"os"
 	"os/exec"
@@ -20,6 +21,12 @@ type TerminalSession struct {
 	Pty  gopty.Pty
 	Cmd  *gopty.Cmd
 	Done chan struct{}
+
+	// connMu guards active — the currently attached WebSocket.
+	// When a new WS attaches, the old one is closed so its goroutines stop
+	// and the new WS becomes the sole reader/writer.
+	connMu sync.Mutex
+	active io.Closer
 }
 
 func NewTerminalService() *TerminalService {
@@ -53,15 +60,40 @@ func defaultShell() string {
 	return "/bin/sh"
 }
 
+// GetOrCreate returns an existing alive session or creates a new one.
+func (s *TerminalService) GetOrCreate(sessionKey string, workingDir string) (*TerminalSession, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Reuse existing session if shell is still running
+	if existing, ok := s.sessions[sessionKey]; ok {
+		if existing.IsAlive() {
+			log.Printf("Terminal: reusing session key=%s", sessionKey)
+			return existing, nil
+		}
+		// Shell is dead — clean up
+		log.Printf("Terminal: dead session found, recreating key=%s", sessionKey)
+		existing.Close()
+		delete(s.sessions, sessionKey)
+	}
+
+	return s.createLocked(sessionKey, workingDir)
+}
+
+// Create always creates a new session, closing any existing one.
 func (s *TerminalService) Create(sessionKey string, workingDir string) (*TerminalSession, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Close existing session if any
 	if existing, ok := s.sessions[sessionKey]; ok {
 		existing.Close()
+		delete(s.sessions, sessionKey)
 	}
 
+	return s.createLocked(sessionKey, workingDir)
+}
+
+func (s *TerminalService) createLocked(sessionKey string, workingDir string) (*TerminalSession, error) {
 	shell := defaultShell()
 	log.Printf("Terminal: shell=%s dir=%s key=%s", shell, workingDir, sessionKey)
 
@@ -143,17 +175,6 @@ func (s *TerminalService) Remove(sessionKey string) {
 	}
 }
 
-// RemoveIfMatch removes the session only if it's the exact same instance.
-// Prevents a race where an old handler's defer kills a newer session.
-func (s *TerminalService) RemoveIfMatch(sessionKey string, expected *TerminalSession) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if session, ok := s.sessions[sessionKey]; ok && session == expected {
-		session.Close()
-		delete(s.sessions, sessionKey)
-	}
-}
-
 func (s *TerminalService) Resize(sessionKey string, rows, cols uint16) error {
 	s.mu.RLock()
 	session, ok := s.sessions[sessionKey]
@@ -164,6 +185,28 @@ func (s *TerminalService) Resize(sessionKey string, rows, cols uint16) error {
 	}
 
 	return session.Pty.Resize(int(cols), int(rows))
+}
+
+// IsAlive returns true if the shell process is still running.
+func (ts *TerminalSession) IsAlive() bool {
+	select {
+	case <-ts.Done:
+		return false
+	default:
+		return true
+	}
+}
+
+// Attach sets this conn as the active WebSocket, closing the previous one.
+// This ensures only one PTY→WS reader goroutine is active at a time.
+func (ts *TerminalSession) Attach(c io.Closer) {
+	ts.connMu.Lock()
+	old := ts.active
+	ts.active = c
+	ts.connMu.Unlock()
+	if old != nil {
+		old.Close()
+	}
 }
 
 func (ts *TerminalSession) Close() {

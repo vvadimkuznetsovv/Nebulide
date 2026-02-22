@@ -51,20 +51,27 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 
 	conn, err := termUpgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
-		log.Printf("Terminal WebSocket upgrade error: %v", err)
+		log.Printf("Terminal WS upgrade error: %v", err)
 		return
 	}
 	defer conn.Close()
 
 	sessionKey := "term:" + claims.UserID.String()
 
-	termSession, err := h.terminal.Create(sessionKey, h.cfg.ClaudeWorkingDir)
+	// Reuse existing shell or create new one.
+	// Shell lives independently of WebSocket — survives reconnections.
+	termSession, err := h.terminal.GetOrCreate(sessionKey, h.cfg.ClaudeWorkingDir)
 	if err != nil {
-		log.Printf("Failed to create terminal: %v", err)
+		log.Printf("Terminal: failed to create: %v (key=%s)", err, sessionKey)
 		conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"error","message":"Failed to create terminal"}`))
 		return
 	}
-	defer h.terminal.RemoveIfMatch(sessionKey, termSession)
+
+	// Close previous WebSocket (if any) so only one reader is active.
+	// Old PTY→WS goroutine will fail on WriteMessage and stop.
+	termSession.Attach(conn)
+
+	log.Printf("Terminal: WS attached key=%s", sessionKey)
 
 	// PTY → WebSocket (stdout)
 	go func() {
@@ -73,14 +80,14 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 			n, err := termSession.Pty.Read(buf)
 			if err != nil {
 				if err != io.EOF {
-					log.Printf("PTY read error: %v", err)
+					log.Printf("Terminal: PTY read error: %v (key=%s)", err, sessionKey)
 				}
 				conn.WriteMessage(websocket.CloseMessage,
-					websocket.FormatCloseMessage(websocket.CloseNormalClosure, "Terminal closed"))
+					websocket.FormatCloseMessage(websocket.CloseNormalClosure, "Shell exited"))
 				return
 			}
 			if err := conn.WriteMessage(websocket.BinaryMessage, buf[:n]); err != nil {
-				return
+				return // WS closed (reconnection or tab closed) — stop reading
 			}
 		}
 	}()
@@ -89,6 +96,7 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 	for {
 		msgType, raw, err := conn.ReadMessage()
 		if err != nil {
+			log.Printf("Terminal: WS closed key=%s: %v", sessionKey, err)
 			break
 		}
 
@@ -111,4 +119,7 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 			h.terminal.Resize(sessionKey, msg.Rows, msg.Cols)
 		}
 	}
+
+	// Session stays alive — shell persists for reconnection.
+	// Only killed when shell exits or Create is called explicitly.
 }
