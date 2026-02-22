@@ -158,7 +158,7 @@ export default function Login() {
         <div style={{ position: 'relative', zIndex: 3 }}>
           {/* Logo */}
           <div className="login-logo" style={{ textAlign: 'center', marginBottom: '48px' }}>
-            <img src="/favicon.svg" alt="Clauder" className="login-logo-icon" width="84" height="84" style={{ borderRadius: '22px', marginBottom: '28px' }} />
+            <img src="/favicon.svg" alt="Clauder" className="login-logo-icon" width="84" height="84" style={{ borderRadius: '22px', marginBottom: '28px', display: 'block', margin: '0 auto 28px' }} />
             <h1 className="login-title" style={{ fontSize: '38px', fontWeight: 800, letterSpacing: '-0.03em', color: 'rgba(255,255,255,0.95)', marginBottom: '10px' }}>Clauder</h1>
             <p className="login-subtitle" style={{ fontSize: '15px', color: 'rgba(255,255,255,0.4)', fontWeight: 500 }}>Claude Code Web Interface</p>
           </div>
