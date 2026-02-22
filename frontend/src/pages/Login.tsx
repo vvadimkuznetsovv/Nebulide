@@ -170,28 +170,8 @@ export default function Login() {
             }}>
               {/* Glass specular highlight */}
               <div style={{ position: 'absolute', inset: 0, borderRadius: '26px', background: 'linear-gradient(145deg, rgba(255,255,255,0.25) 0%, rgba(255,255,255,0.05) 30%, transparent 55%)', pointerEvents: 'none' }} />
-              {/* Lava blobs favicon */}
-              <svg width="52" height="52" viewBox="0 0 100 100" style={{ position: 'relative', zIndex: 1, filter: 'drop-shadow(0 0 12px rgba(127,0,255,0.6))' }}>
-                <defs>
-                  <filter id="lava-logo" x="-50%" y="-50%" width="200%" height="200%" colorInterpolationFilters="sRGB">
-                    <feGaussianBlur in="SourceGraphic" stdDeviation="5.5" result="blur"/>
-                    <feColorMatrix in="blur" type="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 20 -9" result="merged"/>
-                    <feGaussianBlur in="merged" stdDeviation="3.5" result="glow1"/>
-                    <feGaussianBlur in="merged" stdDeviation="7" result="glow2"/>
-                    <feMerge>
-                      <feMergeNode in="glow2"/>
-                      <feMergeNode in="glow1"/>
-                      <feMergeNode in="merged"/>
-                    </feMerge>
-                  </filter>
-                </defs>
-                <g filter="url(#lava-logo)">
-                  <ellipse cx="38" cy="43" rx="19" ry="16" transform="rotate(-20, 38, 43)" fill="#7F00FF"/>
-                  <ellipse cx="58" cy="59" rx="15" ry="13" transform="rotate(-8, 58, 59)" fill="#7F00FF"/>
-                  <ellipse cx="77" cy="28" rx="10" ry="12" transform="rotate(15, 77, 28)" fill="#7F00FF"/>
-                  <ellipse cx="29" cy="78" rx="8" ry="10" transform="rotate(25, 29, 78)" fill="#7F00FF"/>
-                </g>
-              </svg>
+              {/* Favicon logo */}
+              <img src="/favicon.svg" alt="Clauder" width="52" height="52" style={{ position: 'relative', zIndex: 1, borderRadius: '12px', filter: 'drop-shadow(0 0 12px rgba(127,0,255,0.6))' }} />
             </div>
             <h1 className="login-title" style={{ fontSize: '38px', fontWeight: 800, letterSpacing: '-0.03em', color: 'rgba(255,255,255,0.95)', marginBottom: '10px' }}>Clauder</h1>
             <p className="login-subtitle" style={{ fontSize: '15px', color: 'rgba(255,255,255,0.4)', fontWeight: 500 }}>Claude Code Web Interface</p>
