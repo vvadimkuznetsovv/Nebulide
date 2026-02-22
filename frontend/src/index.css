@@ -22,6 +22,7 @@
 
   html {
     height: 100%;
+    overflow: hidden;
     overscroll-behavior: none;
   }
   body {
@@ -30,6 +31,7 @@
     color: var(--text-primary);
     font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
+    overflow: hidden;
     overscroll-behavior: none;
   }
   #root { height: 100%; }
