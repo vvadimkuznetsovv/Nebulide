@@ -16,5 +16,8 @@ RUN mkdir -p /custom-cont-init.d && \
         '#!/bin/bash' \
         'mkdir -p /config/.config/code-server' \
         'printf "bind-addr: 0.0.0.0:8443\nauth: none\ncert: false\n" > /config/.config/code-server/config.yaml' \
+        '' \
+        '# Update Claude Code extension to latest (fixes navigator compat errors)' \
+        '/app/code-server/bin/code-server --extensions-dir /config/extensions --install-extension anthropic.claude-code --force 2>/dev/null &' \
         > /custom-cont-init.d/50-disable-auth && \
     chmod +x /custom-cont-init.d/50-disable-auth

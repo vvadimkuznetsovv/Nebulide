@@ -119,6 +119,15 @@ func CodeServerProxy() gin.HandlerFunc {
 			q.Del("token")
 			req.URL.RawQuery = q.Encode()
 		},
+		ModifyResponse: func(resp *http.Response) error {
+			// Fix code-server CSP: allow data: URIs for fonts (Codicons icon font
+			// is embedded as base64 data URI but code-server's own CSP blocks it).
+			if csp := resp.Header.Get("Content-Security-Policy"); csp != "" {
+				csp = strings.Replace(csp, "font-src 'self'", "font-src 'self' data:", 1)
+				resp.Header.Set("Content-Security-Policy", csp)
+			}
+			return nil
+		},
 	}
 
 	return func(c *gin.Context) {
