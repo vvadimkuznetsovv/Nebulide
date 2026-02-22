@@ -101,9 +101,9 @@ func main() {
 	r.GET("/ws/chat/:id", chatHandler.HandleWebSocket)
 	r.GET("/ws/terminal", terminalHandler.HandleWebSocket)
 
-	// Code-server reverse proxy (auth via ?token= query param)
+	// Code-server reverse proxy (auth via ?token= query param or cookie)
 	codeGroup := r.Group("/code")
-	codeGroup.Use(middleware.AuthRequired(cfg.JWTSecret))
+	codeGroup.Use(handlers.CodeServerAuthMiddleware(cfg.JWTSecret))
 	codeGroup.Any("/*path", handlers.CodeServerProxy())
 
 	// Serve frontend static files
