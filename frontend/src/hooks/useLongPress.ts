@@ -3,17 +3,17 @@ import { useRef, useCallback } from 'react';
 /** Merge two sets of event handlers so both fire for the same event key */
 export function mergeEventHandlers(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  a: Record<string, ((...args: any[]) => void) | undefined>,
+  a: Record<string, ((...args: any[]) => void) | undefined> | undefined,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  b: Record<string, ((...args: any[]) => void) | undefined>,
+  b: Record<string, ((...args: any[]) => void) | undefined> | undefined,
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
 ): Record<string, (...args: any[]) => void> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const merged: Record<string, (...args: any[]) => void> = {};
-  const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
+  const keys = new Set([...Object.keys(a ?? {}), ...Object.keys(b ?? {})]);
   for (const key of keys) {
-    const fa = a[key];
-    const fb = b[key];
+    const fa = a?.[key];
+    const fb = b?.[key];
     if (fa && fb) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       merged[key] = (...args: any[]) => { fa(...args); fb(...args); };
