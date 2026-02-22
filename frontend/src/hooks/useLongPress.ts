@@ -2,16 +2,21 @@ import { useRef, useCallback } from 'react';
 
 /** Merge two sets of event handlers so both fire for the same event key */
 export function mergeEventHandlers(
-  a: Record<string, ((...args: unknown[]) => void) | undefined>,
-  b: Record<string, ((...args: unknown[]) => void) | undefined>,
-): Record<string, (...args: unknown[]) => void> {
-  const merged: Record<string, (...args: unknown[]) => void> = {};
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  a: Record<string, ((...args: any[]) => void) | undefined>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  b: Record<string, ((...args: any[]) => void) | undefined>,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+): Record<string, (...args: any[]) => void> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const merged: Record<string, (...args: any[]) => void> = {};
   const keys = new Set([...Object.keys(a), ...Object.keys(b)]);
   for (const key of keys) {
     const fa = a[key];
     const fb = b[key];
     if (fa && fb) {
-      merged[key] = (...args: unknown[]) => { fa(...args); fb(...args); };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      merged[key] = (...args: any[]) => { fa(...args); fb(...args); };
     } else {
       merged[key] = (fa || fb)!;
     }
