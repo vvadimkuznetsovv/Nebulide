@@ -151,7 +151,13 @@ function connectWs(instanceId: string): void {
 
   ws.onclose = (e) => {
     console.log(`[Terminal] ws.onclose id=${instanceId} code=${e.code} reason="${e.reason}" wasClean=${e.wasClean} session.ws===ws:${session.ws === ws} inMap:${sessions.has(instanceId)}`);
-    if (session.ws === ws) session.ws = null;
+    // WS was superseded by a newer connection (e.g. Attach on backend closed it).
+    // Do NOT reconnect — a fresh WS is already live.
+    if (session.ws !== ws) {
+      console.log(`[Terminal] ws.onclose IGNORED (superseded) id=${instanceId}`);
+      return;
+    }
+    session.ws = null;
     if (!sessions.has(instanceId)) return; // session was destroyed — don't reconnect
 
     if (session.reconnectAttempts < MAX_RECONNECT) {
