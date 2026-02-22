@@ -118,9 +118,12 @@ export default function ContextMenu({ x, y, items, onAction, onClose }: ContextM
     // Use capture phase so clicks inside Monaco editor (which stopPropagation) still close the menu
     window.addEventListener('pointerdown', handleOutside, true);
     window.addEventListener('keydown', handleKeyDown);
+    // Close when focus moves to an iframe (clicks inside iframe don't bubble to parent)
+    window.addEventListener('blur', onClose);
     return () => {
       window.removeEventListener('pointerdown', handleOutside, true);
       window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('blur', onClose);
     };
   }, [onClose, onAction, focusedIndex, actionableIndices, items]);
 
