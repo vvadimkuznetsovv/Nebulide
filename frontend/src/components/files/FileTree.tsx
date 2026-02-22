@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, type ReactNode } from 'react';
+import React, { useState, useEffect, type ReactNode } from 'react';
 import { listFiles, deleteFile, writeFile, mkdirFile, renameFile, type FileEntry } from '../../api/files';
 import FileTreeItem from './FileTreeItem';
 import ContextMenu, { type ContextMenuItem } from './ContextMenu';
@@ -12,11 +12,6 @@ interface FileTreeProps {
 }
 
 // Feather-style SVG icons (14×14)
-const icon = (d: string, opts?: { fill?: boolean }): ReactNode => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill={opts?.fill ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d={d} />
-  </svg>
-);
 const iconMulti = (...paths: string[]): ReactNode => (
   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     {paths.map((d, i) => <path key={i} d={d} />)}
@@ -452,7 +447,7 @@ export default function FileTree({ rootPath, onFileSelect, onFileOpenNewTab }: F
             <span className="glow-pulse inline-block">Loading...</span>
           </div>
         ) : (
-          <>
+          <div className="inline-block min-w-full">
             {/* Root-level inline creation input */}
             {creatingType && !creatingInFolder && renderCreationInput(0)}
 
@@ -463,7 +458,7 @@ export default function FileTree({ rootPath, onFileSelect, onFileOpenNewTab }: F
             ) : (
               renderItems(files, 0)
             )}
-          </>
+          </div>
         )}
       </div>
 
