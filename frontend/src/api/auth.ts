@@ -22,3 +22,6 @@ export const logout = () =>
 
 export const getMe = () =>
   api.get('/auth/me');
+
+export const changePassword = (currentPassword: string, newPassword: string) =>
+  api.post('/auth/change-password', { current_password: currentPassword, new_password: newPassword });

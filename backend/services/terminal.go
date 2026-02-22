@@ -3,9 +3,10 @@ package services
 import (
 	"os"
 	"os/exec"
+	"runtime"
 	"sync"
 
-	"github.com/creack/pty"
+	gopty "github.com/aymanbagabas/go-pty"
 )
 
 type TerminalService struct {
@@ -14,8 +15,8 @@ type TerminalService struct {
 }
 
 type TerminalSession struct {
-	PTY  *os.File
-	Cmd  *exec.Cmd
+	Pty  gopty.Pty
+	Cmd  *gopty.Cmd
 	Done chan struct{}
 }
 
@@ -23,6 +24,26 @@ func NewTerminalService() *TerminalService {
 	return &TerminalService{
 		sessions: make(map[string]*TerminalSession),
 	}
+}
+
+func defaultShell() string {
+	if shell := os.Getenv("SHELL"); shell != "" {
+		return shell
+	}
+	if runtime.GOOS == "windows" {
+		// Must resolve absolute path — go-pty resolves relative to cmd.Dir on Windows
+		if ps, err := exec.LookPath("pwsh.exe"); err == nil {
+			return ps
+		}
+		if ps, err := exec.LookPath("powershell.exe"); err == nil {
+			return ps
+		}
+		return "powershell.exe"
+	}
+	if bash, err := exec.LookPath("bash"); err == nil {
+		return bash
+	}
+	return "/bin/bash"
 }
 
 func (s *TerminalService) Create(sessionKey string, workingDir string) (*TerminalSession, error) {
@@ -34,25 +55,27 @@ func (s *TerminalService) Create(sessionKey string, workingDir string) (*Termina
 		existing.Close()
 	}
 
-	shell := os.Getenv("SHELL")
-	if shell == "" {
-		shell = "/bin/bash"
+	shell := defaultShell()
+
+	p, err := gopty.New()
+	if err != nil {
+		return nil, err
 	}
 
-	cmd := exec.Command(shell)
+	cmd := p.Command(shell)
 	cmd.Dir = workingDir
 	cmd.Env = append(os.Environ(),
 		"TERM=xterm-256color",
 		"COLORTERM=truecolor",
 	)
 
-	ptmx, err := pty.Start(cmd)
-	if err != nil {
+	if err := cmd.Start(); err != nil {
+		p.Close()
 		return nil, err
 	}
 
 	session := &TerminalSession{
-		PTY:  ptmx,
+		Pty:  p,
 		Cmd:  cmd,
 		Done: make(chan struct{}),
 	}
@@ -92,15 +115,12 @@ func (s *TerminalService) Resize(sessionKey string, rows, cols uint16) error {
 		return nil
 	}
 
-	return pty.Setsize(session.PTY, &pty.Winsize{
-		Rows: rows,
-		Cols: cols,
-	})
+	return session.Pty.Resize(int(cols), int(rows))
 }
 
 func (ts *TerminalSession) Close() {
-	if ts.PTY != nil {
-		ts.PTY.Close()
+	if ts.Pty != nil {
+		ts.Pty.Close()
 	}
 	if ts.Cmd != nil && ts.Cmd.Process != nil {
 		ts.Cmd.Process.Kill()

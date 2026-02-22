@@ -85,8 +85,12 @@ export default function Login() {
       const { data } = await login(username, password);
       if (data.requires_totp) { setPartialToken(data.partial_token); setShowTotp(true); setLoading(false); return; }
       setAuth(data.user, data.access_token, data.refresh_token); navigate('/');
-    } catch { toast.error('Invalid credentials'); }
-    finally { setLoading(false); }
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { error?: string }; status?: number }; message?: string };
+      const msg = axiosErr.response?.data?.error || axiosErr.message || 'Login failed';
+      toast.error(msg);
+      console.error('Login error:', axiosErr.response?.status, axiosErr.response?.data || axiosErr.message);
+    } finally { setLoading(false); }
   };
 
   const handleTotp = async (e: React.FormEvent) => {
@@ -94,8 +98,12 @@ export default function Login() {
     try {
       const { data } = await totpVerify(totpCode, partialToken);
       setAuth(data.user, data.access_token, data.refresh_token); navigate('/');
-    } catch { toast.error('Invalid TOTP code'); }
-    finally { setLoading(false); }
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { error?: string }; status?: number }; message?: string };
+      const msg = axiosErr.response?.data?.error || axiosErr.message || 'TOTP verification failed';
+      toast.error(msg);
+      console.error('TOTP error:', axiosErr.response?.status, axiosErr.response?.data || axiosErr.message);
+    } finally { setLoading(false); }
   };
 
   return (

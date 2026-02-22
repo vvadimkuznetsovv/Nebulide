@@ -63,6 +63,7 @@ export default function LayoutRenderer({ node }: LayoutRendererProps) {
 
   return (
     <Group
+      key={visibleChildren.map((vc) => vc.child.id).join(',')}
       orientation={orientation}
       id={node.id}
       defaultLayout={defaultLayout}

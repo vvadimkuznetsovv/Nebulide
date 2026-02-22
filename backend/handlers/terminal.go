@@ -70,7 +70,7 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 	go func() {
 		buf := make([]byte, 4096)
 		for {
-			n, err := termSession.PTY.Read(buf)
+			n, err := termSession.Pty.Read(buf)
 			if err != nil {
 				if err != io.EOF {
 					log.Printf("PTY read error: %v", err)
@@ -94,7 +94,7 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 
 		if msgType == websocket.BinaryMessage {
 			// Raw terminal input
-			termSession.PTY.Write(raw)
+			termSession.Pty.Write(raw)
 			continue
 		}
 
@@ -106,7 +106,7 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 
 		switch msg.Type {
 		case "input":
-			termSession.PTY.Write([]byte(msg.Data))
+			termSession.Pty.Write([]byte(msg.Data))
 		case "resize":
 			h.terminal.Resize(sessionKey, msg.Rows, msg.Cols)
 		}

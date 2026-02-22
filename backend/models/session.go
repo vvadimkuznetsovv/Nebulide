@@ -12,7 +12,7 @@ type ChatSession struct {
 	UserID           uuid.UUID `gorm:"type:uuid;not null;index" json:"user_id"`
 	Title            string    `gorm:"size:255;default:'New Chat'" json:"title"`
 	ClaudeSessionID  string    `gorm:"size:255" json:"claude_session_id"`
-	WorkingDirectory string    `gorm:"size:500;default:'/home/clauder/workspace'" json:"working_directory"`
+	WorkingDirectory string    `gorm:"size:500" json:"working_directory"`
 	CreatedAt        time.Time `json:"created_at"`
 	UpdatedAt        time.Time `json:"updated_at"`
 

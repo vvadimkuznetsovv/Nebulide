@@ -1,4 +1,5 @@
-import type { PanelId } from '../../store/layoutUtils';
+import type { PanelId, BasePanelId } from '../../store/layoutUtils';
+import { isDetachedEditor, getDetachedTabId } from '../../store/layoutUtils';
 import { useLayoutStore } from '../../store/layoutStore';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 import ChatPanel from '../chat/ChatPanel';
@@ -7,7 +8,7 @@ import CodeEditor from '../editor/CodeEditor';
 import PreviewPanel from '../preview/PreviewPanel';
 import TerminalComponent from '../terminal/Terminal';
 
-const panelIcons: Record<PanelId, React.ReactNode> = {
+const basePanelIcons: Record<BasePanelId, React.ReactNode> = {
   chat: (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
@@ -38,7 +39,7 @@ const panelIcons: Record<PanelId, React.ReactNode> = {
   ),
 };
 
-export const panelTitles: Record<PanelId, string> = {
+const basePanelTitles: Record<BasePanelId, string> = {
   chat: 'Chat',
   files: 'File Manager',
   editor: 'Editor',
@@ -46,11 +47,44 @@ export const panelTitles: Record<PanelId, string> = {
   terminal: 'Terminal',
 };
 
-export { panelIcons };
+// Dynamic icon lookup — detached editors use the code icon
+export function getPanelIcon(panelId: PanelId): React.ReactNode {
+  if (isDetachedEditor(panelId)) return basePanelIcons.editor;
+  return basePanelIcons[panelId as BasePanelId] ?? basePanelIcons.editor;
+}
+
+// Dynamic title lookup — detached editors show the filename
+export function getPanelTitle(panelId: PanelId): string {
+  if (isDetachedEditor(panelId)) {
+    const tabId = getDetachedTabId(panelId);
+    if (tabId) {
+      const info = useWorkspaceStore.getState().detachedEditors[tabId];
+      if (info) return info.filePath.split(/[/\\]/).pop() || info.filePath;
+    }
+    return 'Editor';
+  }
+  return basePanelTitles[panelId as BasePanelId] ?? 'Panel';
+}
+
+// Keep backward-compatible exports (used in Workspace.tsx toolbar)
+export const panelIcons = basePanelIcons;
+export const panelTitles = basePanelTitles;
 
 export default function PanelContent({ panelId }: { panelId: PanelId }) {
   const { visibility, toggleVisibility } = useLayoutStore();
-  const { activeSession, sidebarOpen, toolbarOpen, setSidebarOpen, setToolbarOpen, openTabs, activeTabId } = useWorkspaceStore();
+  const { activeSession, sidebarOpen, toolbarOpen, setSidebarOpen, setToolbarOpen, openTabs, activeTabId, detachedEditors } = useWorkspaceStore();
+
+  // Handle detached editor panels
+  if (isDetachedEditor(panelId)) {
+    const tabId = getDetachedTabId(panelId);
+    const info = tabId ? detachedEditors[tabId] : null;
+    return (
+      <CodeEditor
+        filePath={info?.filePath || null}
+        tabId={tabId}
+      />
+    );
+  }
 
   switch (panelId) {
     case 'chat':
@@ -126,10 +160,10 @@ export default function PanelContent({ panelId }: { panelId: PanelId }) {
                 type="button"
                 className={`workspace-toolbar-btn ${visibility[panel] ? 'active' : ''}`}
                 onClick={() => toggleVisibility(panel)}
-                title={visibility[panel] ? `Hide ${panelTitles[panel]}` : `Show ${panelTitles[panel]}`}
+                title={visibility[panel] ? `Hide ${basePanelTitles[panel as BasePanelId]}` : `Show ${basePanelTitles[panel as BasePanelId]}`}
               >
-                {panelIcons[panel]}
-                {panelTitles[panel]}
+                {basePanelIcons[panel as BasePanelId]}
+                {basePanelTitles[panel as BasePanelId]}
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.5 }}>
                   {visibility[panel] ? (
                     <>
@@ -171,5 +205,8 @@ export default function PanelContent({ panelId }: { panelId: PanelId }) {
 
     case 'terminal':
       return <TerminalComponent active={visibility.terminal} />;
+
+    default:
+      return null;
   }
 }

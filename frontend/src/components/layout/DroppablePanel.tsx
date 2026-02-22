@@ -1,7 +1,8 @@
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import type { PanelId, PanelNode } from '../../store/layoutStore';
 import { useLayoutStore } from '../../store/layoutStore';
-import PanelContent, { panelIcons, panelTitles } from './PanelContent';
+import { isDetachedEditor } from '../../store/layoutUtils';
+import PanelContent, { getPanelIcon, getPanelTitle } from './PanelContent';
 
 interface DroppablePanelProps {
   node: PanelNode;
@@ -20,9 +21,12 @@ export default function DroppablePanel({ node }: DroppablePanelProps) {
   // Show directional drop zones when dragging:
   // - a panel from another node, OR
   // - a tab from THIS node (if node has multiple tabs — to split it out)
+  // - an editor tab from FM (draggedEditorTabId)
   const isDraggingFromSelf = dnd.draggedPanelId !== null && node.panelIds.includes(dnd.draggedPanelId);
-  const showDropZones = dnd.isDragging && dnd.draggedPanelId !== null &&
-    (!isDraggingFromSelf || node.panelIds.length > 1);
+  const showDropZones = dnd.isDragging && (
+    (dnd.draggedPanelId !== null && (!isDraggingFromSelf || node.panelIds.length > 1)) ||
+    dnd.draggedEditorTabId !== null
+  );
 
   return (
     <div
@@ -83,8 +87,17 @@ function DropZone({ id, position }: { id: string; position: string }) {
 
 // --- Single panel: drag header (same for ALL panels including Chat) ---
 function DragHeader({ panelId }: { panelId: PanelId }) {
-  const { toggleVisibility } = useLayoutStore();
+  const { toggleVisibility, reattachEditor } = useLayoutStore();
   const { attributes, listeners, setNodeRef } = useDraggable({ id: panelId });
+
+  const title = getPanelTitle(panelId);
+  const handleClose = () => {
+    if (isDetachedEditor(panelId)) {
+      reattachEditor(panelId);
+    } else {
+      toggleVisibility(panelId);
+    }
+  };
 
   return (
     <div
@@ -103,13 +116,13 @@ function DragHeader({ panelId }: { panelId: PanelId }) {
           <circle cx="8" cy="14" r="1.2" />
         </svg>
       </div>
-      <span className="panel-drag-icon">{panelIcons[panelId]}</span>
-      <span className="panel-drag-title">{panelTitles[panelId]}</span>
+      <span className="panel-drag-icon">{getPanelIcon(panelId)}</span>
+      <span className="panel-drag-title">{title}</span>
       <button
         type="button"
         className="panel-close-btn"
-        onClick={(e) => { e.stopPropagation(); toggleVisibility(panelId); }}
-        title={`Hide ${panelTitles[panelId]}`}
+        onClick={(e) => { e.stopPropagation(); handleClose(); }}
+        title={isDetachedEditor(panelId) ? `Return ${title} to File Manager` : `Hide ${title}`}
       >
         <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
           <line x1="18" y1="6" x2="6" y2="18" />
@@ -147,8 +160,17 @@ function DraggableTab({
   isActive: boolean;
   onActivate: () => void;
 }) {
-  const { toggleVisibility } = useLayoutStore();
+  const { toggleVisibility, reattachEditor } = useLayoutStore();
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: panelId });
+
+  const title = getPanelTitle(panelId);
+  const handleClose = () => {
+    if (isDetachedEditor(panelId)) {
+      reattachEditor(panelId);
+    } else {
+      toggleVisibility(panelId);
+    }
+  };
 
   return (
     <div
@@ -159,15 +181,15 @@ function DraggableTab({
       {...listeners}
       {...attributes}
     >
-      <span className="panel-tab-icon">{panelIcons[panelId]}</span>
-      <span className="panel-tab-title">{panelTitles[panelId]}</span>
+      <span className="panel-tab-icon">{getPanelIcon(panelId)}</span>
+      <span className="panel-tab-title">{title}</span>
       <button
         type="button"
-        className="panel-tab-close"
-        onClick={(e) => { e.stopPropagation(); toggleVisibility(panelId); }}
-        title={`Hide ${panelTitles[panelId]}`}
+        className={`panel-tab-close${isActive ? '' : ' panel-tab-close-compact'}`}
+        onClick={(e) => { e.stopPropagation(); handleClose(); }}
+        title={isDetachedEditor(panelId) ? `Return ${title} to File Manager` : `Hide ${title}`}
       >
-        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round">
           <line x1="18" y1="6" x2="6" y2="18" />
           <line x1="6" y1="6" x2="18" y2="18" />
         </svg>

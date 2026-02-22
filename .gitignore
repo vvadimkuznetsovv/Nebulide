@@ -1,6 +1,7 @@
 # Go
 backend/tmp/
 backend/clauder
+backend/clauder.exe
 
 # Frontend
 frontend/node_modules/
@@ -27,3 +28,10 @@ docker-compose.override.yml
 
 # Logs
 *.log
+
+
+# Workspace data
+workspace/
+
+# my personal
+md

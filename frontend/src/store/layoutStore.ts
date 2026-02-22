@@ -10,7 +10,15 @@ import {
   addRowAtEdge,
   updateGroupSizes,
   cloneTree,
+  isDetachedEditor,
+  makeDetachedPanelId,
+  findPanelNode,
+  removePanelFromTree,
+  insertPanelAtNode,
+  insertPanelAtEdge,
+  insertPanelIntoNode,
 } from './layoutUtils';
+import { useWorkspaceStore } from './workspaceStore';
 
 export type { PanelId };
 export type { LayoutNode, PanelNode, GroupNode } from './layoutUtils';
@@ -27,6 +35,8 @@ interface PanelVisibility {
 interface DndState {
   isDragging: boolean;
   draggedPanelId: PanelId | null;
+  // For editor tab drag (from FM tabs, not yet a panel)
+  draggedEditorTabId: string | null;
 }
 
 interface LayoutState {
@@ -46,8 +56,17 @@ interface LayoutState {
   toggleVisibility: (panelId: PanelId) => void;
   resetLayout: () => void;
 
+  // Detached editors
+  detachEditorTab: (tabId: string) => void;
+  detachEditorTabToSplit: (tabId: string, targetNodeId: string, direction: 'top' | 'bottom' | 'left' | 'right') => void;
+  detachEditorTabToEdge: (tabId: string, edge: 'left' | 'right' | 'top' | 'bottom') => void;
+  detachEditorTabToMerge: (tabId: string, targetNodeId: string) => void;
+  reattachEditor: (panelId: PanelId) => void;
+  removeDetachedPanel: (panelId: PanelId) => void;
+
   // DnD
   setDragging: (panelId: PanelId | null) => void;
+  setDraggingEditorTab: (tabId: string | null) => void;
 
   // Mobile
   setMobilePanels: (panels: PanelId[]) => void;
@@ -55,7 +74,7 @@ interface LayoutState {
   closeMobilePanel: (panel: PanelId) => void;
 }
 
-const STORAGE_KEY = 'clauder-layout-v5';
+const STORAGE_KEY = 'clauder-layout-v6';
 
 function loadFromStorage(): { layout?: LayoutNode; visibility?: PanelVisibility; mobilePanels?: PanelId[] } {
   try {
@@ -95,7 +114,7 @@ const stored = loadFromStorage();
 export const useLayoutStore = create<LayoutState>((set) => ({
   layout: stored.layout || cloneTree(DEFAULT_LAYOUT),
   visibility: stored.visibility || { ...defaultVisibility },
-  dnd: { isDragging: false, draggedPanelId: null },
+  dnd: { isDragging: false, draggedPanelId: null, draggedEditorTabId: null },
   mobilePanels: stored.mobilePanels || ['chat'] as PanelId[],
 
   mergePanels: (panelId, targetNodeId) => {
@@ -150,7 +169,22 @@ export const useLayoutStore = create<LayoutState>((set) => ({
 
   toggleVisibility: (panelId) => {
     set((state) => {
-      const newVis = { ...state.visibility, [panelId]: !state.visibility[panelId] };
+      const wasVisible = state.visibility[panelId];
+      const newVis = { ...state.visibility, [panelId]: !wasVisible };
+
+      // For detached editors: hiding = close + reattach to FM
+      if (wasVisible && isDetachedEditor(panelId)) {
+        const tabId = panelId.slice('editor:'.length);
+        useWorkspaceStore.getState().reattachEditor(tabId);
+        // Remove from layout tree
+        const newLayout = removePanelFromTree(state.layout, panelId) || state.layout;
+        // Clean up visibility key
+        delete newVis[panelId];
+        const next = { ...state, layout: newLayout, visibility: newVis };
+        saveToStorage(next);
+        return { layout: newLayout, visibility: newVis };
+      }
+
       const next = { ...state, visibility: newVis };
       saveToStorage(next);
       return { visibility: newVis };
@@ -159,6 +193,11 @@ export const useLayoutStore = create<LayoutState>((set) => ({
 
   resetLayout: () => {
     set((state) => {
+      // Reattach all detached editors back to FM before reset
+      const ws = useWorkspaceStore.getState();
+      for (const tabId of Object.keys(ws.detachedEditors)) {
+        ws.reattachEditor(tabId);
+      }
       const next = {
         ...state,
         layout: cloneTree(DEFAULT_LAYOUT),
@@ -169,8 +208,107 @@ export const useLayoutStore = create<LayoutState>((set) => ({
     });
   },
 
+  // Detach editor tab: place next to the 'files' node (right side)
+  detachEditorTab: (tabId) => {
+    const result = useWorkspaceStore.getState().detachTab(tabId);
+    if (!result) return;
+
+    const panelId = makeDetachedPanelId(tabId);
+
+    set((state) => {
+      // Find the 'files' panel node to place new editor next to it
+      const filesNode = findPanelNode(state.layout, 'files');
+      const targetNodeId = filesNode?.id || 'root';
+      const newLayout = insertPanelAtNode(state.layout, panelId, targetNodeId, 'right');
+      const newVis = { ...state.visibility, [panelId]: true };
+      const next = { ...state, layout: newLayout, visibility: newVis };
+      saveToStorage(next);
+      return { layout: newLayout, visibility: newVis };
+    });
+  },
+
+  // Detach editor tab to a specific split position
+  detachEditorTabToSplit: (tabId, targetNodeId, direction) => {
+    const result = useWorkspaceStore.getState().detachTab(tabId);
+    if (!result) return;
+
+    const panelId = makeDetachedPanelId(tabId);
+
+    set((state) => {
+      const newLayout = insertPanelAtNode(state.layout, panelId, targetNodeId, direction);
+      const newVis = { ...state.visibility, [panelId]: true };
+      const next = { ...state, layout: newLayout, visibility: newVis };
+      saveToStorage(next);
+      return { layout: newLayout, visibility: newVis };
+    });
+  },
+
+  // Detach editor tab to an edge of the layout
+  detachEditorTabToEdge: (tabId, edge) => {
+    const result = useWorkspaceStore.getState().detachTab(tabId);
+    if (!result) return;
+
+    const panelId = makeDetachedPanelId(tabId);
+
+    set((state) => {
+      const newLayout = insertPanelAtEdge(state.layout, panelId, edge);
+      const newVis = { ...state.visibility, [panelId]: true };
+      const next = { ...state, layout: newLayout, visibility: newVis };
+      saveToStorage(next);
+      return { layout: newLayout, visibility: newVis };
+    });
+  },
+
+  // Detach editor tab and merge into existing node as a tab
+  detachEditorTabToMerge: (tabId, targetNodeId) => {
+    const result = useWorkspaceStore.getState().detachTab(tabId);
+    if (!result) return;
+
+    const panelId = makeDetachedPanelId(tabId);
+
+    set((state) => {
+      const newLayout = insertPanelIntoNode(state.layout, panelId, targetNodeId);
+      const newVis = { ...state.visibility, [panelId]: true };
+      const next = { ...state, layout: newLayout, visibility: newVis };
+      saveToStorage(next);
+      return { layout: newLayout, visibility: newVis };
+    });
+  },
+
+  // Reattach a detached editor back to FM
+  reattachEditor: (panelId) => {
+    if (!isDetachedEditor(panelId)) return;
+    const tabId = panelId.slice('editor:'.length);
+    useWorkspaceStore.getState().reattachEditor(tabId);
+
+    set((state) => {
+      const newLayout = removePanelFromTree(state.layout, panelId) || state.layout;
+      const newVis = { ...state.visibility };
+      delete newVis[panelId];
+      const next = { ...state, layout: newLayout, visibility: newVis };
+      saveToStorage(next);
+      return { layout: newLayout, visibility: newVis };
+    });
+  },
+
+  // Remove a detached panel from layout (without reattaching)
+  removeDetachedPanel: (panelId) => {
+    set((state) => {
+      const newLayout = removePanelFromTree(state.layout, panelId) || state.layout;
+      const newVis = { ...state.visibility };
+      delete newVis[panelId];
+      const next = { ...state, layout: newLayout, visibility: newVis };
+      saveToStorage(next);
+      return { layout: newLayout, visibility: newVis };
+    });
+  },
+
   setDragging: (panelId) => {
-    set({ dnd: { isDragging: panelId !== null, draggedPanelId: panelId } });
+    set({ dnd: { isDragging: panelId !== null, draggedPanelId: panelId, draggedEditorTabId: null } });
+  },
+
+  setDraggingEditorTab: (tabId) => {
+    set({ dnd: { isDragging: tabId !== null, draggedPanelId: null, draggedEditorTabId: tabId } });
   },
 
   setMobilePanels: (panels) => {
@@ -211,11 +349,36 @@ export const useLayoutStore = create<LayoutState>((set) => ({
 
   closeMobilePanel: (panel) => {
     set((state) => {
-      if (state.mobilePanels.length <= 1) return {};
-      const newPanels = state.mobilePanels.filter((p) => p !== panel);
-      const next = { ...state, mobilePanels: newPanels };
+      // For detached editors: reattach to FM
+      if (isDetachedEditor(panel)) {
+        const tabId = panel.slice('editor:'.length);
+        useWorkspaceStore.getState().reattachEditor(tabId);
+      }
+
+      // Hide the panel from visibility so it disappears from tab bar
+      const newVis = { ...state.visibility, [panel]: false };
+      if (isDetachedEditor(panel)) delete newVis[panel];
+
+      // Remove from mobilePanels
+      let newPanels = state.mobilePanels.filter((p) => p !== panel);
+
+      // If we closed the last panel, pick the first remaining visible panel
+      if (newPanels.length === 0) {
+        const allPanels: PanelId[] = ['chat', 'files', 'editor', 'preview', 'terminal'];
+        const firstVisible = allPanels.find((p) => newVis[p]);
+        newPanels = firstVisible ? [firstVisible] : ['chat'];
+        // Ensure at least chat is visible
+        if (!firstVisible) newVis.chat = true;
+      }
+
+      let newLayout = state.layout;
+      if (isDetachedEditor(panel)) {
+        newLayout = removePanelFromTree(state.layout, panel) || state.layout;
+      }
+
+      const next = { ...state, layout: newLayout, visibility: newVis, mobilePanels: newPanels };
       saveToStorage(next);
-      return { mobilePanels: newPanels };
+      return { layout: newLayout, visibility: newVis, mobilePanels: newPanels };
     });
   },
 }));

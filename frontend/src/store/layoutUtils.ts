@@ -1,6 +1,91 @@
 // Pure functions for layout tree manipulation
 
-export type PanelId = 'chat' | 'files' | 'editor' | 'preview' | 'terminal';
+// Base panel types (one instance each)
+export type BasePanelId = 'chat' | 'files' | 'editor' | 'preview' | 'terminal';
+// Dynamic detached editors: 'editor:tab-123'
+export type PanelId = BasePanelId | `editor:${string}`;
+
+// --- Detached editor helpers ---
+export function isDetachedEditor(panelId: string): panelId is `editor:${string}` {
+  return panelId.startsWith('editor:');
+}
+export function getDetachedTabId(panelId: string): string | null {
+  if (!isDetachedEditor(panelId)) return null;
+  return panelId.slice('editor:'.length);
+}
+export function makeDetachedPanelId(tabId: string): PanelId {
+  return `editor:${tabId}`;
+}
+
+// Insert a NEW panelId into the tree next to targetNodeId (without removing it from anywhere first).
+// Used for detaching editor tabs which don't exist in the layout yet.
+export function insertPanelAtNode(
+  tree: LayoutNode,
+  panelId: PanelId,
+  targetNodeId: string,
+  direction: 'top' | 'bottom' | 'left' | 'right',
+): LayoutNode {
+  const newPanel: PanelNode = {
+    type: 'panel',
+    id: generateNodeId('node'),
+    panelIds: [panelId],
+    activeIndex: 0,
+  };
+  const splitDirection: 'horizontal' | 'vertical' =
+    direction === 'left' || direction === 'right' ? 'horizontal' : 'vertical';
+  const insertBefore = direction === 'left' || direction === 'top';
+  return insertSplitAtNode(tree, targetNodeId, newPanel, splitDirection, insertBefore);
+}
+
+// Insert a NEW panelId at the edge of the tree (without removing from anywhere).
+export function insertPanelAtEdge(
+  tree: LayoutNode,
+  panelId: PanelId,
+  edge: 'left' | 'right' | 'top' | 'bottom',
+): LayoutNode {
+  const newPanel: PanelNode = {
+    type: 'panel',
+    id: generateNodeId('node'),
+    panelIds: [panelId],
+    activeIndex: 0,
+  };
+
+  if (edge === 'left' || edge === 'right') {
+    if (tree.type === 'group' && tree.direction === 'horizontal') {
+      const children = edge === 'left' ? [newPanel, ...tree.children] : [...tree.children, newPanel];
+      const existingTotal = tree.sizes.reduce((a, b) => a + b, 0);
+      const newSize = 25;
+      const scale = (existingTotal - newSize) / existingTotal;
+      const scaledSizes = tree.sizes.map((s) => Math.max(5, s * scale));
+      const sizes = edge === 'left' ? [newSize, ...scaledSizes] : [...scaledSizes, newSize];
+      return { ...tree, children, sizes };
+    }
+    const children = edge === 'left' ? [newPanel, tree] : [tree, newPanel];
+    return { type: 'group', id: generateNodeId('group'), direction: 'horizontal', children, sizes: edge === 'left' ? [25, 75] : [75, 25] };
+  }
+
+  // top / bottom
+  if (tree.type === 'group' && tree.direction === 'vertical') {
+    const children = edge === 'top' ? [newPanel, ...tree.children] : [...tree.children, newPanel];
+    const existingTotal = tree.sizes.reduce((a, b) => a + b, 0);
+    const newSize = 25;
+    const scale = (existingTotal - newSize) / existingTotal;
+    const scaledSizes = tree.sizes.map((s) => Math.max(5, s * scale));
+    const sizes = edge === 'top' ? [newSize, ...scaledSizes] : [...scaledSizes, newSize];
+    return { ...tree, children, sizes };
+  }
+  const children = edge === 'top' ? [newPanel, tree] : [tree, newPanel];
+  return { type: 'group', id: generateNodeId('group'), direction: 'vertical', children, sizes: edge === 'top' ? [25, 75] : [75, 25] };
+}
+
+// Insert a NEW panelId as a tab into an existing node (without removing from anywhere).
+export function insertPanelIntoNode(
+  tree: LayoutNode,
+  panelId: PanelId,
+  targetNodeId: string,
+): LayoutNode {
+  return addPanelToNodeById(tree, panelId, targetNodeId);
+}
 
 export interface PanelNode {
   type: 'panel';

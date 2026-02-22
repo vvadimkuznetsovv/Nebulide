@@ -1,11 +1,18 @@
-import { useState, useEffect } from 'react';
-import { createPortal } from 'react-dom';
 import type { FileEntry } from '../../api/files';
+import { useLongPress } from '../../hooks/useLongPress';
 
 interface FileTreeItemProps {
   file: FileEntry;
+  depth: number;
+  isExpanded?: boolean;
+  isLoading?: boolean;
+  isSelected?: boolean;
+  isContextTarget?: boolean;
   onClick: () => void;
-  onContextAction?: (action: string, file: FileEntry) => void;
+  onContextMenu: (x: number, y: number, file: FileEntry) => void;
+  isRenaming?: boolean;
+  onRenameSubmit?: (newName: string) => void;
+  onRenameCancel?: () => void;
 }
 
 const FILE_ICONS: Record<string, string> = {
@@ -27,6 +34,9 @@ const FILE_ICONS: Record<string, string> = {
   '.env': 'EN',
   '.toml': 'TM',
   '.mod': 'GM',
+  '.pdf': 'PD',
+  '.docx': 'DX',
+  '.doc': 'WD',
 };
 
 const FILE_COLORS: Record<string, string> = {
@@ -41,6 +51,9 @@ const FILE_COLORS: Record<string, string> = {
   '.json': '#fbbf24',
   '.css': '#ec4899',
   '.html': '#f97316',
+  '.pdf': '#ef4444',
+  '.docx': '#2563eb',
+  '.doc': '#2563eb',
 };
 
 function getIcon(file: FileEntry): string {
@@ -61,80 +74,100 @@ function formatSize(bytes: number): string {
   return (bytes / (1024 * 1024)).toFixed(1) + 'M';
 }
 
-export default function FileTreeItem({ file, onClick, onContextAction }: FileTreeItemProps) {
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number } | null>(null);
+export default function FileTreeItem({
+  file, depth, isExpanded, isLoading, isSelected, isContextTarget,
+  onClick, onContextMenu, isRenaming, onRenameSubmit, onRenameCancel,
+}: FileTreeItemProps) {
+  const { handlers: longPressHandlers, longPressedRef } = useLongPress({
+    onLongPress: (x, y) => onContextMenu(x, y, file),
+    stopPropagation: true,
+  });
 
   const handleContextMenu = (e: React.MouseEvent) => {
-    if (file.is_dir || !onContextAction) return;
     e.preventDefault();
-    // Clamp position to keep menu on screen
-    const x = Math.min(e.clientX, window.innerWidth - 180);
-    const y = Math.min(e.clientY, window.innerHeight - 100);
-    setContextMenu({ x, y });
+    e.stopPropagation();
+    onContextMenu(e.clientX, e.clientY, file);
   };
 
-  // Close on any click outside
-  useEffect(() => {
-    if (!contextMenu) return;
-    const close = () => setContextMenu(null);
-    window.addEventListener('click', close);
-    return () => window.removeEventListener('click', close);
-  }, [contextMenu]);
-
   return (
-    <>
-      <button
-        type="button"
-        onClick={onClick}
-        onContextMenu={handleContextMenu}
-        className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-left transition-all duration-150"
-        style={{
-          color: 'var(--text-primary)',
-          background: 'transparent',
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.background = 'var(--glass-hover)';
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.background = 'transparent';
-        }}
-      >
+    <button
+      type="button"
+      onClick={isRenaming ? undefined : () => {
+        if (longPressedRef.current) { longPressedRef.current = false; return; }
+        onClick();
+      }}
+      onContextMenu={handleContextMenu}
+      {...longPressHandlers}
+      className={`file-tree-item min-w-full w-max flex items-center gap-1.5 py-1.5 text-sm text-left transition-all duration-150 select-none${isSelected ? ' selected' : ''}${isContextTarget ? ' context-target' : ''}`}
+      style={{
+        paddingLeft: `${12 + depth * 16}px`,
+        paddingRight: '12px',
+        color: 'var(--text-primary)',
+        WebkitTouchCallout: 'none',
+      }}
+    >
+      {/* Chevron for directories / spacer for files */}
+      {file.is_dir ? (
         <span
-          className="w-5 text-[10px] font-mono text-center shrink-0 font-bold"
-          style={{ color: getColor(file) }}
+          className="w-4 h-4 flex items-center justify-center shrink-0 transition-transform duration-150"
+          style={{ transform: isExpanded ? 'rotate(90deg)' : 'rotate(0deg)' }}
         >
-          {getIcon(file)}
+          {isLoading ? (
+            <svg className="animate-spin" width="10" height="10" viewBox="0 0 24 24" fill="none"
+              stroke="var(--accent)" strokeWidth="3" strokeLinecap="round">
+              <path d="M12 2a10 10 0 0 1 10 10" />
+            </svg>
+          ) : (
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="9 18 15 12 9 6" />
+            </svg>
+          )}
         </span>
-        <span className="truncate flex-1">{file.name}</span>
-        {!file.is_dir && (
-          <span className="text-xs shrink-0 font-mono" style={{ color: 'var(--text-tertiary)' }}>
-            {formatSize(file.size)}
-          </span>
-        )}
-      </button>
-
-      {contextMenu && createPortal(
-        <div
-          className="context-menu"
-          style={{ position: 'fixed', left: contextMenu.x, top: contextMenu.y, zIndex: 9999 }}
-        >
-          <button
-            type="button"
-            className="context-menu-item"
-            onClick={() => { onContextAction?.('open-new-tab', file); setContextMenu(null); }}
-          >
-            Open in New Tab
-          </button>
-          <button
-            type="button"
-            className="context-menu-item danger"
-            onClick={() => { onContextAction?.('delete', file); setContextMenu(null); }}
-          >
-            Delete
-          </button>
-        </div>,
-        document.body,
+      ) : (
+        <span className="w-4 shrink-0" />
       )}
-    </>
+
+      <span
+        className="w-5 text-[10px] font-mono text-center shrink-0 font-bold"
+        style={{ color: getColor(file) }}
+      >
+        {getIcon(file)}
+      </span>
+      {isRenaming ? (
+        <input
+          className="flex-1 text-sm px-1 py-0 bg-transparent outline-none"
+          style={{
+            fontSize: '13px',
+            borderRadius: '4px',
+            minWidth: 0,
+            border: '1px solid var(--glass-border)',
+            color: 'var(--text-primary)',
+            background: 'rgba(0,0,0,0.35)',
+          }}
+          defaultValue={file.name}
+          placeholder="filename"
+          title="Rename"
+          autoFocus
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') onRenameSubmit?.(e.currentTarget.value.trim());
+            if (e.key === 'Escape') onRenameCancel?.();
+          }}
+          onBlur={(e) => {
+            const val = e.currentTarget.value.trim();
+            if (val && val !== file.name) onRenameSubmit?.(val);
+            else onRenameCancel?.();
+          }}
+          onClick={(e) => e.stopPropagation()}
+        />
+      ) : (
+        <span className="whitespace-nowrap flex-1">{file.name}</span>
+      )}
+      {!file.is_dir && !isRenaming && (
+        <span className="text-xs shrink-0 font-mono" style={{ color: 'var(--text-tertiary)' }}>
+          {formatSize(file.size)}
+        </span>
+      )}
+    </button>
   );
 }

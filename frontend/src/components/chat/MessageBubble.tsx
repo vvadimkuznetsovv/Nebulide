@@ -1,18 +1,29 @@
+import { useCallback } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import { useLongPress } from '../../hooks/useLongPress';
 
 interface MessageBubbleProps {
   role: 'user' | 'assistant' | 'system';
   content: string;
   isStreaming?: boolean;
+  onContextMenu?: (x: number, y: number) => void;
 }
 
-export default function MessageBubble({ role, content, isStreaming }: MessageBubbleProps) {
+export default function MessageBubble({ role, content, isStreaming, onContextMenu }: MessageBubbleProps) {
   const isUser = role === 'user';
-
   const displayContent = role === 'assistant' ? parseAssistantContent(content) : content;
+
+  const { handlers: longPressHandlers } = useLongPress({
+    onLongPress: (x, y) => onContextMenu?.(x, y),
+  });
+
+  const handleContextMenu = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    onContextMenu?.(e.clientX, e.clientY);
+  }, [onContextMenu]);
 
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
@@ -37,6 +48,8 @@ export default function MessageBubble({ role, content, isStreaming }: MessageBub
                 backdropFilter: 'blur(16px)',
               }
         }
+        onContextMenu={handleContextMenu}
+        {...longPressHandlers}
       >
         {isUser ? (
           <p className="whitespace-pre-wrap">{displayContent}</p>
@@ -95,7 +108,7 @@ export default function MessageBubble({ role, content, isStreaming }: MessageBub
   );
 }
 
-function parseAssistantContent(raw: string): string {
+export function parseAssistantContent(raw: string): string {
   const lines = raw.split('\n').filter(Boolean);
   const textParts: string[] = [];
 

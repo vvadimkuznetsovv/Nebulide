@@ -2,6 +2,8 @@ package config
 
 import (
 	"os"
+	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -45,7 +47,7 @@ func Load() *Config {
 		JWTRefreshExpiry: parseDuration(getEnv("JWT_REFRESH_EXPIRY", "168h")),
 
 		ClaudeAllowedTools: getEnv("CLAUDE_ALLOWED_TOOLS", "Read,Edit,Write,Bash,Glob,Grep"),
-		ClaudeWorkingDir:   getEnv("CLAUDE_WORKING_DIR", "/home/clauder/workspace"),
+		ClaudeWorkingDir:   getEnv("CLAUDE_WORKING_DIR", defaultWorkingDir()),
 
 		AdminUsername: getEnv("ADMIN_USERNAME", "admin"),
 		AdminPassword: getEnv("ADMIN_PASSWORD", ""),
@@ -59,6 +61,17 @@ func (c *Config) DSN() string {
 		" dbname=" + c.DBName +
 		" port=" + c.DBPort +
 		" sslmode=disable TimeZone=UTC"
+}
+
+func defaultWorkingDir() string {
+	if runtime.GOOS == "windows" {
+		exe, err := os.Executable()
+		if err != nil {
+			return filepath.Join(os.Getenv("USERPROFILE"), "workspace")
+		}
+		return filepath.Join(filepath.Dir(exe), "..", "workspace")
+	}
+	return "/home/clauder/workspace"
 }
 
 func getEnv(key, fallback string) string {

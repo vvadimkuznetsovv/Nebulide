@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -22,6 +23,9 @@ func main() {
 	// Database
 	database.Connect(cfg)
 	database.Migrate()
+
+	// Ensure workspace directory exists
+	os.MkdirAll(cfg.ClaudeWorkingDir, 0755)
 
 	// Seed admin user
 	seedAdminUser(cfg)
@@ -73,6 +77,7 @@ func main() {
 		protected.POST("/auth/logout", authHandler.Logout)
 		protected.POST("/auth/totp-setup", authHandler.TOTPSetup)
 		protected.POST("/auth/totp-confirm", authHandler.TOTPConfirm)
+		protected.POST("/auth/change-password", authHandler.ChangePassword)
 
 		// Sessions
 		protected.GET("/sessions", sessionsHandler.List)
@@ -84,8 +89,11 @@ func main() {
 		// Files
 		protected.GET("/files", filesHandler.List)
 		protected.GET("/files/read", filesHandler.Read)
+		protected.GET("/files/raw", filesHandler.ReadRaw)
 		protected.PUT("/files/write", filesHandler.Write)
 		protected.DELETE("/files", filesHandler.Delete)
+		protected.POST("/files/mkdir", filesHandler.Mkdir)
+		protected.POST("/files/rename", filesHandler.Rename)
 	}
 
 	// WebSocket routes (auth via query param)
