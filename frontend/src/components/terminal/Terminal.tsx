@@ -115,6 +115,11 @@ function connectWs(instanceId: string): void {
   if (!session) return;
 
   const token = localStorage.getItem('access_token');
+  if (!token) {
+    console.warn(`[Terminal] connectWs SKIP — no access_token id=${instanceId}`);
+    return;
+  }
+
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   const url = `${protocol}//${window.location.host}/ws/terminal?token=${token}&instanceId=${encodeURIComponent(instanceId)}`;
   console.log(`[Terminal] connectWs id=${instanceId} attempt=${session.reconnectAttempts}`);
@@ -122,7 +127,10 @@ function connectWs(instanceId: string): void {
   ws.binaryType = 'arraybuffer';
   session.ws = ws;
 
+  let opened = false;
+
   ws.onopen = () => {
+    opened = true;
     console.log(`[Terminal] ws.onopen id=${instanceId}`);
     session.reconnectAttempts = 0;
     try {
@@ -144,21 +152,28 @@ function connectWs(instanceId: string): void {
 
   ws.onerror = (e) => {
     console.warn(`[Terminal] ws.onerror id=${instanceId}`, e);
-    if (sessions.has(instanceId)) {
-      session.xterm.write('\r\n\x1b[38;2;248;113;113m[Connection error]\x1b[0m\r\n');
-    }
   };
 
   ws.onclose = (e) => {
-    console.log(`[Terminal] ws.onclose id=${instanceId} code=${e.code} reason="${e.reason}" wasClean=${e.wasClean} session.ws===ws:${session.ws === ws} inMap:${sessions.has(instanceId)}`);
-    // WS was superseded by a newer connection (e.g. Attach on backend closed it).
-    // Do NOT reconnect — a fresh WS is already live.
+    console.log(`[Terminal] ws.onclose id=${instanceId} code=${e.code} opened=${opened} session.ws===ws:${session.ws === ws} inMap:${sessions.has(instanceId)}`);
+
+    // WS was superseded by a newer connection — don't reconnect
     if (session.ws !== ws) {
       console.log(`[Terminal] ws.onclose IGNORED (superseded) id=${instanceId}`);
       return;
     }
     session.ws = null;
-    if (!sessions.has(instanceId)) return; // session was destroyed — don't reconnect
+
+    // Connection was rejected before opening (401, network error) — don't reconnect
+    if (!opened) {
+      console.log(`[Terminal] ws.onclose REJECTED (never opened) id=${instanceId}`);
+      session.xterm.write('\r\n\x1b[38;2;248;113;113m[Connection rejected]\x1b[0m\r\n');
+      session.xterm.write('\x1b[38;2;110;180;255m[Right-click \u2192 Reconnect]\x1b[0m\r\n');
+      session.notifyRerender?.();
+      return;
+    }
+
+    if (!sessions.has(instanceId)) return; // session was destroyed
 
     if (session.reconnectAttempts < MAX_RECONNECT) {
       session.reconnectAttempts++;
