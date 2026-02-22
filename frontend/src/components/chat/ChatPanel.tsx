@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useAuthStore } from '../../store/authStore';
 
 interface ChatPanelProps {
   sessionId: string | null;
@@ -7,12 +8,14 @@ interface ChatPanelProps {
 type Status = 'checking' | 'ok' | 'unavailable';
 
 export default function ChatPanel(_props: ChatPanelProps) {
-  const token = localStorage.getItem('access_token');
+  // Reactive token — automatically re-probes after token refresh or logout
+  const token = useAuthStore((s) => s.accessToken);
   const [status, setStatus] = useState<Status>('checking');
 
   useEffect(() => {
     if (!token) { setStatus('unavailable'); return; }
 
+    setStatus('checking');
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 5000);
 

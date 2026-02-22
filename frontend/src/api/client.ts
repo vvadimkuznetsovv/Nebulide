@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { useAuthStore } from '../store/authStore';
 
 const api = axios.create({
   baseURL: '/api',
@@ -31,6 +32,7 @@ api.interceptors.response.use(
           });
           localStorage.setItem('access_token', data.access_token);
           localStorage.setItem('refresh_token', data.refresh_token);
+          useAuthStore.getState().loadFromStorage(); // keep Zustand store in sync
           originalRequest.headers.Authorization = `Bearer ${data.access_token}`;
           return api(originalRequest);
         } catch {

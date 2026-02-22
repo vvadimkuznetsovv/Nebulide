@@ -7,3 +7,14 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
 
 # Claude Code CLI
 RUN npm install -g @anthropic-ai/claude-code
+
+# Disable code-server password auth on every container start.
+# Clauder's JWT reverse proxy (/code/*) handles all authentication.
+# Without this, code-server generates a random password and blocks all requests.
+RUN mkdir -p /custom-cont-init.d && \
+    printf '%s\n' \
+        '#!/bin/bash' \
+        'mkdir -p /config/.config/code-server' \
+        'printf "bind-addr: 0.0.0.0:8443\nauth: none\ncert: false\n" > /config/.config/code-server/config.yaml' \
+        > /custom-cont-init.d/50-disable-auth && \
+    chmod +x /custom-cont-init.d/50-disable-auth
