@@ -108,6 +108,7 @@ func main() {
 
 	// Serve frontend static files
 	r.Static("/assets", "./static/assets")
+	r.StaticFile("/favicon.svg", "./static/favicon.svg")
 	r.StaticFile("/", "./static/index.html")
 	r.NoRoute(func(c *gin.Context) {
 		c.File("./static/index.html")
