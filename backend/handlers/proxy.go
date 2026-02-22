@@ -104,7 +104,9 @@ func CodeServerProxy() gin.HandlerFunc {
 		Director: func(req *http.Request) {
 			req.URL.Scheme = target.Scheme
 			req.URL.Host = target.Host
-			req.Host = target.Host
+			// Do NOT override req.Host — keep the original "clauder.smartrs.tech"
+			// so that code-server's Origin/Host check passes (auth: none still
+			// validates Host vs Origin to prevent DNS rebinding attacks).
 
 			// Strip /code prefix — code-server expects root paths
 			req.URL.Path = strings.TrimPrefix(req.URL.Path, "/code")
@@ -184,10 +186,11 @@ func proxyWebSocket(c *gin.Context, targetHost, path, rawQuery string) {
 	}
 	defer backendConn.Close()
 
-	// Rewrite and forward the WebSocket upgrade request to code-server
+	// Rewrite and forward the WebSocket upgrade request to code-server.
+	// Keep the original Host header (clauder.smartrs.tech) so that code-server's
+	// DNS-rebinding check (Host vs Origin match) passes even with auth: none.
 	req := c.Request.Clone(c.Request.Context())
 	req.URL = &url.URL{Path: path, RawQuery: rawQuery}
-	req.Host = targetHost
 	if err := req.Write(backendConn); err != nil {
 		return
 	}
