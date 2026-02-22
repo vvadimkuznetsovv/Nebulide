@@ -1,5 +1,5 @@
 import React, { useState, useEffect, type ReactNode } from 'react';
-import { listFiles, deleteFile, writeFile, mkdirFile, renameFile, type FileEntry } from '../../api/files';
+import { listFiles, readFile, deleteFile, writeFile, mkdirFile, renameFile, type FileEntry } from '../../api/files';
 import FileTreeItem from './FileTreeItem';
 import ContextMenu, { type ContextMenuItem } from './ContextMenu';
 import { useLongPress } from '../../hooks/useLongPress';
@@ -203,34 +203,77 @@ export default function FileTree({ rootPath, onFileSelect, onFileDoubleClick, on
         break;
       case 'delete':
         if (target) {
-          const label = target.is_dir ? 'Folder' : 'File';
           const parentDir = target.path.split(/[/\\]/).slice(0, -1).join('/');
-          deleteFile(target.path)
-            .then(() => {
-              toast.success(`${label} deleted`);
-              if (target.is_dir) {
+
+          if (target.is_dir) {
+            // Folders are permanently deleted — ask for confirmation
+            const folderName = target.path.split(/[/\\]/).pop() ?? target.path;
+            if (!window.confirm(`Delete folder "${folderName}" and all its contents?\nThis cannot be undone.`)) break;
+
+            deleteFile(target.path)
+              .then(() => {
+                toast.success('Folder deleted');
                 setExpandedFolders(prev => {
                   const next = new Set(prev);
                   for (const key of next) {
-                    if (key === target.path || key.startsWith(target.path + '/')) {
-                      next.delete(key);
-                    }
+                    if (key === target.path || key.startsWith(target.path + '/')) next.delete(key);
                   }
                   return next;
                 });
                 setChildrenCache(prev => {
                   const next = new Map(prev);
                   for (const key of next.keys()) {
-                    if (key === target.path || key.startsWith(target.path + '/')) {
-                      next.delete(key);
-                    }
+                    if (key === target.path || key.startsWith(target.path + '/')) next.delete(key);
                   }
                   return next;
                 });
-              }
-              refreshFolder(parentDir);
-            })
-            .catch(() => toast.error(`Failed to delete ${label.toLowerCase()}`));
+                refreshFolder(parentDir);
+              })
+              .catch(() => toast.error('Failed to delete folder'));
+
+          } else {
+            // Files: read content first for undo support
+            const filePath = target.path;
+            readFile(filePath)
+              .then(({ data }) => {
+                const savedContent = data.content;
+                return deleteFile(filePath).then(() => {
+                  refreshFolder(parentDir);
+                  toast(
+                    (t) => (
+                      <div className="file-delete-undo-toast">
+                        <span>File deleted</span>
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            toast.dismiss(t.id);
+                            try {
+                              await writeFile(filePath, savedContent);
+                              refreshFolder(parentDir);
+                              toast.success('File restored');
+                            } catch {
+                              toast.error('Failed to restore file');
+                            }
+                          }}
+                          className="file-delete-undo-btn"
+                        >
+                          Undo
+                        </button>
+                      </div>
+                    ),
+                    { duration: 7000 },
+                  );
+                });
+              })
+              .catch(() => {
+                // Binary or too large — cannot undo, ask for confirmation instead
+                const fileName = filePath.split(/[/\\]/).pop() ?? filePath;
+                if (!window.confirm(`Delete "${fileName}"?\nThis file cannot be undone (binary or too large).`)) return;
+                deleteFile(filePath)
+                  .then(() => { toast.success('File deleted'); refreshFolder(parentDir); })
+                  .catch(() => toast.error('Failed to delete file'));
+              });
+          }
         }
         break;
     }

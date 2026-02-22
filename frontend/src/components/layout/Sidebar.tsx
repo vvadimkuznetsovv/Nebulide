@@ -126,7 +126,34 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
         {/* Header */}
         <div className="p-4 pb-3">
           <div className="flex items-center justify-between">
-            <h1 className="sidebar-glass-logo">Clauder</h1>
+            <div className="flex items-center gap-2">
+              <div>
+                <svg width="30" height="30" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
+                  <defs>
+                    <filter id="sbl-lava" x="-40%" y="-40%" width="180%" height="180%" colorInterpolationFilters="sRGB">
+                      <feGaussianBlur in="SourceGraphic" stdDeviation="5.5" result="blur"/>
+                      <feColorMatrix in="blur" type="matrix"
+                        values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 22 -11"
+                        result="merged"/>
+                      <feGaussianBlur in="merged" stdDeviation="3"   result="glow1"/>
+                      <feGaussianBlur in="merged" stdDeviation="6.5" result="glow2"/>
+                      <feMerge>
+                        <feMergeNode in="glow2"/>
+                        <feMergeNode in="glow1"/>
+                        <feMergeNode in="merged"/>
+                      </feMerge>
+                    </filter>
+                  </defs>
+                  <g filter="url(#sbl-lava)">
+                    <ellipse cx="38" cy="43" rx="19" ry="16" transform="rotate(-20, 38, 43)" fill="#7F00FF"/>
+                    <ellipse cx="58" cy="59" rx="15" ry="13" transform="rotate(-8, 58, 59)" fill="#7F00FF"/>
+                    <ellipse cx="77" cy="28" rx="10" ry="12" transform="rotate(15, 77, 28)" fill="#7F00FF"/>
+                    <ellipse cx="29" cy="78" rx="8" ry="10" transform="rotate(25, 29, 78)" fill="#7F00FF"/>
+                  </g>
+                </svg>
+              </div>
+              <h1 className="sidebar-glass-logo">Clauder</h1>
+            </div>
             <button
               onClick={onClose}
               className="lg:hidden w-8 h-8 rounded-xl flex items-center justify-center transition-all duration-200"

@@ -59,7 +59,7 @@ const FILE_COLORS: Record<string, string> = {
 };
 
 function getIcon(file: FileEntry): string {
-  if (file.is_dir) return '/';
+  if (file.is_dir) return '';
   const ext = '.' + file.name.split('.').pop()?.toLowerCase();
   return FILE_ICONS[ext] || '--';
 }
@@ -121,14 +121,18 @@ export default function FileTreeItem({
       onDoubleClick={isRenaming || file.is_dir ? undefined : () => onDoubleClick?.()}
       onContextMenu={handleContextMenu}
       {...longPressHandlers}
-      className={`file-tree-item w-full flex items-center gap-1.5 py-1.5 text-sm text-left transition-all duration-150 select-none${isSelected ? ' selected' : ''}${isContextTarget ? ' context-target' : ''}`}
+      className={`file-tree-item relative w-full flex items-center gap-1.5 py-1.5 text-sm text-left transition-all duration-150 select-none${isSelected ? ' selected' : ''}${isContextTarget ? ' context-target' : ''}`}
       style={{
-        paddingLeft: `${12 + depth * 16}px`,
-        paddingRight: '12px',
+        paddingLeft: `${depth * 4}px`,
+        paddingRight: '8px',
         color: 'var(--text-primary)',
         WebkitTouchCallout: 'none',
       }}
     >
+      {/* Indent guide lines — one per ancestor level */}
+      {depth > 0 && Array.from({ length: depth }, (_, i) => (
+        <span key={i} className="file-tree-indent-guide" style={{ left: `${4 + i * 6 + 11}px` }} />
+      ))}
       {/* Chevron for directories / spacer for files */}
       {file.is_dir ? (
         <span
@@ -151,12 +155,14 @@ export default function FileTreeItem({
         <span className="w-4 shrink-0" />
       )}
 
-      <span
-        className="w-5 text-[10px] font-mono text-center shrink-0 font-bold"
-        style={{ color: getColor(file) }}
-      >
-        {getIcon(file)}
-      </span>
+      {!file.is_dir && (
+        <span
+          className="w-5 text-[10px] font-mono text-center shrink-0 font-bold"
+          style={{ color: getColor(file) }}
+        >
+          {getIcon(file)}
+        </span>
+      )}
       {isRenaming ? (
         <input
           className="flex-1 text-sm px-1 py-0 bg-transparent outline-none"

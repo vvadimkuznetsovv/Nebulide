@@ -14,6 +14,32 @@ export function useChat(sessionId: string | null) {
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamContent, setStreamContent] = useState('');
   const streamContentRef = useRef('');
+  // Batch stream delta updates to avoid re-rendering on every WebSocket chunk
+  const pendingDeltaRef = useRef('');
+  const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const flushPending = useCallback(() => {
+    if (pendingDeltaRef.current) {
+      setStreamContent(prev => prev + pendingDeltaRef.current);
+      pendingDeltaRef.current = '';
+    }
+    flushTimerRef.current = null;
+  }, []);
+
+  const scheduleDelta = useCallback((text: string) => {
+    pendingDeltaRef.current += text;
+    if (!flushTimerRef.current) {
+      flushTimerRef.current = setTimeout(flushPending, 50);
+    }
+  }, [flushPending]);
+
+  const cancelFlush = useCallback(() => {
+    if (flushTimerRef.current) {
+      clearTimeout(flushTimerRef.current);
+      flushTimerRef.current = null;
+    }
+    pendingDeltaRef.current = '';
+  }, []);
 
   const handleMessage = useCallback((data: unknown) => {
     const event = data as StreamEvent;
@@ -32,17 +58,20 @@ export function useChat(sessionId: string | null) {
               .filter((b: { type: string }) => b.type === 'text')
               .map((b: { text: string }) => b.text)
               .join('');
+            // Full content block — cancel any pending delta, set directly
+            cancelFlush();
             setStreamContent(textBlocks);
           } else if (parsed?.type === 'content_block_delta' && parsed?.delta?.text) {
-            setStreamContent(prev => prev + parsed.delta.text);
+            scheduleDelta(parsed.delta.text);
           }
         } catch {
           // Raw text fallback
-          setStreamContent(prev => prev + line);
+          scheduleDelta(line);
         }
         break;
       }
       case 'complete': {
+        cancelFlush();
         setIsStreaming(false);
         if (streamContentRef.current) {
           const assistantMsg: Message = {
@@ -60,6 +89,7 @@ export function useChat(sessionId: string | null) {
         break;
       }
       case 'error': {
+        cancelFlush();
         setIsStreaming(false);
         setStreamContent('');
         streamContentRef.current = '';
@@ -67,7 +97,7 @@ export function useChat(sessionId: string | null) {
         break;
       }
     }
-  }, [sessionId]);
+  }, [sessionId, scheduleDelta, cancelFlush]);
 
   const { isConnected, send, connect, disconnect } = useWebSocket({
     url: sessionId ? `/ws/chat/${sessionId}` : '',

@@ -50,6 +50,16 @@ function getLanguage(path: string): string {
 
 // Feather-style SVG icons (14×14)
 const EDITOR_ICONS = {
+  undo: (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M3 7v6h6" /><path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" />
+    </svg>
+  ),
+  redo: (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 7v6h-6" /><path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3L21 13" />
+    </svg>
+  ),
   save: (
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" /><path d="M17 21v-8H7v8" /><path d="M7 3v5h8" />
@@ -90,6 +100,69 @@ export default function CodeEditor({ filePath, tabId }: CodeEditorProps) {
   const tabStatesRef = useRef<Map<string, TabState>>(new Map());
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null);
   const previousTabIdRef = useRef<string | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  // Stable ref so the effect closure always calls the latest setter
+  const setCtxMenuRef = useRef(setCtxMenu);
+  setCtxMenuRef.current = setCtxMenu;
+
+  // Mobile long-press context menu — capture phase so it fires before Monaco
+  // intercepts pointer events and regardless of Monaco's internal stopPropagation.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+
+    let timer = 0;
+    let activeId: number | null = null;
+    let startX = 0;
+    let startY = 0;
+
+    const onDown = (e: PointerEvent) => {
+      if (e.pointerType === 'mouse') return; // Desktop uses right-click / editor.onContextMenu
+      activeId = e.pointerId;
+      startX = e.clientX;
+      startY = e.clientY;
+      const cx = e.clientX;
+      const cy = e.clientY;
+      timer = window.setTimeout(() => {
+        setCtxMenuRef.current({ x: cx, y: cy });
+        // Suppress the browser's native contextmenu that fires after long-press
+        el.addEventListener('contextmenu', (ev) => { ev.preventDefault(); ev.stopPropagation(); }, {
+          capture: true,
+          once: true,
+        });
+      }, 500);
+    };
+
+    const onUp = (e: PointerEvent) => {
+      if (e.pointerId !== activeId) return;
+      activeId = null;
+      clearTimeout(timer);
+    };
+
+    const onMove = (e: PointerEvent) => {
+      if (e.pointerId !== activeId) return;
+      const dx = e.clientX - startX;
+      const dy = e.clientY - startY;
+      if (dx * dx + dy * dy > 100) {
+        activeId = null;
+        clearTimeout(timer);
+      }
+    };
+
+    el.addEventListener('pointerdown', onDown, { capture: true });
+    el.addEventListener('pointerup', onUp, { capture: true });
+    el.addEventListener('pointercancel', onUp, { capture: true });
+    el.addEventListener('pointermove', onMove, { capture: true });
+
+    return () => {
+      clearTimeout(timer);
+      el.removeEventListener('pointerdown', onDown, { capture: true });
+      el.removeEventListener('pointerup', onUp, { capture: true });
+      el.removeEventListener('pointercancel', onUp, { capture: true });
+      el.removeEventListener('pointermove', onMove, { capture: true });
+    };
+  }, []);
 
   const handleSave = useCallback(async () => {
     if (!filePath || !modified || !tabId) return;
@@ -122,6 +195,14 @@ export default function CodeEditor({ filePath, tabId }: CodeEditorProps) {
       label: 'Save File',
       keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS],
       run: () => { handleSaveRef.current(); },
+    });
+
+    // Explicit Ctrl+Shift+Z redo (Monaco default is Ctrl+Y)
+    editor.addAction({
+      id: 'redo-ctrl-shift-z',
+      label: 'Redo',
+      keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Shift | monaco.KeyCode.KeyZ],
+      run: () => { editor.trigger('keyboard', 'redo', null); },
     });
 
     // Intercept right-click to show our custom context menu
@@ -205,6 +286,14 @@ export default function CodeEditor({ filePath, tabId }: CodeEditorProps) {
     if (!editor) return;
 
     switch (action) {
+      case 'undo':
+        editor.focus();
+        editor.trigger('keyboard', 'undo', null);
+        break;
+      case 'redo':
+        editor.focus();
+        editor.trigger('keyboard', 'redo', null);
+        break;
       case 'save':
         handleSaveRef.current();
         break;
@@ -235,24 +324,12 @@ export default function CodeEditor({ filePath, tabId }: CodeEditorProps) {
     }
   }, []);
 
-  if (!filePath) {
-    return (
-      <div className="h-full flex items-center justify-center">
-        <div className="text-center">
-          <div className="text-4xl mb-4" style={{ opacity: 0.1, color: 'var(--accent)' }}>
-            {'</>'}
-          </div>
-          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>
-            Select a file to edit
-          </p>
-        </div>
-      </div>
-    );
-  }
-
   const hasSelection = editorRef.current?.getSelection()?.isEmpty() === false;
 
   const ctxMenuItems: ContextMenuItem[] = [
+    { label: 'Undo', action: 'undo', icon: EDITOR_ICONS.undo },
+    { label: 'Redo', action: 'redo', icon: EDITOR_ICONS.redo },
+    { type: 'separator' },
     { label: 'Save File', action: 'save', icon: EDITOR_ICONS.save, disabled: !modified },
     { type: 'separator' },
     { label: 'Cut', action: 'cut', icon: EDITOR_ICONS.cut, disabled: !hasSelection },
@@ -262,9 +339,19 @@ export default function CodeEditor({ filePath, tabId }: CodeEditorProps) {
     { label: 'Command Palette', action: 'command-palette', icon: EDITOR_ICONS.command },
   ];
 
+  // containerRef must always be on the outermost div — if we returned early for !filePath,
+  // the ref would be null on first mount and the long-press useEffect ([] deps) would
+  // never attach its capture-phase listeners, even after filePath becomes non-null.
   return (
-    <div className="h-full">
-      {loading ? (
+    <div className="h-full" ref={containerRef}>
+      {!filePath ? (
+        <div className="h-full flex items-center justify-center">
+          <div className="text-center">
+            <div className="text-4xl mb-4 code-editor-empty-icon">{'</>'}</div>
+            <p className="text-sm code-editor-empty-label">Select a file to edit</p>
+          </div>
+        </div>
+      ) : loading ? (
         <div className="flex items-center justify-center h-full">
           <span className="text-sm glow-pulse" style={{ color: 'var(--text-secondary)' }}>
             Loading...
@@ -298,7 +385,7 @@ export default function CodeEditor({ filePath, tabId }: CodeEditorProps) {
           }}
         />
       )}
-      {ctxMenu && (
+      {ctxMenu && filePath && (
         <ContextMenu
           x={ctxMenu.x}
           y={ctxMenu.y}
