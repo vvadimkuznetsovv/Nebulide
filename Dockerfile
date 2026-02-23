@@ -1,6 +1,6 @@
 FROM alpine:3.20
 
-RUN apk add --no-cache ca-certificates tzdata bash curl
+RUN apk add --no-cache ca-certificates tzdata bash curl sudo
 
 # Install Node.js, Git, SSH (required for Claude Code CLI + git ops)
 RUN apk add --no-cache nodejs npm git openssh-client
@@ -24,8 +24,13 @@ RUN chmod +x /entrypoint.sh
 COPY scripts/apk-persist /usr/local/bin/apk-persist
 RUN chmod +x /usr/local/bin/apk-persist
 
-# Create workspace directory
-RUN mkdir -p /home/clauder/workspace
+# Create user clauder with sudo access
+RUN adduser -D -s /bin/bash -h /home/clauder clauder \
+    && echo "clauder ALL=(ALL) NOPASSWD: ALL" >> /etc/sudoers
+
+# Create workspace directory and set ownership
+RUN mkdir -p /home/clauder/workspace \
+    && chown -R clauder:clauder /home/clauder
 
 # Claude Code instructions (entrypoint copies to workspace on first run)
 COPY workspace-CLAUDE.md /app/CLAUDE.md

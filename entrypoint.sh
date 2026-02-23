@@ -19,4 +19,7 @@ if [ -f "$PACKAGES_FILE" ]; then
   echo "[entrypoint] Done."
 fi
 
+# Ensure workspace ownership (volume mount may override)
+chown -R clauder:clauder /home/clauder/workspace 2>/dev/null || true
+
 exec "$@"
