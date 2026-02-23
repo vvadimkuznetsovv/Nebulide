@@ -20,8 +20,12 @@
 
   * { margin: 0; padding: 0; box-sizing: border-box; }
 
+  /* iOS keyboard fix: position:fixed prevents Safari from scrolling
+     the html element when an input is focused (virtual keyboard open).
+     --app-height is set by visualViewport resize listener in main.tsx. */
   html {
-    height: 100%;
+    position: fixed;
+    inset: 0;
     overflow: hidden;
     overscroll-behavior: none;
   }
@@ -34,7 +38,7 @@
     overflow: hidden;
     overscroll-behavior: none;
   }
-  #root { height: 100%; }
+  #root { height: var(--app-height, 100%); }
 
   input, textarea, select, button {
     font-family: inherit; color: inherit; background: none;
@@ -1778,7 +1782,41 @@ body { animation: scrollbarShimmer 3s ease-in-out infinite; }
   .docx-content strong { font-weight: 600; }
   .docx-content em { font-style: italic; }
 
-.xterm { padding: 8px; overscroll-behavior: contain; touch-action: manipulation; }
+.xterm { padding: 8px; overscroll-behavior: contain; }
+
+/* ── Terminal mobile toolbar ── */
+.terminal-toolbar {
+  display: flex;
+  gap: 4px;
+  padding: 4px 8px;
+  background: rgba(10, 10, 26, 0.95);
+  border-bottom: 1px solid rgba(127, 0, 255, 0.15);
+  overflow-x: auto;
+  scrollbar-width: none;
+  flex-shrink: 0;
+}
+.terminal-toolbar::-webkit-scrollbar { display: none; }
+.terminal-toolbar-btn {
+  flex-shrink: 0;
+  height: 30px;
+  min-width: 38px;
+  padding: 0 8px;
+  border-radius: 6px;
+  background: rgba(127, 0, 255, 0.12);
+  border: 1px solid rgba(127, 0, 255, 0.25);
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 12px;
+  font-family: 'JetBrains Mono', 'Fira Code', monospace;
+  font-weight: 500;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: background 0.15s, border-color 0.15s;
+}
+.terminal-toolbar-btn:active {
+  background: rgba(127, 0, 255, 0.3);
+  border-color: rgba(127, 0, 255, 0.5);
+}
 
 /* ── Terminal search bar ── */
 .terminal-search-bar {

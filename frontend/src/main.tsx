@@ -4,43 +4,15 @@ import { Toaster } from 'react-hot-toast'
 import './index.css'
 import App from './App'
 
-// ── DEBUG: eruda mobile console (remove after debugging) ──
-import eruda from 'eruda'
-eruda.init()
-
-// ── DEBUG: catch page unloads to find reload cause ──
-window.addEventListener('beforeunload', () => {
-  console.error('[PAGE] beforeunload fired — page is about to reload!', new Error().stack);
-});
-window.addEventListener('unload', () => {
-  console.error('[PAGE] unload fired');
-});
-window.addEventListener('error', (e) => {
-  console.error('[PAGE] Uncaught error:', e.message, e.filename, e.lineno, e.error);
-});
-window.addEventListener('unhandledrejection', (e) => {
-  console.error('[PAGE] Unhandled promise rejection:', e.reason);
-});
-// Log navigation changes
-const _origPushState = history.pushState.bind(history);
-history.pushState = function (...args) {
-  console.log('[PAGE] pushState:', args[2]);
-  return _origPushState(...args);
-};
-const _origReplaceState = history.replaceState.bind(history);
-history.replaceState = function (...args) {
-  console.log('[PAGE] replaceState:', args[2]);
-  return _origReplaceState(...args);
-};
-window.addEventListener('popstate', () => {
-  console.log('[PAGE] popstate:', window.location.href);
-});
-// Intercept location.href setter
-const _origLocationDescriptor = Object.getOwnPropertyDescriptor(window, 'location');
-if (_origLocationDescriptor) {
-  console.log('[PAGE] location descriptor exists, monitoring via Proxy not possible — will catch via beforeunload');
+// iOS virtual keyboard: adjust #root height to visible viewport.
+// Without this, panels hide behind the keyboard when input is focused.
+function updateAppHeight() {
+  const h = window.visualViewport?.height ?? window.innerHeight;
+  document.documentElement.style.setProperty('--app-height', `${h}px`);
 }
-console.log('[PAGE] Debug listeners installed, page loaded at', new Date().toISOString());
+window.visualViewport?.addEventListener('resize', updateAppHeight);
+window.addEventListener('resize', updateAppHeight);
+updateAppHeight();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

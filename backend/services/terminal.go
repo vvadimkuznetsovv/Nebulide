@@ -22,11 +22,14 @@ type TerminalSession struct {
 	Cmd  *gopty.Cmd
 	Done chan struct{}
 
-	// connMu guards active — the currently attached WebSocket.
-	// When a new WS attaches, the old one is closed so its goroutines stop
-	// and the new WS becomes the sole reader/writer.
+	// connMu guards active (io.Closer for the current WS connection).
 	connMu sync.Mutex
 	active io.Closer
+
+	// writerMu guards writer — the destination for PTY output.
+	// pumpOutput holds a read-lock while writing; Attach swaps writer atomically.
+	writerMu sync.Mutex
+	writer   io.Writer
 }
 
 func NewTerminalService() *TerminalService {
@@ -153,6 +156,10 @@ func (s *TerminalService) createLocked(sessionKey string, workingDir string) (*T
 
 	log.Printf("[TerminalService] shell started pid=%d key=%s", cmd.Process.Pid, sessionKey)
 
+	// Single persistent PTY reader — survives WS reconnections.
+	// Writes to whatever io.Writer is installed via Attach().
+	go session.pumpOutput(sessionKey)
+
 	// Monitor process exit
 	go func() {
 		if err := cmd.Wait(); err != nil {
@@ -160,12 +167,42 @@ func (s *TerminalService) createLocked(sessionKey string, workingDir string) (*T
 		} else {
 			log.Printf("[TerminalService] shell exited normally (key=%s)", sessionKey)
 		}
-		close(session.Done)
+		// Close PTY to unblock pumpOutput's Read()
+		p.Close()
 	}()
 
 	s.sessions[sessionKey] = session
 	log.Printf("[TerminalService] session stored key=%s totalSessions=%d", sessionKey, len(s.sessions))
 	return session, nil
+}
+
+// pumpOutput is the single goroutine that reads PTY output and forwards it
+// to the currently attached writer. It runs for the entire lifetime of the
+// shell process. When a WS reconnects, Attach() swaps the writer — this
+// goroutine doesn't restart.
+func (ts *TerminalSession) pumpOutput(sessionKey string) {
+	log.Printf("[TerminalService] pumpOutput START key=%s", sessionKey)
+	buf := make([]byte, 4096)
+	for {
+		n, err := ts.Pty.Read(buf)
+		if err != nil {
+			if err != io.EOF {
+				log.Printf("[TerminalService] pumpOutput PTY read error: %v key=%s", err, sessionKey)
+			}
+			break
+		}
+		ts.writerMu.Lock()
+		w := ts.writer
+		ts.writerMu.Unlock()
+		if w != nil {
+			// Write error = stale/closed WS conn, ignore (next Attach will swap in a new writer)
+			if _, wErr := w.Write(buf[:n]); wErr != nil {
+				log.Printf("[TerminalService] pumpOutput write error (stale conn): %v key=%s", wErr, sessionKey)
+			}
+		}
+	}
+	log.Printf("[TerminalService] pumpOutput STOP key=%s", sessionKey)
+	close(ts.Done)
 }
 
 func (s *TerminalService) Get(sessionKey string) (*TerminalSession, bool) {
@@ -206,18 +243,24 @@ func (ts *TerminalSession) IsAlive() bool {
 	}
 }
 
-// Attach sets this conn as the active WebSocket, closing the previous one.
-// This ensures only one PTY→WS reader goroutine is active at a time.
-func (ts *TerminalSession) Attach(c io.Closer) {
+// Attach installs a new writer+closer as the active WS connection.
+// The single pumpOutput goroutine will use this writer for PTY output.
+// The old connection (if any) is closed, which stops its WS→PTY read loop.
+func (ts *TerminalSession) Attach(w io.Writer, closer io.Closer) {
+	ts.writerMu.Lock()
+	ts.writer = w
+	ts.writerMu.Unlock()
+
 	ts.connMu.Lock()
 	old := ts.active
-	ts.active = c
+	ts.active = closer
 	ts.connMu.Unlock()
+
 	if old != nil {
-		log.Printf("[TerminalService] Attach: closing OLD conn %p, installing NEW conn %p", old, c)
+		log.Printf("[TerminalService] Attach: closing OLD conn %p, installing NEW %p", old, closer)
 		old.Close()
 	} else {
-		log.Printf("[TerminalService] Attach: no old conn, installing NEW conn %p", c)
+		log.Printf("[TerminalService] Attach: no old conn, installing NEW %p", closer)
 	}
 }
 

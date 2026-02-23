@@ -2,9 +2,9 @@ package handlers
 
 import (
 	"encoding/json"
-	"io"
 	"log"
 	"net/http"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -34,6 +34,23 @@ type terminalMessage struct {
 	Data string `json:"data,omitempty"`
 	Rows uint16 `json:"rows,omitempty"`
 	Cols uint16 `json:"cols,omitempty"`
+}
+
+// wsWriter wraps a websocket.Conn to implement io.Writer.
+// Used by pumpOutput (in services/terminal.go) to forward PTY output.
+type wsWriter struct {
+	conn *websocket.Conn
+	mu   sync.Mutex // websocket.Conn is not concurrency-safe for writes
+}
+
+func (w *wsWriter) Write(p []byte) (int, error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	err := w.conn.WriteMessage(websocket.BinaryMessage, p)
+	if err != nil {
+		return 0, err
+	}
+	return len(p), nil
 }
 
 func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
@@ -78,38 +95,16 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 		return
 	}
 
-	// Close previous WebSocket (if any) so only one reader is active.
-	// Old PTY→WS goroutine will fail on WriteMessage and stop.
+	// Install this WS as the output destination for the persistent PTY reader.
+	// pumpOutput (single goroutine per session) writes to this wsWriter.
+	// Old WS (if any) is closed, which breaks its WS→PTY read loop.
+	writer := &wsWriter{conn: conn}
 	log.Printf("[Terminal] calling Attach key=%s", sessionKey)
-	termSession.Attach(conn)
-	log.Printf("[Terminal] Attach done, starting PTY→WS goroutine key=%s", sessionKey)
+	termSession.Attach(writer, conn)
+	log.Printf("[Terminal] Attach done key=%s", sessionKey)
 
-	// PTY → WebSocket (stdout)
-	go func() {
-		log.Printf("[Terminal] PTY→WS goroutine START key=%s", sessionKey)
-		buf := make([]byte, 4096)
-		for {
-			n, err := termSession.Pty.Read(buf)
-			if err != nil {
-				if err != io.EOF {
-					log.Printf("[Terminal] PTY read error: %v (key=%s)", err, sessionKey)
-				} else {
-					log.Printf("[Terminal] PTY EOF (shell exited) key=%s", sessionKey)
-				}
-				conn.WriteMessage(websocket.CloseMessage,
-					websocket.FormatCloseMessage(websocket.CloseNormalClosure, "Shell exited"))
-				log.Printf("[Terminal] PTY→WS goroutine STOP (PTY read err) key=%s", sessionKey)
-				return
-			}
-			if err := conn.WriteMessage(websocket.BinaryMessage, buf[:n]); err != nil {
-				log.Printf("[Terminal] PTY→WS goroutine STOP (WS write err: %v) key=%s", err, sessionKey)
-				return // WS closed (reconnection or tab closed) — stop reading
-			}
-		}
-	}()
-
+	// WS → PTY (stdin + control messages)
 	log.Printf("[Terminal] WS→PTY loop START key=%s", sessionKey)
-	// WebSocket → PTY (stdin)
 	for {
 		msgType, raw, err := conn.ReadMessage()
 		if err != nil {
@@ -130,7 +125,6 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 			continue
 		}
 
-		log.Printf("[Terminal] control msg type=%s (key=%s)", msg.Type, sessionKey)
 		switch msg.Type {
 		case "input":
 			termSession.Pty.Write([]byte(msg.Data))
@@ -142,5 +136,4 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 
 	log.Printf("[Terminal] handler EXIT key=%s", sessionKey)
 	// Session stays alive — shell persists for reconnection.
-	// Only killed when shell exits or Create is called explicitly.
 }

@@ -313,6 +313,20 @@ const TERM_ICONS = {
   ),
 };
 
+// ── Mobile toolbar: shortcut keys for touch devices ──
+
+const TOOLBAR_KEYS: { label: string; data: string }[] = [
+  { label: 'Tab', data: '\t' },
+  { label: '\u2191', data: '\x1b[A' },
+  { label: '\u2193', data: '\x1b[B' },
+  { label: 'C-c', data: '\x03' },
+  { label: 'C-d', data: '\x04' },
+  { label: 'C-z', data: '\x1a' },
+  { label: 'C-l', data: '\x0c' },
+];
+
+const isTouchDevice = 'ontouchstart' in globalThis;
+
 export default function TerminalComponent({ instanceId, active, persistent }: TerminalProps) {
   const termRef = useRef<HTMLDivElement>(null);
   // Store persistent/instanceId in refs to access stable values in cleanup
@@ -439,15 +453,12 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
         break;
       }
       case 'clear':
-        if (s?.ws?.readyState === WebSocket.OPEN) {
-          s.ws!.send(new TextEncoder().encode('\x0c'));
-        }
+        // ANSI: clear screen + cursor home (visual clear, keeps scrollback)
+        s?.xterm.write('\x1b[2J\x1b[H');
         break;
       case 'clear-all':
-        s?.xterm.clear();
-        if (s?.ws?.readyState === WebSocket.OPEN) {
-          s.ws!.send(new TextEncoder().encode('\x0c'));
-        }
+        // Full terminal reset — clears scrollback + screen
+        s?.xterm.reset();
         break;
       case 'reconnect':
         forceReconnect(instanceId);
@@ -484,6 +495,13 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
     sessions.get(instanceId)?.searchAddon.clearDecorations();
   }, [instanceId]);
 
+  const sendKey = useCallback((data: string) => {
+    const s = sessions.get(instanceId);
+    if (s?.ws?.readyState === WebSocket.OPEN) {
+      s.ws.send(new TextEncoder().encode(data));
+    }
+  }, [instanceId]);
+
   // ── Build menu items ──
 
   const s = sessions.get(instanceId);
@@ -507,13 +525,29 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
 
   return (
     <div
-      className="h-full relative"
+      className="h-full relative flex flex-col"
       style={{ background: '#0a0a1a' }}
       onContextMenu={handleContextMenu}
     >
+      {/* Mobile shortcut toolbar */}
+      {isTouchDevice && (
+        <div className="terminal-toolbar">
+          {TOOLBAR_KEYS.map((k) => (
+            <button
+              key={k.label}
+              type="button"
+              className="terminal-toolbar-btn"
+              onPointerDown={(e) => { e.preventDefault(); sendKey(k.data); }}
+            >
+              {k.label}
+            </button>
+          ))}
+        </div>
+      )}
+
       <div
         ref={termRef}
-        className="h-full"
+        className="flex-1 min-h-0"
         {...longPressHandlers}
       />
 
