@@ -121,13 +121,22 @@ function createXterm(instanceId: string): TermSession {
   return session;
 }
 
+// ANSI color helpers for in-terminal diagnostics
+const _blue = (s: string) => `\x1b[38;2;110;180;255m${s}\x1b[0m`;
+const _green = (s: string) => `\x1b[38;2;74;222;128m${s}\x1b[0m`;
+const _yellow = (s: string) => `\x1b[38;2;251;191;36m${s}\x1b[0m`;
+const _red = (s: string) => `\x1b[38;2;248;113;113m${s}\x1b[0m`;
+
 async function connectWs(instanceId: string): Promise<void> {
   const session = sessions.get(instanceId);
   if (!session) return;
 
+  session.xterm.write(_blue('[WS] Getting token...') + '\r\n');
+
   const token = await ensureFreshToken();
   if (!token) {
     console.warn(`[Terminal] connectWs SKIP — no access_token id=${instanceId}`);
+    session.xterm.write(_red('[WS] No access token! Login required.') + '\r\n');
     return;
   }
 
@@ -135,7 +144,10 @@ async function connectWs(instanceId: string): Promise<void> {
   const tabId = getTabSessionId();
   const wsInstanceId = `${instanceId}@${tabId}`;
   const url = `${protocol}//${window.location.host}/ws/terminal?token=${token}&instanceId=${encodeURIComponent(wsInstanceId)}`;
-  console.log(`[Terminal] connectWs id=${instanceId} attempt=${session.reconnectAttempts}`);
+  const safeUrl = url.replace(/token=[^&]+/, 'token=***');
+  session.xterm.write(_blue(`[WS] Connecting ${safeUrl}`) + '\r\n');
+  console.log(`[Terminal] connectWs id=${instanceId} attempt=${session.reconnectAttempts} url=${safeUrl}`);
+
   const ws = new WebSocket(url);
   ws.binaryType = 'arraybuffer';
   session.ws = ws;
@@ -144,6 +156,7 @@ async function connectWs(instanceId: string): Promise<void> {
 
   ws.onopen = () => {
     opened = true;
+    session.xterm.write(_green('[WS] Connected!') + '\r\n');
     console.log(`[Terminal] ws.onopen id=${instanceId}`);
     session.reconnectAttempts = 0;
     try {
@@ -164,11 +177,14 @@ async function connectWs(instanceId: string): Promise<void> {
   };
 
   ws.onerror = (e) => {
+    session.xterm.write(_red('[WS] Connection error!') + '\r\n');
     console.warn(`[Terminal] ws.onerror id=${instanceId}`, e);
   };
 
   ws.onclose = (e) => {
-    console.log(`[Terminal] ws.onclose id=${instanceId} code=${e.code} opened=${opened} session.ws===ws:${session.ws === ws} inMap:${sessions.has(instanceId)}`);
+    const info = `code=${e.code} reason=${e.reason || 'none'} opened=${opened}`;
+    session.xterm.write(_yellow(`[WS] Closed ${info}`) + '\r\n');
+    console.log(`[Terminal] ws.onclose id=${instanceId} ${info} session.ws===ws:${session.ws === ws} inMap:${sessions.has(instanceId)}`);
 
     // WS was superseded by a newer connection — don't reconnect
     if (session.ws !== ws) {
@@ -180,8 +196,8 @@ async function connectWs(instanceId: string): Promise<void> {
     // Connection was rejected before opening (401, network error) — don't reconnect
     if (!opened) {
       console.log(`[Terminal] ws.onclose REJECTED (never opened) id=${instanceId}`);
-      session.xterm.write('\r\n\x1b[38;2;248;113;113m[Connection rejected]\x1b[0m\r\n');
-      session.xterm.write('\x1b[38;2;110;180;255m[Right-click \u2192 Reconnect]\x1b[0m\r\n');
+      session.xterm.write(_red('[Connection rejected — check auth/backend]') + '\r\n');
+      session.xterm.write(_blue('[Right-click \u2192 Reconnect]') + '\r\n');
       session.notifyRerender?.();
       return;
     }
@@ -190,14 +206,14 @@ async function connectWs(instanceId: string): Promise<void> {
 
     if (session.reconnectAttempts < MAX_RECONNECT) {
       session.reconnectAttempts++;
-      session.xterm.write('\r\n\x1b[38;2;251;191;36m[Shell exited \u2014 reconnecting...]\x1b[0m\r\n');
+      session.xterm.write(_yellow(`[Shell exited \u2014 reconnecting ${session.reconnectAttempts}/${MAX_RECONNECT}...]`) + '\r\n');
       session.reconnectTimer = window.setTimeout(() => {
         session.reconnectTimer = null;
         if (sessions.has(instanceId)) connectWs(instanceId);
       }, RECONNECT_DELAY);
     } else {
-      session.xterm.write('\r\n\x1b[38;2;248;113;113m[Disconnected]\x1b[0m\r\n');
-      session.xterm.write('\x1b[38;2;110;180;255m[Right-click \u2192 Reconnect]\x1b[0m\r\n');
+      session.xterm.write(_red('[Disconnected — max retries reached]') + '\r\n');
+      session.xterm.write(_blue('[Right-click \u2192 Reconnect]') + '\r\n');
       session.reconnectAttempts = 0;
     }
     session.notifyRerender?.();
@@ -206,7 +222,10 @@ async function connectWs(instanceId: string): Promise<void> {
 
 function forceReconnect(instanceId: string): void {
   const session = sessions.get(instanceId);
-  if (!session) return;
+  if (!session) {
+    console.error(`[Terminal] forceReconnect: NO SESSION for id=${instanceId}`);
+    return;
+  }
 
   if (session.reconnectTimer) {
     clearTimeout(session.reconnectTimer);
@@ -226,9 +245,11 @@ function getOrCreateSession(instanceId: string): TermSession {
   const existed = !!session;
   if (!session) {
     session = createXterm(instanceId);
+    session.xterm.write(_blue(`[Terminal] Session created id=${instanceId}`) + '\r\n');
   }
   const wsState = session.ws ? ['CONNECTING','OPEN','CLOSING','CLOSED'][session.ws.readyState] : 'null';
   console.log(`[Terminal] getOrCreateSession id=${instanceId} existed=${existed} wsState=${wsState}`);
+  session.xterm.write(_blue(`[Terminal] getOrCreate existed=${existed} wsState=${wsState}`) + '\r\n');
   if (!session.ws || session.ws.readyState > WebSocket.OPEN) {
     connectWs(instanceId);
   }

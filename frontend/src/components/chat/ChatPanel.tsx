@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuthStore } from '../../store/authStore';
 
 interface ChatPanelProps {
@@ -9,43 +9,51 @@ type Status = 'checking' | 'ok' | 'unavailable';
 
 // ── Singleton iframe: created once, NEVER removed from DOM ──
 // Survives any React remount (layout changes, tab switches, panel toggles).
-// Uses position:fixed and syncs position to the ChatPanel container via ResizeObserver.
+// Uses DOM reparenting: iframe wrapper is moved between the panel container
+// (when visible) and an offscreen holder (when panel unmounts).
 
 let iframeWrapper: HTMLDivElement | null = null;
 let iframeEl: HTMLIFrameElement | null = null;
+
+let offscreenHolder: HTMLDivElement | null = null;
+function ensureOffscreenHolder(): HTMLDivElement {
+  if (!offscreenHolder) {
+    offscreenHolder = document.createElement('div');
+    offscreenHolder.style.cssText =
+      'position:fixed;left:-9999px;top:-9999px;width:0;height:0;overflow:hidden;pointer-events:none;';
+    document.body.appendChild(offscreenHolder);
+  }
+  return offscreenHolder;
+}
+
 function ensureIframe(token: string): void {
   if (iframeWrapper) return; // already created
   console.log('[ChatPanel] Creating singleton iframe');
 
   iframeWrapper = document.createElement('div');
   iframeWrapper.style.cssText =
-    'position:fixed;z-index:15;display:none;overflow:hidden;pointer-events:none;';
-  document.body.appendChild(iframeWrapper);
+    'position:absolute;inset:0;z-index:15;overflow:hidden;';
 
   iframeEl = document.createElement('iframe');
   iframeEl.src = `/code/?token=${token}`;
   iframeEl.title = 'VS Code';
   iframeEl.allow = 'clipboard-read; clipboard-write';
   iframeEl.style.cssText =
-    'width:100%;height:100%;border:0;background:#1e1e1e;pointer-events:auto;';
+    'width:100%;height:100%;border:0;background:#1e1e1e;';
   iframeWrapper.appendChild(iframeEl);
+
+  // Park in offscreen holder until a panel mounts
+  ensureOffscreenHolder().appendChild(iframeWrapper);
 }
 
-function showIframe(rect: DOMRect): void {
+function attachIframe(container: HTMLElement): void {
   if (!iframeWrapper) return;
-  if (rect.width <= 0 || rect.height <= 0) {
-    iframeWrapper.style.display = 'none';
-    return;
-  }
-  iframeWrapper.style.display = 'block';
-  iframeWrapper.style.top = `${rect.top}px`;
-  iframeWrapper.style.left = `${rect.left}px`;
-  iframeWrapper.style.width = `${rect.width}px`;
-  iframeWrapper.style.height = `${rect.height}px`;
+  container.appendChild(iframeWrapper); // moves the node (no reload)
 }
 
-function hideIframe(): void {
-  if (iframeWrapper) iframeWrapper.style.display = 'none';
+function detachIframe(): void {
+  if (!iframeWrapper) return;
+  ensureOffscreenHolder().appendChild(iframeWrapper); // back to offscreen
 }
 
 function isIframeCreated(): boolean {
@@ -100,34 +108,12 @@ export default function ChatPanel(_props: ChatPanelProps) {
     return () => { controller.abort(); clearTimeout(timer); };
   }, [status, token]);
 
-  // Sync iframe position to our container
-  const syncPosition = useCallback(() => {
-    if (containerRef.current) {
-      showIframe(containerRef.current.getBoundingClientRect());
-    }
-  }, []);
-
+  // Attach iframe to this container on mount, detach on unmount
   useEffect(() => {
     if (status !== 'ok' || !containerRef.current) return;
-
-    // Initial sync
-    syncPosition();
-
-    // ResizeObserver: fires when container size changes (tab switch, panel resize, etc.)
-    const ro = new ResizeObserver(syncPosition);
-    ro.observe(containerRef.current);
-
-    // Also sync on scroll/resize (catches position changes without size change)
-    window.addEventListener('resize', syncPosition);
-    window.addEventListener('scroll', syncPosition, true);
-
-    return () => {
-      ro.disconnect();
-      window.removeEventListener('resize', syncPosition);
-      window.removeEventListener('scroll', syncPosition, true);
-      hideIframe();
-    };
-  }, [status, syncPosition]);
+    attachIframe(containerRef.current);
+    return () => { detachIframe(); };
+  }, [status]);
 
   if (status === 'checking') {
     return (
@@ -185,6 +171,6 @@ export default function ChatPanel(_props: ChatPanelProps) {
     );
   }
 
-  // Placeholder div — iframe is positioned over it via position:fixed
-  return <div ref={containerRef} className="h-full" style={{ touchAction: 'manipulation' }} />;
+  // Container for the iframe — position:relative so absolute iframe fills it
+  return <div ref={containerRef} className="h-full" style={{ position: 'relative' }} />;
 }
