@@ -1,6 +1,7 @@
 package services
 
 import (
+	"bytes"
 	"io"
 	"log"
 	"os"
@@ -26,10 +27,12 @@ type TerminalSession struct {
 	connMu sync.Mutex
 	active io.Closer
 
-	// writerMu guards writer — the destination for PTY output.
-	// pumpOutput holds a read-lock while writing; Attach swaps writer atomically.
+	// writerMu guards writer, initBuf, and attached.
+	// pumpOutput buffers output before first Attach; afterwards writes directly.
 	writerMu sync.Mutex
 	writer   io.Writer
+	initBuf  bytes.Buffer // PTY output before first Attach (e.g. shell prompt)
+	attached bool         // true after first Attach
 }
 
 func NewTerminalService() *TerminalService {
@@ -193,6 +196,14 @@ func (ts *TerminalSession) pumpOutput(sessionKey string) {
 		}
 		ts.writerMu.Lock()
 		w := ts.writer
+		if w == nil && !ts.attached {
+			// Buffer initial output (shell prompt etc.) until first Attach — cap 64KB
+			if ts.initBuf.Len() < 65536 {
+				ts.initBuf.Write(buf[:n])
+			}
+			ts.writerMu.Unlock()
+			continue
+		}
 		ts.writerMu.Unlock()
 		if w != nil {
 			// Write error = stale/closed WS conn, ignore (next Attach will swap in a new writer)
@@ -248,6 +259,15 @@ func (ts *TerminalSession) IsAlive() bool {
 // The old connection (if any) is closed, which stops its WS→PTY read loop.
 func (ts *TerminalSession) Attach(w io.Writer, closer io.Closer) {
 	ts.writerMu.Lock()
+	// Flush buffered initial output (shell prompt) to first writer
+	if !ts.attached {
+		ts.attached = true
+		if ts.initBuf.Len() > 0 {
+			log.Printf("[TerminalService] Attach: flushing %d bytes of initial output", ts.initBuf.Len())
+			w.Write(ts.initBuf.Bytes())
+			ts.initBuf.Reset()
+		}
+	}
 	ts.writer = w
 	ts.writerMu.Unlock()
 
