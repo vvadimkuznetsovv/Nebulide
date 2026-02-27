@@ -1782,7 +1782,7 @@ body { animation: scrollbarShimmer 3s ease-in-out infinite; }
   .docx-content strong { font-weight: 600; }
   .docx-content em { font-style: italic; }
 
-.xterm { padding: 8px; overscroll-behavior: contain; }
+.xterm { padding: 8px; overscroll-behavior: contain; width: 100%; height: 100%; }
 
 /* ── Terminal toolbar ── */
 .terminal-toolbar {

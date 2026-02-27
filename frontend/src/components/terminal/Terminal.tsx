@@ -401,11 +401,16 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
 
     setTimeout(fit, 50);
 
-    const resizeObserver = new ResizeObserver(() => fit());
+    let rafId = 0;
+    const resizeObserver = new ResizeObserver(() => {
+      cancelAnimationFrame(rafId);
+      rafId = requestAnimationFrame(() => fit());
+    });
     resizeObserver.observe(el);
 
     return () => {
       console.log(`[Terminal] useEffect CLEANUP id=${instanceIdRef.current} persistent=${persistentRef.current}`);
+      cancelAnimationFrame(rafId);
       resizeObserver.disconnect();
       // Destroy session on unmount only for non-persistent (detached) terminals
       if (!persistentRef.current) {
@@ -642,7 +647,7 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
 
       <div
         ref={termRef}
-        className="flex-1 min-h-0"
+        className="flex-1 min-h-0 min-w-0 overflow-hidden"
         {...longPressHandlers}
       />
 
