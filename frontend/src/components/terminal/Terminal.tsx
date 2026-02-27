@@ -388,11 +388,11 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
 
     // Attach xterm to this DOM element (re-attach if container changed)
     if (s.container !== el) {
-      if (s.container) {
-        const xtermEl = s.xterm.element?.parentElement;
-        if (xtermEl) {
-          el.appendChild(xtermEl);
-        }
+      if (s.container && s.xterm.element) {
+        // Move xterm's own element directly into the new container.
+        // Moving parentElement would nest old container inside new one,
+        // breaking FitAddon (it reads dimensions from xterm.element.parentElement).
+        el.appendChild(s.xterm.element);
       } else {
         s.xterm.open(el);
       }
