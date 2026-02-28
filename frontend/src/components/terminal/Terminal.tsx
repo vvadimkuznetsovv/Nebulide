@@ -655,8 +655,6 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
     }
     if (len > 0) {
       s.xterm.select(sel.startCol, sel.startRow, Math.max(1, len));
-    } else {
-      toast(`sel len=0, skip`, { duration: 1500 });
     }
   }, [instanceId]);
 
@@ -712,7 +710,6 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
         sel.startCol = 0;
       }
     }
-    toast(`selRow ${boundary} d=${delta} sr=${sel.startRow}:${sel.startCol} er=${sel.endRow}:${sel.endCol}`, { duration: 2000 });
     applySelection();
     s.xterm.scrollToLine(boundary === 'start' ? sel.startRow : sel.endRow);
   }, [instanceId, applySelection, getLineLen]);
@@ -720,7 +717,7 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
   /** Move selection boundary by character (col delta) */
   const moveSelCol = useCallback((boundary: 'start' | 'end', delta: number) => {
     const s = sessions.get(instanceId);
-    if (!s) { toast.error('moveSelCol: no session'); return; }
+    if (!s) return;
     const buf = s.xterm.buffer.active;
     const maxLine = buf.length - 1;
     const sel = selRef.current;
@@ -756,7 +753,6 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
         sel.startCol = sel.endCol;
       }
     }
-    toast(`selCol ${boundary} d=${delta} sr=${sel.startRow}:${sel.startCol} er=${sel.endRow}:${sel.endCol}`, { duration: 2000 });
     applySelection();
     s.xterm.scrollToLine(boundary === 'start' ? sel.startRow : sel.endRow);
   }, [instanceId, applySelection, getLineLen]);
