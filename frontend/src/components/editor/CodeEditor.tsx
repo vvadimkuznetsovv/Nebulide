@@ -94,6 +94,9 @@ export default function CodeEditor({ filePath, tabId }: CodeEditorProps) {
   const [loading, setLoading] = useState(false);
   const [modified, setModified] = useState(false);
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
+  const [toolbarOpen, setToolbarOpen] = useState(() => localStorage.getItem('nebulide-editor-toolbar') !== 'closed');
+  const [copyMode, setCopyMode] = useState(false);
+  const selRef = useRef({ startLine: 1, endLine: 1 });
 
   const { setTabModified } = useWorkspaceStore();
 
@@ -288,9 +291,13 @@ export default function CodeEditor({ filePath, tabId }: CodeEditorProps) {
 
   const handleCtxAction = useCallback((action: string) => {
     setCtxMenu(null);
+    runAction(action);
+  }, [runAction]);
+
+  // Shared action runner for both toolbar and context menu
+  const runAction = useCallback((action: string) => {
     const editor = editorRef.current;
     if (!editor) return;
-
     switch (action) {
       case 'undo':
         editor.focus();
@@ -345,48 +352,207 @@ export default function CodeEditor({ filePath, tabId }: CodeEditorProps) {
     { label: 'Command Palette', action: 'command-palette', icon: EDITOR_ICONS.command },
   ];
 
+  // ── Copy mode (row 2) — line-based selection via buttons ──
+
+  const toggleCopyMode = useCallback(() => {
+    setCopyMode((prev) => {
+      const editor = editorRef.current;
+      if (!editor) return false;
+      if (prev) {
+        // Exiting — clear selection
+        const pos = editor.getPosition();
+        if (pos) editor.setSelection({ startLineNumber: pos.lineNumber, startColumn: pos.column, endLineNumber: pos.lineNumber, endColumn: pos.column });
+        return false;
+      }
+      // Entering — select current line
+      const pos = editor.getPosition();
+      const line = pos?.lineNumber ?? 1;
+      selRef.current = { startLine: line, endLine: line };
+      const model = editor.getModel();
+      const maxCol = model ? model.getLineMaxColumn(line) : 1;
+      editor.setSelection({ startLineNumber: line, startColumn: 1, endLineNumber: line, endColumn: maxCol });
+      editor.revealLineInCenter(line);
+      return true;
+    });
+  }, []);
+
+  const moveSelBoundary = useCallback((boundary: 'start' | 'end', delta: number) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const model = editor.getModel();
+    if (!model) return;
+    const maxLine = model.getLineCount();
+    const sel = selRef.current;
+    if (boundary === 'start') {
+      sel.startLine = Math.max(1, Math.min(maxLine, sel.startLine + delta));
+      if (sel.startLine > sel.endLine) sel.endLine = sel.startLine;
+    } else {
+      sel.endLine = Math.max(1, Math.min(maxLine, sel.endLine + delta));
+      if (sel.endLine < sel.startLine) sel.startLine = sel.endLine;
+    }
+    const endMaxCol = model.getLineMaxColumn(sel.endLine);
+    editor.setSelection({ startLineNumber: sel.startLine, startColumn: 1, endLineNumber: sel.endLine, endColumn: endMaxCol });
+    editor.revealLineInCenter(boundary === 'start' ? sel.startLine : sel.endLine);
+  }, []);
+
+  const copySelection = useCallback(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const sel = editor.getSelection();
+    if (!sel) return;
+    const model = editor.getModel();
+    if (!model) return;
+    const text = model.getValueInRange(sel);
+    if (text) {
+      navigator.clipboard.writeText(text)
+        .then(() => toast.success('Copied'))
+        .catch(() => toast.error('Failed to copy'));
+    }
+  }, []);
+
+  const selectAllLines = useCallback(() => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const model = editor.getModel();
+    if (!model) return;
+    const maxLine = model.getLineCount();
+    const maxCol = model.getLineMaxColumn(maxLine);
+    selRef.current = { startLine: 1, endLine: maxLine };
+    editor.setSelection({ startLineNumber: 1, startColumn: 1, endLineNumber: maxLine, endColumn: maxCol });
+  }, []);
+
+  const exitCopyMode = useCallback(() => {
+    const editor = editorRef.current;
+    if (editor) {
+      const pos = editor.getPosition();
+      if (pos) editor.setSelection({ startLineNumber: pos.lineNumber, startColumn: pos.column, endLineNumber: pos.lineNumber, endColumn: pos.column });
+    }
+    setCopyMode(false);
+  }, []);
+
+  const TB = (label: string, action: string) => (
+    <button
+      key={action}
+      type="button"
+      className="terminal-toolbar-btn"
+      onPointerDown={(e) => e.preventDefault()}
+      onClick={() => runAction(action)}
+    >
+      {label}
+    </button>
+  );
+  const SEP = <div className="terminal-toolbar-sep" />;
+
   return (
-    <div className="h-full" ref={containerRef}>
+    <div className="h-full flex flex-col" ref={containerRef}>
       {!filePath ? (
-        <div className="h-full flex items-center justify-center">
+        <div className="flex-1 flex items-center justify-center">
           <div className="text-center">
             <div className="text-4xl mb-4 code-editor-empty-icon">{'</>'}</div>
             <p className="text-sm code-editor-empty-label">Select a file to edit</p>
           </div>
         </div>
       ) : loading ? (
-        <div className="flex items-center justify-center h-full">
+        <div className="flex items-center justify-center flex-1">
           <span className="text-sm glow-pulse" style={{ color: 'var(--text-secondary)' }}>
             Loading...
           </span>
         </div>
       ) : (
-        <Editor
-          height="100%"
-          language={getLanguage(filePath)}
-          value={content}
-          theme="vs-dark"
-          onMount={handleEditorMount}
-          onChange={(value) => {
-            const newContent = value || '';
-            setContent(newContent);
-            const isModified = newContent !== originalContent;
-            setModified(isModified);
-            if (tabId) setTabModified(tabId, isModified);
-          }}
-          options={{
-            minimap: { enabled: false },
-            fontSize: 13,
-            lineNumbers: 'on',
-            wordWrap: 'on',
-            scrollBeyondLastLine: false,
-            automaticLayout: true,
-            padding: { top: 8 },
-            renderWhitespace: 'selection',
-            bracketPairColorization: { enabled: true },
-            contextmenu: false,
-          }}
-        />
+        <>
+          {/* Editor toolbar — same style as terminal toolbar */}
+          <div className={`terminal-toolbar ${toolbarOpen ? '' : 'collapsed'}`}>
+            <button
+              type="button"
+              className="terminal-toolbar-toggle"
+              onClick={() => setToolbarOpen((v) => {
+                localStorage.setItem('nebulide-editor-toolbar', v ? 'closed' : 'open');
+                return !v;
+              })}
+            >
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                {toolbarOpen ? <polyline points="18 15 12 9 6 15" /> : <polyline points="6 9 12 15 18 9" />}
+              </svg>
+            </button>
+            {toolbarOpen && (
+              <>
+                {TB('Undo', 'undo')}
+                {TB('Redo', 'redo')}
+                {TB('Save', 'save')}
+                {SEP}
+                {TB('Cut', 'cut')}
+                {TB('Copy', 'copy')}
+                {TB('Paste', 'paste')}
+                {SEP}
+                <button
+                  type="button"
+                  className={`terminal-toolbar-btn${copyMode ? ' active' : ''}`}
+                  onPointerDown={(e) => e.preventDefault()}
+                  onClick={toggleCopyMode}
+                >
+                  f-C
+                </button>
+              </>
+            )}
+          </div>
+
+          {/* Row 2: copy & selection (visible when copyMode && toolbarOpen) */}
+          {copyMode && toolbarOpen && (
+            <div className="terminal-toolbar">
+              <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => moveSelBoundary('start', -1)}>
+                S{'\u2191'}
+              </button>
+              <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => moveSelBoundary('start', 1)}>
+                S{'\u2193'}
+              </button>
+              {SEP}
+              <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => moveSelBoundary('end', -1)}>
+                E{'\u2191'}
+              </button>
+              <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => moveSelBoundary('end', 1)}>
+                E{'\u2193'}
+              </button>
+              {SEP}
+              <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={copySelection}>
+                Copy
+              </button>
+              <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={selectAllLines}>
+                All
+              </button>
+              <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={exitCopyMode}>
+                {'\u00d7'}
+              </button>
+            </div>
+          )}
+          <div className="flex-1 min-h-0">
+            <Editor
+              height="100%"
+              language={getLanguage(filePath)}
+              value={content}
+              theme="vs-dark"
+              onMount={handleEditorMount}
+              onChange={(value) => {
+                const newContent = value || '';
+                setContent(newContent);
+                const isModified = newContent !== originalContent;
+                setModified(isModified);
+                if (tabId) setTabModified(tabId, isModified);
+              }}
+              options={{
+                minimap: { enabled: false },
+                fontSize: 13,
+                lineNumbers: 'on',
+                wordWrap: 'on',
+                scrollBeyondLastLine: false,
+                automaticLayout: true,
+                padding: { top: 8 },
+                renderWhitespace: 'selection',
+                bracketPairColorization: { enabled: true },
+                contextmenu: false,
+              }}
+            />
+          </div>
+        </>
       )}
       {ctxMenu && filePath && (
         <ContextMenu
