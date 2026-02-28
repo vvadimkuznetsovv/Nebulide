@@ -9,6 +9,17 @@ import { useLongPress } from '../../hooks/useLongPress';
 import { ensureFreshToken } from '../../api/tokenRefresh';
 import toast from 'react-hot-toast';
 
+// ── Clipboard helper: first readText() on mobile may fail (permission not yet initialized) ──
+
+async function clipboardReadWithRetry(): Promise<string> {
+  try {
+    return await navigator.clipboard.readText();
+  } catch {
+    await new Promise(r => setTimeout(r, 100));
+    return navigator.clipboard.readText();
+  }
+}
+
 // ── Font size persistence ──
 
 const FONT_SIZE_KEY = 'nebulide-terminal-font-size';
@@ -361,7 +372,10 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
     localStorage.getItem('nebulide-terminal-toolbar') !== 'closed',
   );
   const [copyMode, setCopyMode] = useState(false);
-  const selRef = useRef({ start: 0, end: 0 });
+  const [row2Open, setRow2Open] = useState(() =>
+    localStorage.getItem('nebulide-terminal-toolbar-r2') !== 'closed',
+  );
+  const selRef = useRef({ startRow: 0, startCol: 0, endRow: 0, endCol: 0 });
 
   // Long-press for mobile context menu
   const { handlers: longPressHandlers } = useLongPress({
@@ -491,11 +505,13 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
         break;
       }
       case 'paste':
-        navigator.clipboard.readText()
+        clipboardReadWithRetry()
           .then((text) => {
-            if (text && s?.ws?.readyState === WebSocket.OPEN) {
-              s.ws!.send(new TextEncoder().encode(text));
+            if (!s?.ws || s.ws.readyState !== WebSocket.OPEN) {
+              toast.error('Terminal disconnected');
+              return;
             }
+            if (text) s.ws.send(new TextEncoder().encode(text));
           })
           .catch(() => toast.error('Failed to paste'));
         break;
@@ -573,6 +589,29 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
     }
   }, [instanceId]);
 
+  const pasteToTerminal = useCallback(() => {
+    const s = sessions.get(instanceId);
+    clipboardReadWithRetry()
+      .then((text) => {
+        if (!s?.ws || s.ws.readyState !== WebSocket.OPEN) {
+          toast.error('Terminal disconnected');
+          return;
+        }
+        if (text) s.ws.send(new TextEncoder().encode(text));
+      })
+      .catch(() => toast.error('Failed to paste'));
+  }, [instanceId]);
+
+  const copyTermSelection = useCallback(() => {
+    const s = sessions.get(instanceId);
+    const sel = s?.xterm.getSelection();
+    if (sel) {
+      navigator.clipboard.writeText(sel)
+        .then(() => toast.success('Copied'))
+        .catch(() => toast.error('Failed to copy'));
+    }
+  }, [instanceId]);
+
   /** Copy last N lines from terminal buffer (0 = all) */
   const copyLines = useCallback((n: number) => {
     const s = sessions.get(instanceId);
@@ -595,16 +634,43 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
     }
   }, [instanceId]);
 
-  // ── Copy mode (row 2) — line-based selection via buttons ──
+  // ── Copy mode (row 3) — character-level selection via buttons ──
+
+  /** Apply selection from selRef coordinates using xterm.select(col, row, length) */
+  const applySelection = useCallback(() => {
+    const s = sessions.get(instanceId);
+    if (!s) return;
+    const buf = s.xterm.buffer.active;
+    const sel = selRef.current;
+    // Compute total character length from (startRow,startCol) to (endRow,endCol)
+    let len: number;
+    if (sel.startRow === sel.endRow) {
+      len = Math.max(0, sel.endCol - sel.startCol);
+    } else {
+      len = (buf.getLine(sel.startRow)?.translateToString(true).length ?? 0) - sel.startCol;
+      for (let r = sel.startRow + 1; r < sel.endRow; r++) {
+        len += buf.getLine(r)?.translateToString(true).length ?? 0;
+      }
+      len += sel.endCol;
+    }
+    if (len > 0) {
+      s.xterm.select(sel.startCol, sel.startRow, Math.max(1, len));
+    }
+  }, [instanceId]);
+
+  /** Get line length for a buffer row */
+  const getLineLen = useCallback((row: number) => {
+    const s = sessions.get(instanceId);
+    if (!s) return 0;
+    return s.xterm.buffer.active.getLine(row)?.translateToString(true).length ?? 0;
+  }, [instanceId]);
 
   const toggleCopyMode = useCallback(() => {
     setCopyMode((prev) => {
       if (prev) {
-        // Exiting — clear selection
         sessions.get(instanceId)?.xterm.clearSelection();
         return false;
       }
-      // Entering — select last non-empty line
       const s = sessions.get(instanceId);
       if (!s) return false;
       const buf = s.xterm.buffer.active;
@@ -614,29 +680,82 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
         if (line && line.translateToString(true).trim() !== '') break;
         lastLine--;
       }
-      selRef.current = { start: lastLine, end: lastLine };
+      const lineLen = buf.getLine(lastLine)?.translateToString(true).length ?? 0;
+      selRef.current = { startRow: lastLine, startCol: 0, endRow: lastLine, endCol: lineLen };
       s.xterm.selectLines(lastLine, lastLine);
       s.xterm.scrollToLine(lastLine);
       return true;
     });
   }, [instanceId]);
 
-  const moveSelBoundary = useCallback((boundary: 'start' | 'end', delta: number) => {
+  /** Move selection boundary by line (row delta) */
+  const moveSelRow = useCallback((boundary: 'start' | 'end', delta: number) => {
     const s = sessions.get(instanceId);
     if (!s) return;
     const buf = s.xterm.buffer.active;
     const maxLine = buf.length - 1;
     const sel = selRef.current;
     if (boundary === 'start') {
-      sel.start = Math.max(0, Math.min(maxLine, sel.start + delta));
-      if (sel.start > sel.end) sel.end = sel.start;
+      sel.startRow = Math.max(0, Math.min(maxLine, sel.startRow + delta));
+      sel.startCol = 0;
+      if (sel.startRow > sel.endRow) {
+        sel.endRow = sel.startRow;
+        sel.endCol = getLineLen(sel.endRow);
+      }
     } else {
-      sel.end = Math.max(0, Math.min(maxLine, sel.end + delta));
-      if (sel.end < sel.start) sel.start = sel.end;
+      sel.endRow = Math.max(0, Math.min(maxLine, sel.endRow + delta));
+      sel.endCol = getLineLen(sel.endRow);
+      if (sel.endRow < sel.startRow) {
+        sel.startRow = sel.endRow;
+        sel.startCol = 0;
+      }
     }
-    s.xterm.selectLines(sel.start, sel.end);
-    s.xterm.scrollToLine(boundary === 'start' ? sel.start : sel.end);
-  }, [instanceId]);
+    applySelection();
+    s.xterm.scrollToLine(boundary === 'start' ? sel.startRow : sel.endRow);
+  }, [instanceId, applySelection, getLineLen]);
+
+  /** Move selection boundary by character (col delta) */
+  const moveSelCol = useCallback((boundary: 'start' | 'end', delta: number) => {
+    const s = sessions.get(instanceId);
+    if (!s) return;
+    const buf = s.xterm.buffer.active;
+    const maxLine = buf.length - 1;
+    const sel = selRef.current;
+    if (boundary === 'start') {
+      sel.startCol += delta;
+      // Wrap to previous/next line
+      if (sel.startCol < 0 && sel.startRow > 0) {
+        sel.startRow--;
+        sel.startCol = getLineLen(sel.startRow);
+      } else if (sel.startCol > getLineLen(sel.startRow) && sel.startRow < maxLine) {
+        sel.startRow++;
+        sel.startCol = 0;
+      }
+      sel.startCol = Math.max(0, Math.min(getLineLen(sel.startRow), sel.startCol));
+      // Keep start <= end
+      if (sel.startRow > sel.endRow || (sel.startRow === sel.endRow && sel.startCol > sel.endCol)) {
+        sel.endRow = sel.startRow;
+        sel.endCol = sel.startCol;
+      }
+    } else {
+      sel.endCol += delta;
+      if (sel.endCol < 0 && sel.endRow > 0) {
+        sel.endRow--;
+        sel.endCol = getLineLen(sel.endRow);
+      } else if (sel.endCol > getLineLen(sel.endRow) && sel.endRow < maxLine) {
+        sel.endRow++;
+        sel.endCol = 0;
+      }
+      sel.endCol = Math.max(0, Math.min(getLineLen(sel.endRow), sel.endCol));
+      // Keep end >= start
+      if (sel.endRow < sel.startRow || (sel.endRow === sel.startRow && sel.endCol < sel.startCol)) {
+        sel.startRow = sel.endRow;
+        sel.startCol = sel.endCol;
+      }
+    }
+    applySelection();
+    s.xterm.scrollToLine(boundary === 'start' ? sel.startRow : sel.endRow);
+  }, [instanceId, applySelection, getLineLen]);
 
   const copySelection = useCallback(() => {
     const s = sessions.get(instanceId);
@@ -654,8 +773,9 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
     if (!s) return;
     s.xterm.selectAll();
     const buf = s.xterm.buffer.active;
-    selRef.current = { start: 0, end: buf.length - 1 };
-  }, [instanceId]);
+    const lastLine = buf.length - 1;
+    selRef.current = { startRow: 0, startCol: 0, endRow: lastLine, endCol: getLineLen(lastLine) };
+  }, [instanceId, getLineLen]);
 
   const exitCopyMode = useCallback(() => {
     sessions.get(instanceId)?.xterm.clearSelection();
@@ -689,7 +809,7 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
       style={{ background: '#0a0a1a' }}
       onContextMenu={handleContextMenu}
     >
-      {/* Shortcut toolbar */}
+      {/* Row 1: shortcut keys + C-p + f-V + f-C */}
       <div className={`terminal-toolbar ${toolbarOpen ? '' : 'collapsed'}`}>
         <button
           type="button"
@@ -720,6 +840,27 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
             <div className="terminal-toolbar-sep" />
             <button
               type="button"
+              className="terminal-toolbar-btn"
+              onPointerDown={(e) => e.preventDefault()}
+              onClick={pasteToTerminal}
+            >
+              C-p
+            </button>
+            <div className="terminal-toolbar-sep" />
+            <button
+              type="button"
+              className={`terminal-toolbar-btn${row2Open ? ' active' : ''}`}
+              onPointerDown={(e) => e.preventDefault()}
+              onClick={() => setRow2Open((v) => {
+                localStorage.setItem('nebulide-terminal-toolbar-r2', v ? 'closed' : 'open');
+                setTimeout(fit, 50);
+                return !v;
+              })}
+            >
+              f-V
+            </button>
+            <button
+              type="button"
               className={`terminal-toolbar-btn${copyMode ? ' active' : ''}`}
               onPointerDown={(e) => e.preventDefault()}
               onClick={toggleCopyMode}
@@ -730,21 +871,61 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
         )}
       </div>
 
-      {/* Row 2: copy & selection (visible when copyMode && toolbarOpen) */}
-      {copyMode && toolbarOpen && (
+      {/* Row 2: common actions (toggled by f-V) */}
+      {row2Open && toolbarOpen && (
         <div className="terminal-toolbar">
-          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => moveSelBoundary('start', -1)}>
-            S{'\u2191'}
+          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={copyTermSelection}>
+            Copy
           </button>
-          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => moveSelBoundary('start', 1)}>
-            S{'\u2193'}
+          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={pasteToTerminal}>
+            Paste
+          </button>
+          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => sessions.get(instanceId)?.xterm.selectAll()}>
+            Sel All
           </button>
           <div className="terminal-toolbar-sep" />
-          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => moveSelBoundary('end', -1)}>
+          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => sendKey('\x1b[H')}>
+            Home
+          </button>
+          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => sendKey('\x1b[F')}>
+            End
+          </button>
+          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => sendKey('\x1b[5~')}>
+            PgUp
+          </button>
+          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => sendKey('\x1b[6~')}>
+            PgDn
+          </button>
+        </div>
+      )}
+
+      {/* Row 3: copy mode — line & character selection (toggled by f-C) */}
+      {copyMode && toolbarOpen && (
+        <div className="terminal-toolbar">
+          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => moveSelRow('start', -1)}>
+            S{'\u2191'}
+          </button>
+          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => moveSelRow('start', 1)}>
+            S{'\u2193'}
+          </button>
+          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => moveSelCol('start', -1)}>
+            S{'\u2190'}
+          </button>
+          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => moveSelCol('start', 1)}>
+            S{'\u2192'}
+          </button>
+          <div className="terminal-toolbar-sep" />
+          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => moveSelRow('end', -1)}>
             E{'\u2191'}
           </button>
-          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => moveSelBoundary('end', 1)}>
+          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => moveSelRow('end', 1)}>
             E{'\u2193'}
+          </button>
+          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => moveSelCol('end', -1)}>
+            E{'\u2190'}
+          </button>
+          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => moveSelCol('end', 1)}>
+            E{'\u2192'}
           </button>
           <div className="terminal-toolbar-sep" />
           <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={copySelection}>
