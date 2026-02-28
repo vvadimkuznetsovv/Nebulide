@@ -340,6 +340,8 @@ const TOOLBAR_KEYS: { label: string; data: string }[] = [
   { label: 'Tab', data: '\t' },
   { label: '\u2191', data: '\x1b[A' },
   { label: '\u2193', data: '\x1b[B' },
+  { label: '\u2190', data: '\x1b[D' },
+  { label: '\u2192', data: '\x1b[C' },
   { label: 'C-c', data: '\x03' },
   { label: 'C-d', data: '\x04' },
   { label: 'C-z', data: '\x1a' },
