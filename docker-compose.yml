@@ -40,8 +40,7 @@ services:
       - /tmp/nebulide:/tmp
       - usr_local:/usr/local
       - ssh_keys:/root/.ssh
-      # Seed SSH keys from host (optional, read-only):
-      # - ~/.ssh:/root/.ssh-mount:ro
+      - ~/.ssh:/root/.ssh-mount:ro
 
   code-server:
     build:
