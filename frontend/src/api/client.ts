@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { useAuthStore } from '../store/authStore';
+import { refreshTokenOnce } from './tokenRefresh';
 
 const api = axios.create({
   baseURL: '/api',
@@ -28,15 +28,12 @@ api.interceptors.response.use(
       const refreshToken = localStorage.getItem('refresh_token');
       if (refreshToken) {
         try {
-          const { data } = await axios.post('/api/auth/refresh', {
-            refresh_token: refreshToken,
-          });
-          console.log('[AUTH] Token refresh SUCCESS');
-          localStorage.setItem('access_token', data.access_token);
-          localStorage.setItem('refresh_token', data.refresh_token);
-          useAuthStore.getState().loadFromStorage(); // keep Zustand store in sync
-          originalRequest.headers.Authorization = `Bearer ${data.access_token}`;
-          return api(originalRequest);
+          const newToken = await refreshTokenOnce();
+          if (newToken) {
+            originalRequest.headers.Authorization = `Bearer ${newToken}`;
+            return api(originalRequest);
+          }
+          throw new Error('refresh returned null');
         } catch (refreshErr) {
           console.error('[AUTH] Token refresh FAILED — redirecting to /login', refreshErr);
           localStorage.removeItem('access_token');

@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"sync"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/gorilla/websocket"
@@ -12,6 +13,11 @@ import (
 	"nebulide/config"
 	"nebulide/services"
 	"nebulide/utils"
+)
+
+const (
+	wsPingInterval = 30 * time.Second
+	wsPongTimeout  = 45 * time.Second
 )
 
 var termUpgrader = websocket.Upgrader{
@@ -102,6 +108,28 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 	log.Printf("[Terminal] calling Attach key=%s", sessionKey)
 	termSession.Attach(writer, conn)
 	log.Printf("[Terminal] Attach done key=%s", sessionKey)
+
+	// Ping/pong keepalive — detect dead clients, prevent proxy timeouts.
+	// WriteControl is concurrency-safe (doesn't conflict with pumpOutput writes).
+	conn.SetReadDeadline(time.Now().Add(wsPongTimeout))
+	conn.SetPongHandler(func(string) error {
+		conn.SetReadDeadline(time.Now().Add(wsPongTimeout))
+		return nil
+	})
+	go func() {
+		ticker := time.NewTicker(wsPingInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second)); err != nil {
+					return
+				}
+			case <-termSession.Done:
+				return
+			}
+		}
+	}()
 
 	// Close WS when shell exits (e.g. Ctrl+D / exit) so frontend gets onclose and reconnects
 	go func() {

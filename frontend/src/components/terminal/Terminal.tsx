@@ -410,10 +410,24 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
     });
     resizeObserver.observe(el);
 
+    // Reconnect when page becomes visible (phone woke from sleep/background).
+    // setTimeout timers are frozen during background — this ensures immediate reconnect.
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        const sess = sessions.get(instanceId);
+        if (sess && (!sess.ws || sess.ws.readyState > WebSocket.OPEN)) {
+          sess.reconnectAttempts = 0; // reset — this is a fresh wake
+          connectWs(instanceId);
+        }
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
     return () => {
       console.log(`[Terminal] useEffect CLEANUP id=${instanceIdRef.current} persistent=${persistentRef.current}`);
       cancelAnimationFrame(rafId);
       resizeObserver.disconnect();
+      document.removeEventListener('visibilitychange', onVisibilityChange);
       // Destroy session on unmount only for non-persistent (detached) terminals
       if (!persistentRef.current) {
         destroyTerminalSession(instanceIdRef.current);
@@ -695,7 +709,8 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
                 key={k.label}
                 type="button"
                 className="terminal-toolbar-btn"
-                onPointerDown={(e) => { e.preventDefault(); sendKey(k.data); }}
+                onPointerDown={(e) => e.preventDefault()}
+                onClick={() => sendKey(k.data)}
               >
                 {k.label}
               </button>
@@ -704,7 +719,8 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
             <button
               type="button"
               className={`terminal-toolbar-btn${copyMode ? ' active' : ''}`}
-              onPointerDown={(e) => { e.preventDefault(); toggleCopyMode(); }}
+              onPointerDown={(e) => e.preventDefault()}
+              onClick={toggleCopyMode}
             >
               f-C
             </button>
@@ -715,37 +731,37 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
       {/* Row 2: copy & selection (visible when copyMode && toolbarOpen) */}
       {copyMode && toolbarOpen && (
         <div className="terminal-toolbar">
-          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => { e.preventDefault(); moveSelBoundary('start', -1); }}>
+          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => moveSelBoundary('start', -1)}>
             S{'\u2191'}
           </button>
-          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => { e.preventDefault(); moveSelBoundary('start', 1); }}>
+          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => moveSelBoundary('start', 1)}>
             S{'\u2193'}
           </button>
           <div className="terminal-toolbar-sep" />
-          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => { e.preventDefault(); moveSelBoundary('end', -1); }}>
+          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => moveSelBoundary('end', -1)}>
             E{'\u2191'}
           </button>
-          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => { e.preventDefault(); moveSelBoundary('end', 1); }}>
+          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => moveSelBoundary('end', 1)}>
             E{'\u2193'}
           </button>
           <div className="terminal-toolbar-sep" />
-          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => { e.preventDefault(); copySelection(); }}>
+          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={copySelection}>
             Copy
           </button>
-          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => { e.preventDefault(); selectAllLines(); }}>
+          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={selectAllLines}>
             All
           </button>
-          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => { e.preventDefault(); exitCopyMode(); }}>
+          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={exitCopyMode}>
             {'\u00d7'}
           </button>
           <div className="terminal-toolbar-sep" />
-          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => { e.preventDefault(); copyLines(5); }}>
+          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => copyLines(5)}>
             Cp5
           </button>
-          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => { e.preventDefault(); copyLines(30); }}>
+          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => copyLines(30)}>
             Cp30
           </button>
-          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => { e.preventDefault(); copyLines(0); }}>
+          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => copyLines(0)}>
             CpAll
           </button>
         </div>

@@ -2,6 +2,8 @@
 
 Self-hosted web interface wrapping Claude Code CLI. Go backend + React frontend, deployed via Docker on VPS.
 
+**Server:** IP `45.156.20.105`, SSH port `45191`, deploy path `/opt/nebulide`
+
 ## Tech Stack
 
 - **Backend:** Go 1.24 / Gin / GORM / PostgreSQL 16 / gorilla/websocket / go-pty
