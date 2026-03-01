@@ -13,6 +13,8 @@ func Migrate() {
 		&models.ChatSession{},
 		&models.Message{},
 		&models.RefreshToken{},
+		&models.Invite{},
+		&models.WorkspaceSession{},
 	)
 	if err != nil {
 		log.Fatalf("Failed to run migrations: %v", err)

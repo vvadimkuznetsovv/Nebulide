@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { convertToHtml } from 'mammoth';
+import DOMPurify from 'dompurify';
 import { readFileRaw } from '../../api/files';
 
 interface DocxViewerProps {
@@ -21,7 +22,16 @@ export default function DocxViewer({ filePath }: DocxViewerProps) {
       .then(({ data }) => convertToHtml({ arrayBuffer: data }))
       .then((result) => {
         if (cancelled) return;
-        setHtml(result.value);
+        const clean = DOMPurify.sanitize(result.value, {
+          ALLOWED_TAGS: [
+            'p', 'br', 'b', 'i', 'u', 'em', 'strong', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+            'ul', 'ol', 'li', 'table', 'thead', 'tbody', 'tr', 'td', 'th',
+            'a', 'img', 'span', 'div', 'blockquote', 'pre', 'code', 'sup', 'sub',
+          ],
+          ALLOWED_ATTR: ['href', 'src', 'alt', 'title', 'class', 'style', 'colspan', 'rowspan'],
+          ALLOW_DATA_ATTR: false,
+        });
+        setHtml(clean);
       })
       .catch((err: unknown) => {
         if (cancelled) return;

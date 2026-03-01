@@ -96,6 +96,20 @@ interface WorkspaceState {
   // UI
   setSidebarOpen: (open: boolean) => void;
   setToolbarOpen: (open: boolean) => void;
+
+  // Workspace snapshot
+  getWorkspaceSnapshot: () => WorkspaceSnapshot;
+  restoreFromSnapshot: (snap: WorkspaceSnapshot) => Record<string, string>;
+}
+
+export interface WorkspaceSnapshot {
+  openTabs: Array<{ filePath: string }>;
+  activeTabIndex: number | null;
+  tempTabIndex: number | null;
+  detachedEditors: Array<{ filePath: string; panelId: string }>;
+  fileTreeVisible: boolean;
+  sidebarOpen: boolean;
+  toolbarOpen: boolean;
 }
 
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
@@ -348,4 +362,68 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
 
   setSidebarOpen: (open) => set({ sidebarOpen: open }),
   setToolbarOpen: (open) => set({ toolbarOpen: open }),
+
+  getWorkspaceSnapshot: () => {
+    const state = get();
+    const activeIdx = state.activeTabId
+      ? state.openTabs.findIndex((t) => t.id === state.activeTabId)
+      : null;
+    const tempIdx = state.tempTabId
+      ? state.openTabs.findIndex((t) => t.id === state.tempTabId)
+      : null;
+    return {
+      openTabs: state.openTabs.map((t) => ({ filePath: t.filePath })),
+      activeTabIndex: activeIdx !== -1 ? activeIdx : null,
+      tempTabIndex: tempIdx !== -1 ? tempIdx : null,
+      detachedEditors: Object.entries(state.detachedEditors).map(([tabId, info]) => ({
+        filePath: info.filePath,
+        panelId: `editor:${tabId}`,
+      })),
+      fileTreeVisible: state.fileTreeVisible,
+      sidebarOpen: state.sidebarOpen,
+      toolbarOpen: state.toolbarOpen,
+    };
+  },
+
+  restoreFromSnapshot: (snap) => {
+    // Generate new tab IDs for restored tabs
+    const newTabs: EditorTab[] = snap.openTabs.map((t) => ({
+      id: generateTabId(),
+      filePath: t.filePath,
+      modified: false,
+    }));
+
+    const activeTabId = snap.activeTabIndex != null && newTabs[snap.activeTabIndex]
+      ? newTabs[snap.activeTabIndex].id
+      : newTabs.length > 0 ? newTabs[0].id : null;
+
+    const tempTabId = snap.tempTabIndex != null && newTabs[snap.tempTabIndex]
+      ? newTabs[snap.tempTabIndex].id
+      : null;
+
+    // Restore detached editors with new tab IDs
+    const detachedEditors: Record<string, DetachedEditorInfo> = {};
+    const panelIdMapping: Record<string, string> = {};
+    for (const de of snap.detachedEditors) {
+      const newTabId = generateTabId();
+      detachedEditors[newTabId] = { filePath: de.filePath, modified: false };
+      panelIdMapping[de.panelId] = `editor:${newTabId}`;
+    }
+
+    set({
+      openTabs: newTabs,
+      activeTabId,
+      tempTabId,
+      detachedEditors,
+      fileTreeVisible: snap.fileTreeVisible,
+      sidebarOpen: snap.sidebarOpen,
+      toolbarOpen: snap.toolbarOpen,
+      previewTabs: [],
+      activePreviewTabId: null,
+      previewUrl: null,
+      previewFilePath: null,
+    });
+
+    return panelIdMapping;
+  },
 }));

@@ -21,6 +21,8 @@ import {
   insertPanelAtEdge,
   insertPanelIntoNode,
   getAllPanelIds,
+  remapPanelIds,
+  remapVisibility,
 } from './layoutUtils';
 import { useWorkspaceStore } from './workspaceStore';
 import { destroyTerminalSession } from '../components/terminal/Terminal';
@@ -80,6 +82,16 @@ interface LayoutState {
   setMobilePanels: (panels: PanelId[]) => void;
   openMobilePanel: (panel: PanelId, position: 'top' | 'bottom') => void;
   closeMobilePanel: (panel: PanelId) => void;
+
+  // Workspace snapshot
+  getLayoutSnapshot: () => LayoutSnapshot;
+  restoreLayoutFromSnapshot: (snap: LayoutSnapshot, panelIdMapping?: Record<string, string>) => void;
+}
+
+export interface LayoutSnapshot {
+  layout: LayoutNode;
+  visibility: Record<string, boolean>;
+  mobilePanels: PanelId[];
 }
 
 const STORAGE_KEY = 'nebulide-layout-v6';
@@ -462,6 +474,42 @@ export const useLayoutStore = create<LayoutState>((set) => ({
       const next = { ...state, layout: newLayout, visibility: newVis, mobilePanels: newPanels };
       saveToStorage(next);
       return { layout: newLayout, visibility: newVis, mobilePanels: newPanels };
+    });
+  },
+
+  getLayoutSnapshot: () => {
+    const state = useLayoutStore.getState();
+    return {
+      layout: cloneTree(state.layout),
+      visibility: { ...state.visibility },
+      mobilePanels: [...state.mobilePanels],
+    };
+  },
+
+  restoreLayoutFromSnapshot: (snap, panelIdMapping) => {
+    set((state) => {
+      // Destroy all existing detached terminals
+      for (const panelId of getAllPanelIds(state.layout)) {
+        if (isDetachedTerminal(panelId)) {
+          const instanceId = getDetachedTerminalId(panelId);
+          if (instanceId) destroyTerminalSession(instanceId);
+        }
+      }
+
+      // Remap panel IDs if mapping provided (detached editors get new tab IDs)
+      let layout = cloneTree(snap.layout);
+      let visibility = { ...snap.visibility } as PanelVisibility;
+      let mobilePanels = [...snap.mobilePanels];
+
+      if (panelIdMapping && Object.keys(panelIdMapping).length > 0) {
+        layout = remapPanelIds(layout, panelIdMapping);
+        visibility = remapVisibility(visibility, panelIdMapping) as PanelVisibility;
+        mobilePanels = mobilePanels.map((p) => (panelIdMapping[p] || p) as PanelId);
+      }
+
+      const next = { ...state, layout, visibility, mobilePanels };
+      saveToStorage(next);
+      return { layout, visibility, mobilePanels };
     });
   },
 }));

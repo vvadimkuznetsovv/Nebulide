@@ -25,3 +25,6 @@ export const getMe = () =>
 
 export const changePassword = (currentPassword: string, newPassword: string) =>
   api.post('/auth/change-password', { current_password: currentPassword, new_password: newPassword });
+
+export const register = (username: string, password: string, inviteCode: string) =>
+  api.post('/auth/register', { username, password, invite_code: inviteCode });

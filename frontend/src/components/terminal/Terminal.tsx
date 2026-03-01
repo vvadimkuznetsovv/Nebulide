@@ -51,6 +51,7 @@ const sessions = new Map<string, TermSession>();
 
 const MAX_RECONNECT = 5;
 const RECONNECT_DELAY = 800;
+const RECONNECT_DELAY_BACKEND_DOWN = 3000; // longer delay when backend is unreachable
 
 /** Unique ID per browser tab — so two tabs/devices get separate PTY sessions */
 function getTabSessionId(): string {
@@ -187,6 +188,15 @@ async function connectWs(instanceId: string): Promise<void> {
         ws.send(JSON.stringify({ type: 'resize', rows: dims.rows, cols: dims.cols }));
       }
     } catch { /* xterm may not be attached yet */ }
+
+    // Force xterm repaint on next frame — ensures prompt (user@host:path$) is visible
+    // after reconnect. Without this, buffered content isn't painted until a resize event.
+    requestAnimationFrame(() => {
+      try {
+        session.fitAddon.fit();
+        session.xterm.refresh(0, session.xterm.rows - 1);
+      } catch { /* ignore */ }
+    });
   };
 
   ws.onmessage = (event) => {
@@ -214,24 +224,19 @@ async function connectWs(instanceId: string): Promise<void> {
     }
     session.ws = null;
 
-    // Connection was rejected before opening (401, network error) — don't reconnect
-    if (!opened) {
-      console.log(`[Terminal] ws.onclose REJECTED (never opened) id=${instanceId}`);
-      session.xterm.write(_red('[Connection rejected — check auth/backend]') + '\r\n');
-      session.xterm.write(_blue('[Right-click \u2192 Reconnect]') + '\r\n');
-      session.notifyRerender?.();
-      return;
-    }
-
     if (!sessions.has(instanceId)) return; // session was destroyed
 
     if (session.reconnectAttempts < MAX_RECONNECT) {
       session.reconnectAttempts++;
-      session.xterm.write(_yellow(`[Shell exited \u2014 reconnecting ${session.reconnectAttempts}/${MAX_RECONNECT}...]`) + '\r\n');
+      const delay = opened ? RECONNECT_DELAY : RECONNECT_DELAY_BACKEND_DOWN;
+      const label = opened
+        ? `[Shell exited \u2014 reconnecting ${session.reconnectAttempts}/${MAX_RECONNECT}...]`
+        : `[Backend unreachable \u2014 retrying ${session.reconnectAttempts}/${MAX_RECONNECT}...]`;
+      session.xterm.write(_yellow(label) + '\r\n');
       session.reconnectTimer = window.setTimeout(() => {
         session.reconnectTimer = null;
         if (sessions.has(instanceId)) connectWs(instanceId);
-      }, RECONNECT_DELAY);
+      }, delay);
     } else {
       session.xterm.write(_red('[Disconnected — max retries reached]') + '\r\n');
       session.xterm.write(_blue('[Right-click \u2192 Reconnect]') + '\r\n');
@@ -276,6 +281,18 @@ function getOrCreateSession(instanceId: string): TermSession {
     connectWs(instanceId);
   }
   return session;
+}
+
+/** Get all active terminal instance IDs (for workspace snapshot). */
+export function getActiveTerminalInstanceIds(): string[] {
+  return Array.from(sessions.keys());
+}
+
+/** Destroy all terminal sessions (for workspace switching). */
+export function destroyAllTerminalSessions(): void {
+  for (const instanceId of Array.from(sessions.keys())) {
+    destroyTerminalSession(instanceId);
+  }
 }
 
 /** Destroy a terminal session: close WS, dispose xterm, remove from Map.

@@ -18,19 +18,22 @@ import (
 	"nebulide/utils"
 )
 
-var chatUpgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-	CheckOrigin:     func(r *http.Request) bool { return true },
-}
-
 type ChatHandler struct {
-	cfg     *config.Config
-	claude  *services.ClaudeService
+	cfg      *config.Config
+	claude   *services.ClaudeService
+	upgrader websocket.Upgrader
 }
 
 func NewChatHandler(cfg *config.Config, claude *services.ClaudeService) *ChatHandler {
-	return &ChatHandler{cfg: cfg, claude: claude}
+	return &ChatHandler{
+		cfg:    cfg,
+		claude: claude,
+		upgrader: websocket.Upgrader{
+			ReadBufferSize:  1024,
+			WriteBufferSize: 1024,
+			CheckOrigin:     checkWSOrigin(cfg.AllowedOrigins),
+		},
+	}
 }
 
 type chatMessage struct {
@@ -68,7 +71,7 @@ func (h *ChatHandler) HandleWebSocket(c *gin.Context) {
 		return
 	}
 
-	conn, err := chatUpgrader.Upgrade(c.Writer, c.Request, nil)
+	conn, err := h.upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		log.Printf("WebSocket upgrade error: %v", err)
 		return

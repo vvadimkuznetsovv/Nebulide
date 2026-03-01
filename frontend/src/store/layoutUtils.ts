@@ -468,6 +468,35 @@ export function getAllPanelIds(tree: LayoutNode): PanelId[] {
   return tree.children.flatMap(getAllPanelIds);
 }
 
+// Remap panel IDs in a layout tree according to a mapping (old → new).
+// Used when restoring workspace snapshots — detached editor panel IDs change
+// because tab IDs are regenerated.
+export function remapPanelIds(
+  node: LayoutNode,
+  mapping: Record<string, string>,
+): LayoutNode {
+  if (node.type === 'panel') {
+    const newPanelIds = node.panelIds.map((id) => (mapping[id] || id) as PanelId);
+    return { ...node, panelIds: newPanelIds };
+  }
+  return {
+    ...node,
+    children: node.children.map((child) => remapPanelIds(child, mapping)),
+  };
+}
+
+// Remap keys in a visibility Record according to a mapping.
+export function remapVisibility(
+  vis: Record<string, boolean>,
+  mapping: Record<string, string>,
+): Record<string, boolean> {
+  const result: Record<string, boolean> = {};
+  for (const [key, val] of Object.entries(vis)) {
+    result[mapping[key] || key] = val;
+  }
+  return result;
+}
+
 // Update sizes for a specific group node
 export function updateGroupSizes(tree: LayoutNode, groupId: string, sizes: number[]): LayoutNode {
   if (tree.type === 'panel') return tree;

@@ -281,7 +281,14 @@ func (h *FilesHandler) ReadRaw(c *gin.Context) {
 	}
 
 	c.Header("Content-Type", contentType)
-	c.Header("Content-Disposition", fmt.Sprintf(`inline; filename="%s"`, filepath.Base(fullPath)))
+	filename := filepath.Base(fullPath)
+	sanitized := strings.Map(func(r rune) rune {
+		if r == '"' || r == '\\' || r == '\n' || r == '\r' {
+			return '_'
+		}
+		return r
+	}, filename)
+	c.Header("Content-Disposition", fmt.Sprintf(`inline; filename="%s"`, sanitized))
 	c.File(fullPath)
 }
 

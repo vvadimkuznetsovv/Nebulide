@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useState, useEffect } from 'react';
 import {
   DndContext,
   DragOverlay,
@@ -15,6 +15,8 @@ import { useAuth } from '../hooks/useAuth';
 import { useLayoutStore, type PanelId } from '../store/layoutStore';
 import { findPanelNode, isDetachedEditor } from '../store/layoutUtils';
 import { useWorkspaceStore } from '../store/workspaceStore';
+import { useWorkspaceSessionStore } from '../store/workspaceSessionStore';
+import { useSyncWS } from '../hooks/useSyncWS';
 import Sidebar from '../components/layout/Sidebar';
 import LayoutRenderer from '../components/layout/LayoutRenderer';
 import EdgeDropZone from '../components/layout/EdgeDropZone';
@@ -41,6 +43,25 @@ const touchSnapCenter: Modifier = ({ activatorEvent, draggingNodeRect, overlayNo
 
 export default function Workspace() {
   useAuth();
+  useSyncWS();
+
+  // Initialize workspace sessions on mount + auto-save periodically
+  const initSession = useWorkspaceSessionStore((s) => s.initSession);
+  const saveCurrentSession = useWorkspaceSessionStore((s) => s.saveCurrentSession);
+
+  useEffect(() => {
+    initSession();
+  }, [initSession]);
+
+  useEffect(() => {
+    const interval = setInterval(saveCurrentSession, 30_000);
+    const handleBeforeUnload = () => { saveCurrentSession(); };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [saveCurrentSession]);
 
   const {
     layout,
@@ -201,17 +222,7 @@ export default function Workspace() {
 
   return (
     <div className="h-full relative overflow-hidden">
-      {/* === Lava lamp background === */}
-      <svg xmlns="http://www.w3.org/2000/svg" width="0" height="0" style={{ position: 'absolute', overflow: 'hidden' }}>
-        <defs>
-          <filter id="glass-distortion" x="-10%" y="-10%" width="120%" height="120%">
-            <feTurbulence type="fractalNoise" baseFrequency="0.006 0.006" numOctaves="3" seed="42" result="noise" />
-            <feGaussianBlur in="noise" stdDeviation="2.5" result="blurred" />
-            <feDisplacementMap in="SourceGraphic" in2="blurred" scale="120" xChannelSelector="R" yChannelSelector="G" />
-          </filter>
-        </defs>
-      </svg>
-
+      {/* === Lava lamp background (6 blobs for desktop perf, mobile hides 5-6 too) === */}
       <div className="lava-lamp">
         <div className="lava-blob lava-blob-1" />
         <div className="lava-blob lava-blob-2" />
@@ -219,8 +230,6 @@ export default function Workspace() {
         <div className="lava-blob lava-blob-4" />
         <div className="lava-blob lava-blob-5" />
         <div className="lava-blob lava-blob-6" />
-        <div className="lava-blob lava-blob-7" />
-        <div className="lava-blob lava-blob-8" />
         <div className="lava-glow" />
       </div>
 

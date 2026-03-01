@@ -4,6 +4,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -24,6 +25,9 @@ type Config struct {
 
 	ClaudeAllowedTools string
 	ClaudeWorkingDir   string
+
+	RedisURL       string
+	AllowedOrigins []string
 
 	AdminUsername string
 	AdminPassword string
@@ -48,6 +52,9 @@ func Load() *Config {
 
 		ClaudeAllowedTools: getEnv("CLAUDE_ALLOWED_TOOLS", "Read,Edit,Write,Bash,Glob,Grep"),
 		ClaudeWorkingDir:   getEnv("CLAUDE_WORKING_DIR", defaultWorkingDir()),
+
+		RedisURL:       getEnv("REDIS_URL", "localhost:6379"),
+		AllowedOrigins: parseOrigins(getEnv("ALLOWED_ORIGINS", defaultOrigins())),
 
 		AdminUsername: getEnv("ADMIN_USERNAME", "admin"),
 		AdminPassword: getEnv("ADMIN_PASSWORD", ""),
@@ -105,4 +112,23 @@ func parseDuration(s string) time.Duration {
 		return 15 * time.Minute
 	}
 	return d
+}
+
+func defaultOrigins() string {
+	if os.Getenv("GIN_MODE") != "release" {
+		return "https://nebulide.ru,http://localhost:5173,http://localhost:8080"
+	}
+	return "https://nebulide.ru"
+}
+
+func parseOrigins(s string) []string {
+	parts := strings.Split(s, ",")
+	origins := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			origins = append(origins, p)
+		}
+	}
+	return origins
 }

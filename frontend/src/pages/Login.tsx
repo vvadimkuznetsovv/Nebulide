@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { login, totpVerify } from '../api/auth';
 import { useAuthStore } from '../store/authStore';
 import toast from 'react-hot-toast';
@@ -110,25 +110,7 @@ export default function Login() {
   return (
     <div style={{ minHeight: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', position: 'relative', overflow: 'hidden' }}>
 
-      {/* SVG Glass Distortion Filters (Chromium only) */}
-      <svg xmlns="http://www.w3.org/2000/svg" width="0" height="0" style={{ position: 'absolute', overflow: 'hidden' }}>
-        <defs>
-          {/* Desktop — strong refraction */}
-          <filter id="glass-distortion" x="-10%" y="-10%" width="120%" height="120%">
-            <feTurbulence type="fractalNoise" baseFrequency="0.006 0.006" numOctaves="3" seed="42" result="noise" />
-            <feGaussianBlur in="noise" stdDeviation="2.5" result="blurred" />
-            <feDisplacementMap in="SourceGraphic" in2="blurred" scale="120" xChannelSelector="R" yChannelSelector="G" />
-          </filter>
-          {/* Mobile — softer refraction */}
-          <filter id="glass-distortion-mobile" x="-10%" y="-10%" width="120%" height="120%">
-            <feTurbulence type="fractalNoise" baseFrequency="0.008 0.008" numOctaves="2" seed="42" result="noise" />
-            <feGaussianBlur in="noise" stdDeviation="3" result="blurred" />
-            <feDisplacementMap in="SourceGraphic" in2="blurred" scale="40" xChannelSelector="R" yChannelSelector="G" />
-          </filter>
-        </defs>
-      </svg>
-
-      {/* LAVA LAMP — 8 sharp blobs */}
+      {/* LAVA LAMP — 6 blobs (perf-optimized) */}
       <div className="lava-lamp">
         <div className="lava-blob lava-blob-1" />
         <div className="lava-blob lava-blob-2" />
@@ -136,14 +118,6 @@ export default function Login() {
         <div className="lava-blob lava-blob-4" />
         <div className="lava-blob lava-blob-5" />
         <div className="lava-blob lava-blob-6" />
-        <div className="lava-blob lava-blob-7" />
-        <div className="lava-blob lava-blob-8" />
-        {/* === NEW BLOBS — раскомментировать если нужны ===
-        <div className="lava-blob lava-blob-9" />
-        <div className="lava-blob lava-blob-10" />
-        <div className="lava-blob lava-blob-11" />
-        <div className="lava-blob lava-blob-12" />
-        === END NEW BLOBS === */}
         <div className="lava-glow" />
       </div>
 
@@ -202,6 +176,13 @@ export default function Login() {
                 style={{ width: '100%', padding: '18px', borderRadius: '9999px', fontSize: '16px', fontWeight: 700, letterSpacing: '0.02em' }}>
                 {loading ? 'Signing in...' : 'Sign In'}
               </button>
+              <div style={{ textAlign: 'center', marginTop: '16px' }}>
+                <Link to="/register" style={{ fontSize: '14px', color: 'rgba(255,255,255,0.45)', textDecoration: 'none', fontWeight: 500, transition: 'color 0.2s' }}
+                  onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--accent-bright)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.45)'; }}>
+                  Have an invite? Register
+                </Link>
+              </div>
             </form>
           ) : (
             <form onSubmit={handleTotp} style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>

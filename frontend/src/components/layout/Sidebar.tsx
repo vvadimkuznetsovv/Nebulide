@@ -1,6 +1,7 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useAuthStore } from '../../store/authStore';
 import { useLayoutStore } from '../../store/layoutStore';
+import { useWorkspaceSessionStore } from '../../store/workspaceSessionStore';
 import { logout, totpSetup, totpConfirm, changePassword } from '../../api/auth';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
@@ -17,7 +18,14 @@ const allPanels: BasePanelId[] = ['chat', 'files', 'editor', 'preview', 'termina
 
 export default function Sidebar({ isOpen, onClose }: SidebarProps) {
   const { visibility, toggleVisibility, openNewTerminal } = useLayoutStore();
+  const { sessions: wsSessions, activeSessionId, switchSession, createSession, renameSession, deleteSession } = useWorkspaceSessionStore();
   const [showSettings, setShowSettings] = useState(false);
+  const [newWsName, setNewWsName] = useState('');
+  const [showNewWsInput, setShowNewWsInput] = useState(false);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+  const newWsInputRef = useRef<HTMLInputElement>(null);
+  const renameInputRef = useRef<HTMLInputElement>(null);
   const [showTotpSetup, setShowTotpSetup] = useState(false);
   const [totpUrl, setTotpUrl] = useState('');
   const [totpSecret, setTotpSecret] = useState('');
@@ -199,6 +207,157 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
             );
           })}
         </div>
+
+        <div className="glass-divider mx-3" />
+
+        {/* Workspace Sessions */}
+        {!showSettings && (
+          <div className="px-3 py-2">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)', fontSize: '10px', letterSpacing: '0.1em' }}>
+                Workspaces
+              </span>
+              <button
+                type="button"
+                onClick={() => { setShowNewWsInput(true); setTimeout(() => newWsInputRef.current?.focus(), 50); }}
+                className="w-6 h-6 rounded-lg flex items-center justify-center transition-all duration-200"
+                style={{
+                  background: 'rgba(255, 255, 255, 0.04)',
+                  border: '1px solid rgba(255, 255, 255, 0.06)',
+                  color: 'rgba(255, 255, 255, 0.4)',
+                }}
+                title="New workspace"
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                  <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+                </svg>
+              </button>
+            </div>
+
+            {/* New workspace input */}
+            {showNewWsInput && (
+              <div className="mb-2">
+                <div className="rounded-xl overflow-hidden" style={{ background: 'rgba(0,0,0,0.35)', border: '1px solid var(--glass-border)' }}>
+                  <input
+                    ref={newWsInputRef}
+                    type="text"
+                    value={newWsName}
+                    onChange={(e) => setNewWsName(e.target.value)}
+                    placeholder="Workspace name"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && newWsName.trim()) {
+                        createSession(newWsName.trim());
+                        setNewWsName('');
+                        setShowNewWsInput(false);
+                      }
+                      if (e.key === 'Escape') {
+                        setNewWsName('');
+                        setShowNewWsInput(false);
+                      }
+                    }}
+                    onBlur={() => { setNewWsName(''); setShowNewWsInput(false); }}
+                    style={{ width: '100%', padding: '8px 12px', fontSize: '12px', background: 'transparent', border: 'none', color: 'var(--text-primary)', outline: 'none' }}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Sessions list */}
+            <div className="space-y-1 max-h-48 overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
+              {wsSessions.map((ws) => {
+                const isActive = ws.id === activeSessionId;
+                return (
+                  <div
+                    key={ws.id}
+                    className="group flex items-center gap-2 px-2.5 py-2 rounded-xl cursor-pointer transition-all duration-200"
+                    style={{
+                      background: isActive ? 'rgba(127, 0, 255, 0.12)' : 'transparent',
+                      border: `1px solid ${isActive ? 'rgba(127, 0, 255, 0.25)' : 'transparent'}`,
+                    }}
+                    onClick={() => { if (!isActive) switchSession(ws.id); }}
+                    onContextMenu={(e) => {
+                      e.preventDefault();
+                      setRenamingId(ws.id);
+                      setRenameValue(ws.name);
+                      setTimeout(() => renameInputRef.current?.focus(), 50);
+                    }}
+                  >
+                    {/* Active indicator */}
+                    <div
+                      className="w-2 h-2 rounded-full flex-shrink-0"
+                      style={{
+                        background: isActive ? 'var(--accent-bright)' : 'rgba(255,255,255,0.15)',
+                        boxShadow: isActive ? '0 0 6px rgba(127,0,255,0.5)' : 'none',
+                      }}
+                    />
+
+                    {renamingId === ws.id ? (
+                      <input
+                        ref={renameInputRef}
+                        type="text"
+                        value={renameValue}
+                        onChange={(e) => setRenameValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && renameValue.trim()) {
+                            renameSession(ws.id, renameValue.trim());
+                            setRenamingId(null);
+                          }
+                          if (e.key === 'Escape') setRenamingId(null);
+                        }}
+                        onBlur={() => {
+                          if (renameValue.trim() && renameValue.trim() !== ws.name) {
+                            renameSession(ws.id, renameValue.trim());
+                          }
+                          setRenamingId(null);
+                        }}
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                          flex: 1, minWidth: 0, padding: '2px 4px', fontSize: '12px',
+                          background: 'rgba(0,0,0,0.4)', border: '1px solid var(--glass-border)',
+                          borderRadius: '6px', color: 'var(--text-primary)', outline: 'none',
+                        }}
+                      />
+                    ) : (
+                      <span
+                        className="text-xs font-medium truncate flex-1"
+                        style={{ color: isActive ? 'var(--accent-bright)' : 'rgba(255,255,255,0.6)' }}
+                      >
+                        {ws.name}
+                      </span>
+                    )}
+
+                    {/* Device tag */}
+                    {ws.device_tag && (
+                      <span className="text-xs flex-shrink-0" style={{ color: 'rgba(255,255,255,0.2)', fontSize: '10px' }}>
+                        {ws.device_tag}
+                      </span>
+                    )}
+
+                    {/* Delete button — only visible on hover, not for active session */}
+                    {!isActive && wsSessions.length > 1 && (
+                      <button
+                        type="button"
+                        className="opacity-0 group-hover:opacity-100 transition-opacity w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0"
+                        style={{ color: 'rgba(255,255,255,0.3)' }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (window.confirm(`Delete workspace "${ws.name}"?`)) {
+                            deleteSession(ws.id);
+                          }
+                        }}
+                        title="Delete workspace"
+                      >
+                        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                          <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                        </svg>
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         <div className="glass-divider mx-3" />
 

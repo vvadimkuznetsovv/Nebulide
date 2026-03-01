@@ -4,6 +4,7 @@ interface User {
   id: string;
   username: string;
   totp_enabled: boolean;
+  is_admin?: boolean;
 }
 
 interface AuthState {

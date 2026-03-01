@@ -25,16 +25,25 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
 
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 128mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+
   app:
     image: nebulide:latest
     build: .
     restart: unless-stopped
     depends_on:
       - postgres
+      - redis
     env_file:
       - .env
     environment:
       DB_HOST: postgres
+      REDIS_URL: redis:6379
     volumes:
       - /home/nebulide/workspace:/home/nebulide/workspace
       - /tmp/nebulide:/tmp
@@ -58,6 +67,7 @@ services:
       - /home/nebulide/workspace:/config/workspace
 
 volumes:
+  redis_data:
   postgres_data:
   usr_local:
   ssh_keys:

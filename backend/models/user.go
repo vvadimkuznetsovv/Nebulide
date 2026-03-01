@@ -13,6 +13,7 @@ type User struct {
 	PasswordHash string    `gorm:"size:255;not null" json:"-"`
 	TOTPSecret   string    `gorm:"size:64;not null" json:"-"`
 	TOTPEnabled  bool      `gorm:"default:false" json:"totp_enabled"`
+	IsAdmin      bool      `gorm:"default:false" json:"is_admin"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }

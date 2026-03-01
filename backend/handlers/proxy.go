@@ -54,7 +54,8 @@ func CodeServerAuthMiddleware(jwtSecret string) gin.HandlerFunc {
 		claims, err := utils.ParseToken(jwtSecret, tokenString)
 		if err != nil || claims.Partial {
 			// Clear stale cookie
-			c.SetCookie("nebulide-code-auth", "", -1, "/code", "", false, true)
+			c.SetSameSite(http.SameSiteLaxMode)
+			c.SetCookie("nebulide-code-auth", "", -1, "/code", "", true, true)
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid token"})
 			c.Abort()
 			return
@@ -65,7 +66,8 @@ func CodeServerAuthMiddleware(jwtSecret string) gin.HandlerFunc {
 		if setCookie {
 			longLived, err := utils.GenerateAccessToken(jwtSecret, claims.UserID, claims.Username, false, 7*24*time.Hour)
 			if err == nil {
-				c.SetCookie("nebulide-code-auth", longLived, 7*24*60*60, "/code", "", false, true)
+				c.SetSameSite(http.SameSiteLaxMode)
+				c.SetCookie("nebulide-code-auth", longLived, 7*24*60*60, "/code", "", true, true)
 			}
 		}
 

@@ -24,6 +24,9 @@ func main() {
 	database.Connect(cfg)
 	database.Migrate()
 
+	// Redis
+	database.ConnectRedis(cfg)
+
 	// Ensure workspace directory exists
 	log.Printf("Workspace: %s", cfg.ClaudeWorkingDir)
 	os.MkdirAll(cfg.ClaudeWorkingDir, 0755)
@@ -36,15 +39,20 @@ func main() {
 	terminalService := services.NewTerminalService()
 
 	// Handlers
-	authHandler := handlers.NewAuthHandler(cfg)
+	lockout := services.NewLoginLockout(database.RDB)
+	authHandler := handlers.NewAuthHandler(cfg, lockout)
 	sessionsHandler := handlers.NewSessionsHandler(cfg)
 	chatHandler := handlers.NewChatHandler(cfg, claudeService)
 	terminalHandler := handlers.NewTerminalHandler(cfg, terminalService)
 	filesHandler := handlers.NewFilesHandler(cfg)
+	inviteHandler := handlers.NewInviteHandler(cfg, lockout)
+	workspaceSessionsHandler := handlers.NewWorkspaceSessionsHandler(cfg)
+	syncHandler := handlers.NewSyncHandler(cfg)
 
 	// Router
 	r := gin.Default()
-	r.Use(middleware.CORS())
+	r.Use(middleware.SecurityHeaders())
+	r.Use(middleware.CORS(cfg))
 
 	// Rate limiter for auth endpoints
 	authLimiter := middleware.NewRateLimiter(10, 1*time.Minute)
@@ -60,6 +68,7 @@ func main() {
 	{
 		auth.POST("/login", authHandler.Login)
 		auth.POST("/refresh", authHandler.Refresh)
+		auth.POST("/register", inviteHandler.Register)
 	}
 
 	// Auth routes requiring partial token (pre-TOTP)
@@ -87,6 +96,18 @@ func main() {
 		protected.DELETE("/sessions/:id", sessionsHandler.Delete)
 		protected.GET("/sessions/:id/messages", sessionsHandler.Messages)
 
+		// Workspace sessions
+		protected.GET("/workspace-sessions/latest", workspaceSessionsHandler.Latest)
+		protected.GET("/workspace-sessions", workspaceSessionsHandler.List)
+		protected.POST("/workspace-sessions", workspaceSessionsHandler.Create)
+		protected.PUT("/workspace-sessions/:id", workspaceSessionsHandler.Update)
+		protected.DELETE("/workspace-sessions/:id", workspaceSessionsHandler.Delete)
+
+		// Invites (admin only — checked inside handler)
+		protected.POST("/admin/invites", inviteHandler.CreateInvite)
+		protected.GET("/admin/invites", inviteHandler.ListInvites)
+		protected.DELETE("/admin/invites/:id", inviteHandler.DeleteInvite)
+
 		// Files
 		protected.GET("/files", filesHandler.List)
 		protected.GET("/files/read", filesHandler.Read)
@@ -100,6 +121,7 @@ func main() {
 	// WebSocket routes (auth via query param)
 	r.GET("/ws/chat/:id", chatHandler.HandleWebSocket)
 	r.GET("/ws/terminal", terminalHandler.HandleWebSocket)
+	r.GET("/ws/sync", syncHandler.HandleWebSocket)
 
 	// Code-server reverse proxy (auth via ?token= query param or cookie)
 	codeGroup := r.Group("/code")
@@ -140,6 +162,7 @@ func seedAdminUser(cfg *config.Config) {
 	user := models.User{
 		Username:     cfg.AdminUsername,
 		PasswordHash: string(hash),
+		IsAdmin:      true,
 	}
 
 	if err := database.DB.Create(&user).Error; err != nil {

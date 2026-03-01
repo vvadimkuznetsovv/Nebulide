@@ -16,11 +16,12 @@ import (
 )
 
 type AuthHandler struct {
-	cfg *config.Config
+	cfg     *config.Config
+	lockout *services.LoginLockout
 }
 
-func NewAuthHandler(cfg *config.Config) *AuthHandler {
-	return &AuthHandler{cfg: cfg}
+func NewAuthHandler(cfg *config.Config, lockout *services.LoginLockout) *AuthHandler {
+	return &AuthHandler{cfg: cfg, lockout: lockout}
 }
 
 type loginRequest struct {
@@ -43,16 +44,37 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
+	// Check lockout BEFORE any DB/bcrypt work
+	if locked, remaining := h.lockout.IsLocked(c.Request.Context(), req.Username); locked {
+		c.JSON(http.StatusTooManyRequests, gin.H{
+			"error":               "Account temporarily locked due to too many failed attempts",
+			"retry_after_seconds": remaining,
+		})
+		return
+	}
+
+	// Dummy hash for constant-time response when user not found (prevents timing-based user enumeration)
+	dummyHash := []byte("$2a$10$0000000000000000000000uAAAAAAAAAAAAAAAAAAAAAAAAAAAA")
+
 	var user models.User
-	if err := database.DB.Where("username = ?", req.Username).First(&user).Error; err != nil {
+	userFound := database.DB.Where("username = ?", req.Username).First(&user).Error == nil
+
+	if !userFound {
+		// Run bcrypt anyway so response time is the same as for existing users
+		bcrypt.CompareHashAndPassword(dummyHash, []byte(req.Password))
+		h.lockout.RecordFailure(c.Request.Context(), req.Username)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
 		return
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(req.Password)); err != nil {
+		h.lockout.RecordFailure(c.Request.Context(), req.Username)
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
 		return
 	}
+
+	// Clear lockout on success
+	h.lockout.RecordSuccess(c.Request.Context(), req.Username)
 
 	if user.TOTPEnabled {
 		// Issue partial token — TOTP verification still needed
@@ -242,6 +264,7 @@ func (h *AuthHandler) Me(c *gin.Context) {
 		"id":           user.ID,
 		"username":     user.Username,
 		"totp_enabled": user.TOTPEnabled,
+		"is_admin":     user.IsAdmin,
 	})
 }
 

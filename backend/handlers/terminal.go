@@ -20,19 +20,22 @@ const (
 	wsPongTimeout  = 45 * time.Second
 )
 
-var termUpgrader = websocket.Upgrader{
-	ReadBufferSize:  1024,
-	WriteBufferSize: 1024,
-	CheckOrigin:     func(r *http.Request) bool { return true },
-}
-
 type TerminalHandler struct {
 	cfg      *config.Config
 	terminal *services.TerminalService
+	upgrader websocket.Upgrader
 }
 
 func NewTerminalHandler(cfg *config.Config, terminal *services.TerminalService) *TerminalHandler {
-	return &TerminalHandler{cfg: cfg, terminal: terminal}
+	return &TerminalHandler{
+		cfg:      cfg,
+		terminal: terminal,
+		upgrader: websocket.Upgrader{
+			ReadBufferSize:  1024,
+			WriteBufferSize: 1024,
+			CheckOrigin:     checkWSOrigin(cfg.AllowedOrigins),
+		},
+	}
 }
 
 type terminalMessage struct {
@@ -81,7 +84,7 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 	log.Printf("[Terminal] NEW WS connection: remote=%s instanceId=%q sessionKey=%s",
 		c.Request.RemoteAddr, instanceID, sessionKey)
 
-	conn, err := termUpgrader.Upgrade(c.Writer, c.Request, nil)
+	conn, err := h.upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
 		log.Printf("[Terminal] WS upgrade error: %v (key=%s)", err, sessionKey)
 		return
