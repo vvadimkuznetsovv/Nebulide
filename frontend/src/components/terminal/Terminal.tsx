@@ -54,9 +54,12 @@ const MAX_RECONNECT = 5;
 const RECONNECT_DELAY = 800;
 const RECONNECT_DELAY_BACKEND_DOWN = 3000; // longer delay when backend is unreachable
 
-/** Get workspace session ID — terminals are scoped to workspace, shared across devices */
+/** Get workspace session ID — terminals are scoped to workspace, shared across devices.
+ *  Falls back to localStorage (sync) when store hasn't loaded yet (race on first mount). */
 function getWorkspaceSessionId(): string {
-  return useWorkspaceSessionStore.getState().activeSessionId || 'default';
+  return useWorkspaceSessionStore.getState().activeSessionId
+    || localStorage.getItem('nebulide-active-workspace')
+    || 'default';
 }
 
 function createXterm(instanceId: string): TermSession {
