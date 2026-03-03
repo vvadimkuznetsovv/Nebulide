@@ -46,6 +46,24 @@ fi
 # Symlink nebulide user SSH → root SSH (same keys, avoids duplication)
 ln -sfn "$SSH_TARGET" /home/nebulide/.ssh
 
+# Claude CLI config — symlink /root/.claude.json into the persistent volume
+# so it survives container rebuilds (volume mounts /root/.claude/)
+CLAUDE_JSON="/root/.claude.json"
+CLAUDE_JSON_VOL="/root/.claude/.claude.json"
+if [ -f "$CLAUDE_JSON" ] && [ ! -L "$CLAUDE_JSON" ]; then
+  # First run after fix: move existing file into volume, then symlink
+  mv "$CLAUDE_JSON" "$CLAUDE_JSON_VOL"
+fi
+if [ -f "$CLAUDE_JSON_VOL" ]; then
+  ln -sfn "$CLAUDE_JSON_VOL" "$CLAUDE_JSON"
+  echo "[entrypoint] Claude CLI config symlinked."
+elif [ ! -e "$CLAUDE_JSON" ]; then
+  # No config yet — create empty one in volume and symlink
+  echo '{}' > "$CLAUDE_JSON_VOL"
+  ln -sfn "$CLAUDE_JSON_VOL" "$CLAUDE_JSON"
+  echo "[entrypoint] Claude CLI config created."
+fi
+
 # Ensure workspace ownership (volume mount may override)
 chown -R nebulide:nebulide /home/nebulide/workspace 2>/dev/null || true
 
