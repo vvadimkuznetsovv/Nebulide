@@ -506,13 +506,9 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
 
   restoreLayoutFromSnapshot: (snap, panelIdMapping) => {
     set((state) => {
-      // Destroy all existing detached terminals
-      for (const panelId of getAllPanelIds(state.layout)) {
-        if (isDetachedTerminal(panelId)) {
-          const instanceId = getDetachedTerminalId(panelId);
-          if (instanceId) destroyTerminalSession(instanceId);
-        }
-      }
+      // Don't explicitly destroy terminal sessions here — React's cleanup
+      // effect on unmount handles it. Destroying synchronously before layout
+      // update kills sessions that were just connected (race on page load).
 
       // Remap panel IDs if mapping provided (detached editors get new tab IDs)
       let layout = cloneTree(snap.layout);
