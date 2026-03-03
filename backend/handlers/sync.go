@@ -148,7 +148,11 @@ func (h *SyncHandler) HandleWebSocket(c *gin.Context) {
 			select {
 			case <-ticker.C:
 				if activeSessionID != "" && deviceID != "" {
-					switch h.refreshLock(ctx, activeSessionID, deviceID) {
+					result := h.refreshLock(ctx, activeSessionID, deviceID)
+					if result != lockOK {
+						log.Printf("[Sync] goroutine refreshLock: sessionID=%s deviceID=%s result=%d", activeSessionID, deviceID, result)
+					}
+					switch result {
 					case lockExpired:
 						sendJSON(syncServerMsg{
 							Type:      "workspace_unlocked",
@@ -176,6 +180,7 @@ func (h *SyncHandler) HandleWebSocket(c *gin.Context) {
 					cancel()
 					return
 				}
+				log.Printf("[Sync] pubsub→WS: deviceID=%s payload=%s", deviceID, msg.Payload)
 				mu.Lock()
 				err := conn.WriteMessage(websocket.TextMessage, []byte(msg.Payload))
 				mu.Unlock()
@@ -205,8 +210,10 @@ func (h *SyncHandler) HandleWebSocket(c *gin.Context) {
 		case "device_register":
 			deviceID = msg.DeviceID
 			deviceType = msg.DeviceType
+			log.Printf("[Sync] device_register: deviceID=%s type=%s sessionID=%s userID=%s", deviceID, deviceType, msg.SessionID, userID)
 
 			if msg.SessionID == "" {
+				log.Printf("[Sync] device_register: no sessionID, skipping lock")
 				sendJSON(syncServerMsg{Type: "register_ok"})
 				continue
 			}
@@ -218,14 +225,17 @@ func (h *SyncHandler) HandleWebSocket(c *gin.Context) {
 			}
 
 			existing, lockErr := h.acquireLock(ctx, msg.SessionID, userID, deviceID, deviceType)
+			log.Printf("[Sync] acquireLock: sessionID=%s deviceID=%s err=%v existing=%+v", msg.SessionID, deviceID, lockErr, existing)
 			if lockErr != nil {
 				// Another device holds the lock — check priority
 				dt := strings.ToLower(existing.DeviceType)
 				isMobileHolder := dt == "phone" || dt == "tablet"
+				log.Printf("[Sync] lock conflict: holder=%s holderType=%s isMobileHolder=%v", existing.DeviceID, existing.DeviceType, isMobileHolder)
 
 				if isMobileHolder {
 					// Mobile holds lock → block new device (mobile priority)
 					activeSessionID = msg.SessionID
+					log.Printf("[Sync] mobile priority: blocking new device %s", deviceID)
 					sendJSON(syncServerMsg{
 						Type:      "workspace_locked",
 						SessionID: msg.SessionID,
@@ -233,6 +243,7 @@ func (h *SyncHandler) HandleWebSocket(c *gin.Context) {
 					})
 				} else {
 					// Desktop holds lock → auto-takeover (last-device-wins)
+					log.Printf("[Sync] desktop holder: auto-takeover by %s", deviceID)
 					info := h.forceTakeover(ctx, msg.SessionID, userID, deviceID, deviceType)
 					activeSessionID = msg.SessionID
 					sendJSON(syncServerMsg{Type: "register_ok", SessionID: msg.SessionID})
@@ -240,13 +251,16 @@ func (h *SyncHandler) HandleWebSocket(c *gin.Context) {
 				}
 			} else {
 				activeSessionID = msg.SessionID
+				log.Printf("[Sync] lock acquired: sessionID=%s deviceID=%s", msg.SessionID, deviceID)
 				sendJSON(syncServerMsg{Type: "register_ok", SessionID: msg.SessionID})
 				h.publishLockEvent(userID, "workspace_locked", msg.SessionID, existing)
 			}
 
 		case "heartbeat":
 			if activeSessionID != "" && deviceID != "" {
-				switch h.refreshLock(ctx, activeSessionID, deviceID) {
+				result := h.refreshLock(ctx, activeSessionID, deviceID)
+				log.Printf("[Sync] heartbeat refreshLock: sessionID=%s deviceID=%s result=%d", activeSessionID, deviceID, result)
+				switch result {
 				case lockExpired:
 					sendJSON(syncServerMsg{
 						Type:      "workspace_unlocked",
@@ -269,6 +283,7 @@ func (h *SyncHandler) HandleWebSocket(c *gin.Context) {
 
 	// --- cleanup: release lock on disconnect ---
 	if activeSessionID != "" && deviceID != "" {
+		log.Printf("[Sync] cleanup: releasing lock sessionID=%s deviceID=%s", activeSessionID, deviceID)
 		h.releaseLock(context.Background(), activeSessionID, deviceID)
 		h.publishLockEvent(userID, "workspace_unlocked", activeSessionID, nil)
 	}
@@ -405,5 +420,6 @@ func (h *SyncHandler) publishLockEvent(userID, eventType, sessionID string, info
 		event["locked_by"] = info
 	}
 	data, _ := json.Marshal(event)
+	log.Printf("[Sync] publishLockEvent: event=%s sessionID=%s channel=ws:user:%s info=%+v", eventType, sessionID, userID, info)
 	database.RDB.Publish(context.Background(), "ws:user:"+userID, string(data))
 }

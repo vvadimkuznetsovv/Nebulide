@@ -20,12 +20,14 @@ export function useSyncWS() {
   useEffect(() => {
     activeSessionIdRef.current = activeSessionId;
     if (wsRef.current?.readyState === WebSocket.OPEN && activeSessionId) {
-      wsRef.current.send(JSON.stringify({
+      const reRegMsg = {
         type: 'device_register',
         device_id: getDeviceId(),
         device_type: detectDeviceType(),
         session_id: activeSessionId,
-      }));
+      };
+      console.log('[SyncWS] re-register (session changed):', reRegMsg);
+      wsRef.current.send(JSON.stringify(reRegMsg));
     }
   }, [activeSessionId]);
 
@@ -52,17 +54,20 @@ export function useSyncWS() {
       ws.onopen = () => {
         // Register device with current workspace
         const sessionId = activeSessionIdRef.current;
-        ws.send(JSON.stringify({
+        const regMsg = {
           type: 'device_register',
           device_id: getDeviceId(),
           device_type: detectDeviceType(),
           session_id: sessionId || '',
-        }));
+        };
+        console.log('[SyncWS] register sent:', regMsg);
+        ws.send(JSON.stringify(regMsg));
       };
 
       ws.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data);
+          console.log('[SyncWS] received:', msg);
           const store = useWorkspaceSessionStore.getState();
 
           switch (msg.type) {
