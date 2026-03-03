@@ -33,6 +33,8 @@ RUN mkdir -p /custom-cont-init.d && \
         '}' \
         'SETTINGS' \
         '' \
+        'chown -R abc:abc /config/data' \
+        '' \
         '# Install extensions: C++ themes (Visual Studio Dark - C++) + Claude Code' \
         '/app/code-server/bin/code-server --extensions-dir /config/extensions --install-extension ms-vscode.cpptools-themes --force 2>/dev/null' \
         '/app/code-server/bin/code-server --extensions-dir /config/extensions --install-extension anthropic.claude-code --force 2>/dev/null &' \

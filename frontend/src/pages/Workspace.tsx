@@ -87,9 +87,9 @@ export default function Workspace() {
 
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
 
-  // DnD sensors — unified for all screen sizes
+  // DnD sensors — mouse: distance-based (instant), touch: delay-based (allows native scroll)
   const mouseSensor = useSensor(MouseSensor, { activationConstraint: { distance: 8 } });
-  const touchSensor = useSensor(TouchSensor, { activationConstraint: { distance: 10 } });
+  const touchSensor = useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } });
   const sensors = useSensors(mouseSensor, touchSensor);
 
   // DnD handlers

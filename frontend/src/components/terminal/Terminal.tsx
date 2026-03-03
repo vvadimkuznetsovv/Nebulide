@@ -540,7 +540,8 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
         }
         break;
       }
-      case 'paste':
+      case 'paste': {
+        const hadFocus = document.activeElement === s?.xterm.textarea;
         clipboardReadWithRetry()
           .then((text) => {
             if (!s?.ws || s.ws.readyState !== WebSocket.OPEN) {
@@ -548,9 +549,11 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
               return;
             }
             if (text) s.ws.send(new TextEncoder().encode(text));
+            if (hadFocus) s?.xterm.focus();
           })
           .catch(() => toast.error('Failed to paste'));
         break;
+      }
       case 'select-all':
         s?.xterm.selectAll();
         break;
@@ -627,6 +630,7 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
 
   const pasteToTerminal = useCallback(() => {
     const s = sessions.get(instanceId);
+    const hadFocus = document.activeElement === s?.xterm.textarea;
     clipboardReadWithRetry()
       .then((text) => {
         if (!s?.ws || s.ws.readyState !== WebSocket.OPEN) {
@@ -634,6 +638,7 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
           return;
         }
         if (text) s.ws.send(new TextEncoder().encode(text));
+        if (hadFocus) s?.xterm.focus();
       })
       .catch(() => toast.error('Failed to paste'));
   }, [instanceId]);
@@ -922,6 +927,10 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
           </button>
           <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => sendKey('\x1b[6~')}>
             PgDn
+          </button>
+          <div className="terminal-toolbar-sep" />
+          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => sendKey('\r')}>
+            ↵
           </button>
         </div>
       )}

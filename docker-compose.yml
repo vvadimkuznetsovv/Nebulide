@@ -50,6 +50,7 @@ services:
       - usr_local:/usr/local
       - ssh_keys:/root/.ssh
       - ~/.ssh:/root/.ssh-mount:ro
+      - claude_data:/root/.claude
 
   code-server:
     build:
@@ -71,5 +72,6 @@ volumes:
   postgres_data:
   usr_local:
   ssh_keys:
+  claude_data:
   code-server-config:
   nginx_logs:

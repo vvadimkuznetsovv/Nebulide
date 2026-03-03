@@ -1842,6 +1842,9 @@ body { animation: scrollbarShimmer 8s ease-in-out infinite; }
 
 @media (max-width: 640px) {
   .terminal-search-bar input { width: 120px; }
+
+  /* Allow native horizontal scroll on tab bar — dnd-kit uses delay-based activation */
+  .panel-tab { touch-action: manipulation; }
 }
 
 .prose a { color: var(--accent) !important; }

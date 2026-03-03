@@ -1,4 +1,5 @@
 import { useState, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { useAuthStore } from '../../store/authStore';
 import { useLayoutStore } from '../../store/layoutStore';
 import { useWorkspaceSessionStore } from '../../store/workspaceSessionStore';
@@ -503,8 +504,8 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
         </div>
       </aside>
 
-      {/* TOTP Setup Modal */}
-      {showTotpSetup && (
+      {/* TOTP Setup Modal — portal to body to escape stacking context from sidebar's backdrop-filter */}
+      {showTotpSetup && createPortal(
         <div
           className="fixed inset-0 z-[100] flex items-center justify-center p-4"
           style={{ background: 'rgba(0, 0, 0, 0.7)', WebkitBackdropFilter: 'blur(8px)', backdropFilter: 'blur(8px)' }}
@@ -593,7 +594,8 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   );
