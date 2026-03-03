@@ -47,8 +47,8 @@ func Load() *Config {
 		DBName:     getEnv("DB_NAME", "nebulide"),
 
 		JWTSecret:        getEnv("JWT_SECRET", "dev-secret-change-in-production"),
-		JWTExpiry:        parseDuration(getEnv("JWT_EXPIRY", "15m")),
-		JWTRefreshExpiry: parseDuration(getEnv("JWT_REFRESH_EXPIRY", "168h")),
+		JWTExpiry:        parseDuration(getEnv("JWT_EXPIRY", "24h")),
+		JWTRefreshExpiry: parseDuration(getEnv("JWT_REFRESH_EXPIRY", "720h")),
 
 		ClaudeAllowedTools: getEnv("CLAUDE_ALLOWED_TOOLS", "Read,Edit,Write,Bash,Glob,Grep"),
 		ClaudeWorkingDir:   getEnv("CLAUDE_WORKING_DIR", defaultWorkingDir()),

@@ -18,10 +18,11 @@ api.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
 
-    // Skip redirect for auth endpoints — let the component handle the error
-    const isAuthRequest = originalRequest?.url?.startsWith('/auth/');
+    // Skip refresh only for login/refresh endpoints (prevents infinite loop).
+    // Other /auth/* endpoints (me, totp-setup, etc.) ARE protected and need refresh.
+    const skipRefresh = ['/auth/login', '/auth/refresh', '/auth/register'].includes(originalRequest?.url);
 
-    if (error.response?.status === 401 && !originalRequest._retry && !isAuthRequest) {
+    if (error.response?.status === 401 && !originalRequest._retry && !skipRefresh) {
       originalRequest._retry = true;
       console.warn('[AUTH] 401 received for', originalRequest.url, '— attempting token refresh');
 
