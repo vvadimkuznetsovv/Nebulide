@@ -107,6 +107,13 @@ func getEnv(key, fallback string) string {
 }
 
 func parseDuration(s string) time.Duration {
+	// Support "d" suffix for days (Go's time.ParseDuration only handles up to "h")
+	if strings.HasSuffix(s, "d") {
+		numStr := strings.TrimSuffix(s, "d")
+		if days, err := time.ParseDuration(numStr + "h"); err == nil {
+			return days * 24
+		}
+	}
 	d, err := time.ParseDuration(s)
 	if err != nil {
 		return 15 * time.Minute

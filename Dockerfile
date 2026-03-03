@@ -2,8 +2,8 @@ FROM alpine:3.20
 
 RUN apk add --no-cache ca-certificates tzdata bash curl sudo
 
-# Install Node.js, Git, SSH (required for Claude Code CLI + git ops)
-RUN apk add --no-cache nodejs npm git openssh-client
+# Install Node.js, Python, Git, SSH (required for Claude Code CLI + git ops)
+RUN apk add --no-cache nodejs npm git openssh-client python3 py3-pip
 
 # Install Claude Code CLI
 RUN npm install -g @anthropic-ai/claude-code
@@ -20,9 +20,10 @@ COPY frontend/dist ./static
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-# apk-persist: install packages + save them so they survive restarts
+# Persist helpers: install packages that survive container rebuilds
 COPY scripts/apk-persist /usr/local/bin/apk-persist
-RUN chmod +x /usr/local/bin/apk-persist
+COPY scripts/pip-persist /usr/local/bin/pip-persist
+RUN chmod +x /usr/local/bin/apk-persist /usr/local/bin/pip-persist
 
 # Create user nebulide with sudo access
 RUN adduser -D -s /bin/bash -h /home/nebulide nebulide \

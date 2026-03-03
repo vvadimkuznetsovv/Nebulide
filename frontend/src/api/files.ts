@@ -45,6 +45,6 @@ export function getRawFileUrl(path: string): string {
   return `/api/files/raw?${params.toString()}`;
 }
 
-// Fetch raw binary content as ArrayBuffer (for mammoth DOCX processing)
+// Fetch raw binary content as ArrayBuffer (for DOCX preview, etc.)
 export const readFileRaw = (path: string) =>
   api.get<ArrayBuffer>('/files/raw', { params: { path }, responseType: 'arraybuffer' });

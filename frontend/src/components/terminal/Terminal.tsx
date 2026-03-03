@@ -303,6 +303,23 @@ export function destroyAllTerminalSessions(): void {
   }
 }
 
+/** Disconnect all terminal WebSockets without destroying sessions.
+ *  Used on force_disconnected — PTY stays alive on backend,
+ *  new device reconnects to the same shell via GetOrCreate. */
+export function disconnectAllTerminalSessions(): void {
+  for (const session of sessions.values()) {
+    if (session.reconnectTimer) {
+      clearTimeout(session.reconnectTimer);
+      session.reconnectTimer = null;
+    }
+    if (session.ws) {
+      session.ws.close();
+      session.ws = null;
+    }
+    session.reconnectAttempts = MAX_RECONNECT; // prevent auto-reconnect
+  }
+}
+
 /** Destroy a terminal session: close WS, dispose xterm, remove from Map.
  *  Called by layoutStore when a detached terminal panel is closed. */
 export function destroyTerminalSession(instanceId: string): void {

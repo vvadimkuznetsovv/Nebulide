@@ -64,6 +64,28 @@ elif [ ! -e "$CLAUDE_JSON" ]; then
   echo "[entrypoint] Claude CLI config created."
 fi
 
+# Persistent Python venv — lives in workspace volume, survives deploys
+VENV_DIR="$WORKSPACE/.venv"
+if [ ! -d "$VENV_DIR" ]; then
+  echo "[entrypoint] Creating persistent Python venv..."
+  python3 -m venv "$VENV_DIR"
+  echo "[entrypoint] Python venv created at $VENV_DIR"
+fi
+
+# Auto-activate venv in interactive shells (bash)
+BASHRC="/home/nebulide/.bashrc"
+ACTIVATE_LINE="source $VENV_DIR/bin/activate"
+if ! grep -qF "$ACTIVATE_LINE" "$BASHRC" 2>/dev/null; then
+  echo "$ACTIVATE_LINE" >> "$BASHRC"
+  echo "[entrypoint] Venv auto-activation added to .bashrc"
+fi
+
+# Also activate for root (claude CLI runs as root)
+ROOT_BASHRC="/root/.bashrc"
+if ! grep -qF "$ACTIVATE_LINE" "$ROOT_BASHRC" 2>/dev/null; then
+  echo "$ACTIVATE_LINE" >> "$ROOT_BASHRC"
+fi
+
 # Ensure workspace ownership (volume mount may override)
 chown -R nebulide:nebulide /home/nebulide/workspace 2>/dev/null || true
 

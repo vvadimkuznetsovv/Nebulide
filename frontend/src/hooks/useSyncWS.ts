@@ -4,6 +4,7 @@ import { useWorkspaceSessionStore } from '../store/workspaceSessionStore';
 import { getWorkspaceSessions } from '../api/workspaceSessions';
 import { getDeviceId, detectDeviceType } from '../utils/deviceId';
 import { setSyncWs } from '../utils/syncBridge';
+import { disconnectAllTerminalSessions } from '../components/terminal/Terminal';
 
 // Re-export for backwards compat (store imports from syncBridge directly now)
 export { sendSyncMessage } from '../utils/syncBridge';
@@ -91,6 +92,10 @@ export function useSyncWS() {
             case 'force_disconnected':
               // Another device took over — only react if it's not us
               if (msg.locked_by?.device_id !== getDeviceId() && msg.session_id) {
+                // Save current state so the new device gets our layout
+                store.saveCurrentSession();
+                // Disconnect terminal WebSockets (PTY stays alive for new device)
+                disconnectAllTerminalSessions();
                 store.setLockState(msg.session_id, 'blocked', msg.locked_by);
               }
               break;

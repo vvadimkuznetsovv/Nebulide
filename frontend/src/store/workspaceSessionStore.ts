@@ -88,8 +88,18 @@ export const useWorkspaceSessionStore = create<WorkspaceSessionState>((set, get)
       if (activeSessionId) {
         const exists = sessions.find((s) => s.id === activeSessionId);
         if (exists) {
+          // Restore server snapshot for cross-device layout sync
+          try {
+            const snap = exists.snapshot as unknown as FullSnapshot;
+            if (snap?.layout && snap?.workspace) {
+              const panelIdMapping = useWorkspaceStore.getState().restoreFromSnapshot(snap.workspace);
+              useLayoutStore.getState().restoreLayoutFromSnapshot(snap.layout, panelIdMapping);
+            }
+          } catch {
+            console.warn('[WorkspaceSession] Failed to restore snapshot');
+          }
           set({ loading: false });
-          return; // Already on a valid session
+          return;
         }
       }
 

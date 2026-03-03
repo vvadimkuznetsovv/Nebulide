@@ -1,6 +1,5 @@
-import { useState, useEffect } from 'react';
-import { convertToHtml } from 'mammoth';
-import DOMPurify from 'dompurify';
+import { useEffect, useRef, useState } from 'react';
+import { renderAsync } from 'docx-preview';
 import { readFileRaw } from '../../api/files';
 
 interface DocxViewerProps {
@@ -8,7 +7,7 @@ interface DocxViewerProps {
 }
 
 export default function DocxViewer({ filePath }: DocxViewerProps) {
-  const [html, setHtml] = useState<string | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -16,45 +15,42 @@ export default function DocxViewer({ filePath }: DocxViewerProps) {
     let cancelled = false;
     setLoading(true);
     setError(null);
-    setHtml(null);
+
+    // Clear previous render
+    if (containerRef.current) {
+      containerRef.current.innerHTML = '';
+    }
 
     readFileRaw(filePath)
-      .then(({ data }) => convertToHtml({ arrayBuffer: data }))
-      .then((result) => {
-        if (cancelled) return;
-        const clean = DOMPurify.sanitize(result.value, {
-          ALLOWED_TAGS: [
-            'p', 'br', 'b', 'i', 'u', 'em', 'strong', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
-            'ul', 'ol', 'li', 'table', 'thead', 'tbody', 'tr', 'td', 'th',
-            'a', 'img', 'span', 'div', 'blockquote', 'pre', 'code', 'sup', 'sub',
-          ],
-          ALLOWED_ATTR: ['href', 'src', 'alt', 'title', 'class', 'style', 'colspan', 'rowspan'],
-          ALLOW_DATA_ATTR: false,
+      .then(({ data }) => {
+        if (cancelled || !containerRef.current) return;
+        return renderAsync(data, containerRef.current, undefined, {
+          className: 'docx-viewer-page',
+          inWrapper: true,
+          ignoreWidth: false,
+          ignoreHeight: false,
+          ignoreFonts: false,
+          breakPages: true,
+          renderHeaders: true,
+          renderFooters: true,
+          renderFootnotes: true,
+          renderEndnotes: true,
+          renderComments: false,
+          useBase64URL: true,
         });
-        setHtml(clean);
+      })
+      .then(() => {
+        if (!cancelled) setLoading(false);
       })
       .catch((err: unknown) => {
         if (cancelled) return;
         const message = err instanceof Error ? err.message : 'Failed to load document';
         setError(message);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
+        setLoading(false);
       });
 
     return () => { cancelled = true; };
   }, [filePath]);
-
-  if (loading) {
-    return (
-      <div className="h-full flex items-center justify-center">
-        <div className="text-center">
-          <div className="inline-block w-6 h-6 border-2 border-current border-t-transparent rounded-full animate-spin mb-3" style={{ color: 'var(--accent)' }} />
-          <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Loading document...</p>
-        </div>
-      </div>
-    );
-  }
 
   if (error) {
     return (
@@ -72,9 +68,16 @@ export default function DocxViewer({ filePath }: DocxViewerProps) {
   }
 
   return (
-    <div
-      className="docx-content h-full overflow-auto p-8"
-      dangerouslySetInnerHTML={{ __html: html || '' }}
-    />
+    <div className="h-full overflow-auto docx-viewer-container" style={{ background: '#525659' }}>
+      {loading && (
+        <div className="h-full flex items-center justify-center">
+          <div className="text-center">
+            <div className="inline-block w-6 h-6 border-2 border-current border-t-transparent rounded-full animate-spin mb-3" style={{ color: 'var(--accent)' }} />
+            <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>Loading document...</p>
+          </div>
+        </div>
+      )}
+      <div ref={containerRef} />
+    </div>
   );
 }

@@ -1689,29 +1689,25 @@ body { animation: scrollbarShimmer 8s ease-in-out infinite; }
   }
 
   /* ==========================================
-     DOCX rendered content
+     DOCX Preview (docx-preview library)
      ========================================== */
-  .docx-content {
-    background: rgba(255, 255, 255, 0.95);
-    color: #1a1a1a;
-    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
-    font-size: 14px;
-    line-height: 1.7;
-    max-width: 800px;
-    margin: 0 auto;
+  .docx-viewer-container {
+    padding: 16px;
   }
-  .docx-content h1 { font-size: 1.6em; font-weight: 700; margin: 1.2em 0 0.5em; color: #111; }
-  .docx-content h2 { font-size: 1.35em; font-weight: 600; margin: 1em 0 0.5em; color: #222; }
-  .docx-content h3 { font-size: 1.15em; font-weight: 600; margin: 0.8em 0 0.4em; color: #333; }
-  .docx-content p { margin: 0.5em 0; }
-  .docx-content ul, .docx-content ol { margin: 0.5em 0; padding-left: 1.5em; }
-  .docx-content li { margin: 0.25em 0; }
-  .docx-content table { border-collapse: collapse; width: 100%; margin: 1em 0; }
-  .docx-content td, .docx-content th { border: 1px solid #d1d5db; padding: 8px 12px; text-align: left; }
-  .docx-content th { background: #f3f4f6; font-weight: 600; }
-  .docx-content img { max-width: 100%; height: auto; }
-  .docx-content strong { font-weight: 600; }
-  .docx-content em { font-style: italic; }
+  .docx-viewer-container .docx-wrapper {
+    background: #525659;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 16px;
+    padding: 16px 0;
+  }
+  .docx-viewer-container .docx-wrapper > section.docx-viewer-page {
+    background: white;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    margin: 0;
+    overflow: hidden;
+  }
 
 .xterm { padding: 8px; overscroll-behavior: contain; width: 100%; height: 100%; }
 /* Hide native browser caret — xterm renders its own cursor */
