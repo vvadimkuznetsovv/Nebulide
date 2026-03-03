@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -147,11 +148,16 @@ func (h *SyncHandler) HandleWebSocket(c *gin.Context) {
 			select {
 			case <-ticker.C:
 				if activeSessionID != "" && deviceID != "" {
-					if !h.refreshLock(ctx, activeSessionID, deviceID) {
+					switch h.refreshLock(ctx, activeSessionID, deviceID) {
+					case lockExpired:
 						sendJSON(syncServerMsg{
 							Type:      "workspace_unlocked",
 							SessionID: activeSessionID,
 						})
+					case lockStolen:
+						// Another device took over — stop heartbeating.
+						// force_disconnected already sent via pub/sub.
+						activeSessionID = ""
 					}
 				}
 			case <-ctx.Done():
@@ -214,7 +220,8 @@ func (h *SyncHandler) HandleWebSocket(c *gin.Context) {
 			existing, lockErr := h.acquireLock(ctx, msg.SessionID, userID, deviceID, deviceType)
 			if lockErr != nil {
 				// Another device holds the lock — check priority
-				isMobileHolder := existing.DeviceType == "Phone" || existing.DeviceType == "Tablet"
+				dt := strings.ToLower(existing.DeviceType)
+				isMobileHolder := dt == "phone" || dt == "tablet"
 
 				if isMobileHolder {
 					// Mobile holds lock → block new device (mobile priority)
@@ -239,11 +246,14 @@ func (h *SyncHandler) HandleWebSocket(c *gin.Context) {
 
 		case "heartbeat":
 			if activeSessionID != "" && deviceID != "" {
-				if !h.refreshLock(ctx, activeSessionID, deviceID) {
+				switch h.refreshLock(ctx, activeSessionID, deviceID) {
+				case lockExpired:
 					sendJSON(syncServerMsg{
 						Type:      "workspace_unlocked",
 						SessionID: activeSessionID,
 					})
+				case lockStolen:
+					activeSessionID = ""
 				}
 			}
 
@@ -310,22 +320,31 @@ func (h *SyncHandler) acquireLock(ctx context.Context, sessionID, userID, device
 	return &existingInfo, fmt.Errorf("workspace_locked")
 }
 
+// lockRefreshResult distinguishes between lock states for heartbeat handling.
+type lockRefreshResult int
+
+const (
+	lockOK      lockRefreshResult = iota
+	lockExpired                   // key doesn't exist (TTL expired)
+	lockStolen                    // lock exists but belongs to another device
+)
+
 // refreshLock renews the TTL if we still own the lock.
-func (h *SyncHandler) refreshLock(ctx context.Context, sessionID, deviceID string) bool {
+func (h *SyncHandler) refreshLock(ctx context.Context, sessionID, deviceID string) lockRefreshResult {
 	key := lockKey(sessionID)
 	existing, err := database.RDB.Get(ctx, key).Result()
 	if err != nil {
-		return false
+		return lockExpired
 	}
 	var info LockInfo
 	if err := json.Unmarshal([]byte(existing), &info); err != nil {
-		return false
+		return lockExpired
 	}
 	if info.DeviceID != deviceID {
-		return false
+		return lockStolen
 	}
 	database.RDB.Expire(ctx, key, 45*time.Second)
-	return true
+	return lockOK
 }
 
 // releaseLock atomically deletes the lock only if we still own it.

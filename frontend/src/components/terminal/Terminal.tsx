@@ -303,6 +303,17 @@ export function destroyAllTerminalSessions(): void {
   }
 }
 
+/** Reconnect all terminal WebSockets (after Take over restores lock).
+ *  Resets reconnectAttempts and calls connectWs for each session. */
+export function reconnectAllTerminalSessions(): void {
+  for (const [instanceId, session] of sessions.entries()) {
+    if (!session.ws || session.ws.readyState > WebSocket.OPEN) {
+      session.reconnectAttempts = 0;
+      connectWs(instanceId);
+    }
+  }
+}
+
 /** Disconnect all terminal WebSockets without destroying sessions.
  *  Used on force_disconnected — PTY stays alive on backend,
  *  new device reconnects to the same shell via GetOrCreate. */

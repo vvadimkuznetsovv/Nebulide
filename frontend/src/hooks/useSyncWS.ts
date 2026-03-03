@@ -4,7 +4,7 @@ import { useWorkspaceSessionStore } from '../store/workspaceSessionStore';
 import { getWorkspaceSessions } from '../api/workspaceSessions';
 import { getDeviceId, detectDeviceType } from '../utils/deviceId';
 import { setSyncWs } from '../utils/syncBridge';
-import { disconnectAllTerminalSessions } from '../components/terminal/Terminal';
+import { disconnectAllTerminalSessions, reconnectAllTerminalSessions } from '../components/terminal/Terminal';
 
 // Re-export for backwards compat (store imports from syncBridge directly now)
 export { sendSyncMessage } from '../utils/syncBridge';
@@ -68,16 +68,22 @@ export function useSyncWS() {
           switch (msg.type) {
             case 'register_ok':
               if (msg.session_id) {
+                const prevStatus = store.lockStatus[msg.session_id];
                 store.setLockState(msg.session_id, 'owner');
+                // Was blocked → now owner again → reconnect terminals
+                if (prevStatus === 'blocked') {
+                  reconnectAllTerminalSessions();
+                }
               }
               break;
 
             case 'workspace_locked':
               if (msg.session_id && msg.locked_by) {
-                // Check if it's us (another tab) or a different device
                 if (msg.locked_by.device_id === getDeviceId()) {
                   store.setLockState(msg.session_id, 'owner');
                 } else {
+                  // Another device acquired the lock — disconnect terminals
+                  disconnectAllTerminalSessions();
                   store.setLockState(msg.session_id, 'blocked', msg.locked_by);
                 }
               }
@@ -85,7 +91,12 @@ export function useSyncWS() {
 
             case 'workspace_unlocked':
               if (msg.session_id) {
-                store.setLockState(msg.session_id, 'free');
+                // Don't clear 'blocked' state — only owner losing lock → free.
+                // 'blocked' is cleared by force_takeover → register_ok.
+                const current = store.lockStatus[msg.session_id];
+                if (current !== 'blocked') {
+                  store.setLockState(msg.session_id, 'free');
+                }
               }
               break;
 
