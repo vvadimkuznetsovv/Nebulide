@@ -33,7 +33,12 @@ type updateWorkspaceSessionRequest struct {
 	Snapshot datatypes.JSON `json:"snapshot"`
 }
 
-// List returns all workspace sessions for the current user.
+type sessionWithLock struct {
+	models.WorkspaceSession
+	Lock *LockInfo `json:"lock,omitempty"`
+}
+
+// List returns all workspace sessions for the current user, enriched with lock status.
 func (h *WorkspaceSessionsHandler) List(c *gin.Context) {
 	userID, _ := c.Get("user_id")
 
@@ -42,7 +47,13 @@ func (h *WorkspaceSessionsHandler) List(c *gin.Context) {
 		Order("updated_at DESC").
 		Find(&sessions)
 
-	c.JSON(http.StatusOK, sessions)
+	result := make([]sessionWithLock, len(sessions))
+	for i, s := range sessions {
+		result[i] = sessionWithLock{WorkspaceSession: s}
+		result[i].Lock = GetLockInfo(c.Request.Context(), s.ID.String())
+	}
+
+	c.JSON(http.StatusOK, result)
 }
 
 // Latest returns the most recently updated workspace session.
@@ -57,7 +68,10 @@ func (h *WorkspaceSessionsHandler) Latest(c *gin.Context) {
 		return
 	}
 
-	c.JSON(http.StatusOK, session)
+	c.JSON(http.StatusOK, sessionWithLock{
+		WorkspaceSession: session,
+		Lock:             GetLockInfo(c.Request.Context(), session.ID.String()),
+	})
 }
 
 // Create creates a new workspace session.

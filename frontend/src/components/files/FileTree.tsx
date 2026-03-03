@@ -1,4 +1,4 @@
-import React, { useState, useEffect, type ReactNode } from 'react';
+import React, { useState, useEffect, useRef, type ReactNode } from 'react';
 import { listFiles, readFile, deleteFile, writeFile, mkdirFile, renameFile, type FileEntry } from '../../api/files';
 import FileTreeItem from './FileTreeItem';
 import ContextMenu, { type ContextMenuItem } from './ContextMenu';
@@ -366,6 +366,9 @@ export default function FileTree({ rootPath, onFileSelect, onFileDoubleClick, on
 
   const canGoUp = currentPath && currentPath !== (rootPath || '');
 
+  // Guard: prevent blur from re-submitting after Enter/Escape in creation input
+  const createSubmittedRef = useRef(false);
+
   // Inline creation input component
   const renderCreationInput = (depth: number) => (
     <div
@@ -392,10 +395,17 @@ export default function FileTree({ rootPath, onFileSelect, onFileDoubleClick, on
         title={creatingType === 'folder' ? 'New folder name' : 'New file name'}
         autoFocus
         onKeyDown={(e) => {
-          if (e.key === 'Enter') handleCreate(e.currentTarget.value.trim());
-          if (e.key === 'Escape') { setCreatingType(null); setCreatingInFolder(null); }
+          if (e.key === 'Enter') {
+            createSubmittedRef.current = true;
+            handleCreate(e.currentTarget.value.trim());
+          }
+          if (e.key === 'Escape') {
+            createSubmittedRef.current = true;
+            setCreatingType(null); setCreatingInFolder(null);
+          }
         }}
         onBlur={(e) => {
+          if (createSubmittedRef.current) { createSubmittedRef.current = false; return; }
           const val = e.currentTarget.value.trim();
           if (val) handleCreate(val);
           else { setCreatingType(null); setCreatingInFolder(null); }
@@ -473,10 +483,15 @@ export default function FileTree({ rootPath, onFileSelect, onFileDoubleClick, on
         <button
           type="button"
           onClick={handleRefresh}
-          className="hover:opacity-70 transition-opacity px-1"
+          className="hover:opacity-70 transition-opacity p-0.5"
           title="Refresh"
         >
-          R
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="23 4 23 10 17 10" />
+            <polyline points="1 20 1 14 7 14" />
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+          </svg>
         </button>
       </div>
 

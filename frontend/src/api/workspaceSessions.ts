@@ -1,5 +1,12 @@
 import api from './client';
 
+export interface LockInfo {
+  device_id: string;
+  device_type: string;
+  user_id: string;
+  connected_at: string;
+}
+
 export interface WorkspaceSession {
   id: string;
   user_id: string;
@@ -8,6 +15,7 @@ export interface WorkspaceSession {
   snapshot: Record<string, unknown>;
   created_at: string;
   updated_at: string;
+  lock?: LockInfo | null;
 }
 
 export const getWorkspaceSessions = () =>

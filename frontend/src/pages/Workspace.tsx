@@ -1,4 +1,5 @@
-import { useCallback, useState, useEffect } from 'react';
+import { useCallback, useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   DndContext,
   DragOverlay,
@@ -53,12 +54,43 @@ export default function Workspace() {
     initSession();
   }, [initSession]);
 
+  // Enhanced auto-save: debounced 2s on state changes + 30s safety + beforeunload
+  const debounceRef = useRef<number | null>(null);
+
   useEffect(() => {
-    const interval = setInterval(saveCurrentSession, 30_000);
-    const handleBeforeUnload = () => { saveCurrentSession(); };
+    const debouncedSave = () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      debounceRef.current = window.setTimeout(() => {
+        saveCurrentSession();
+        debounceRef.current = null;
+      }, 2000);
+    };
+
+    const unsubLayout = useLayoutStore.subscribe(debouncedSave);
+    const unsubWorkspace = useWorkspaceStore.subscribe(debouncedSave);
+    const safetyInterval = setInterval(saveCurrentSession, 30_000);
+
+    const handleBeforeUnload = () => {
+      // Use fetch with keepalive for reliability on tab close
+      const activeId = useWorkspaceSessionStore.getState().activeSessionId;
+      if (!activeId) return;
+      const workspaceSnap = useWorkspaceStore.getState().getWorkspaceSnapshot();
+      const layoutSnap = useLayoutStore.getState().getLayoutSnapshot();
+      const token = localStorage.getItem('access_token');
+      fetch(`/api/workspace-sessions/${activeId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...(token ? { 'Authorization': `Bearer ${token}` } : {}) },
+        body: JSON.stringify({ snapshot: { workspace: workspaceSnap, layout: layoutSnap } }),
+        keepalive: true,
+      });
+    };
     window.addEventListener('beforeunload', handleBeforeUnload);
+
     return () => {
-      clearInterval(interval);
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+      unsubLayout();
+      unsubWorkspace();
+      clearInterval(safetyInterval);
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
   }, [saveCurrentSession]);
@@ -81,6 +113,17 @@ export default function Workspace() {
     sidebarOpen,
     setSidebarOpen,
   } = useWorkspaceStore();
+
+  // Lock state
+  const showLockWarning = useWorkspaceSessionStore((s) => s.showLockWarning);
+  const lockWarningSessionId = useWorkspaceSessionStore((s) => s.lockWarningSessionId);
+  const lockInfoMap = useWorkspaceSessionStore((s) => s.lockInfo);
+  const lockStatusMap = useWorkspaceSessionStore((s) => s.lockStatus);
+  const activeSessionId = useWorkspaceSessionStore((s) => s.activeSessionId);
+  const forceTakeover = useWorkspaceSessionStore((s) => s.forceTakeover);
+  const dismissLockWarning = useWorkspaceSessionStore((s) => s.dismissLockWarning);
+  const isBlocked = activeSessionId ? lockStatusMap[activeSessionId] === 'blocked' : false;
+  const warningLockInfo = lockWarningSessionId ? lockInfoMap[lockWarningSessionId] : null;
 
   // Check if any panel is visible (to show fallback sidebar toggle)
   const anyPanelVisible = Object.entries(visibility).some(([, v]) => v);
@@ -311,6 +354,109 @@ export default function Workspace() {
           {getDragOverlayContent()}
         </DragOverlay>
       </DndContext>
+
+      {/* Persistent banner when workspace is blocked by another device */}
+      {isBlocked && activeSessionId && (
+        <div
+          className="absolute top-0 left-0 right-0 z-50 flex items-center justify-center py-1.5 px-4"
+          style={{
+            background: 'rgba(251, 191, 36, 0.08)',
+            borderBottom: '1px solid rgba(251, 191, 36, 0.2)',
+            backdropFilter: 'blur(10px)',
+          }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="rgb(251, 191, 36)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mr-2 flex-shrink-0">
+            <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+            <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+          </svg>
+          <span className="text-xs" style={{ color: 'rgb(251, 191, 36)' }}>
+            Workspace locked by another device
+          </span>
+          <button
+            type="button"
+            onClick={() => forceTakeover(activeSessionId)}
+            className="ml-3 text-xs font-semibold underline"
+            style={{ color: 'rgb(251, 191, 36)' }}
+          >
+            Take over
+          </button>
+        </div>
+      )}
+
+      {/* Lock warning modal */}
+      {showLockWarning && lockWarningSessionId && createPortal(
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+          style={{ background: 'rgba(0, 0, 0, 0.7)', backdropFilter: 'blur(8px)' }}
+          onClick={dismissLockWarning}
+        >
+          <div
+            className="w-full max-w-sm rounded-3xl p-8"
+            style={{
+              background: 'rgba(10, 5, 20, 0.85)',
+              border: '1px solid rgba(251, 191, 36, 0.2)',
+              backdropFilter: 'blur(20px)',
+              boxShadow: '0 0 40px rgba(251, 191, 36, 0.1)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-center mb-4">
+              <div
+                className="w-16 h-16 rounded-2xl flex items-center justify-center"
+                style={{ background: 'rgba(251, 191, 36, 0.1)', border: '1px solid rgba(251, 191, 36, 0.3)' }}
+              >
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="rgb(251, 191, 36)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+                  <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+                </svg>
+              </div>
+            </div>
+
+            <h2 className="text-lg font-bold mb-2 text-center" style={{ color: 'var(--text-primary)' }}>
+              Workspace In Use
+            </h2>
+            <p className="text-sm mb-1 text-center" style={{ color: 'var(--text-secondary)' }}>
+              This workspace is currently active on another device
+            </p>
+            {warningLockInfo && (
+              <p className="text-xs mb-6 text-center" style={{ color: 'var(--text-muted)' }}>
+                {warningLockInfo.device_type === 'phone' ? '\uD83D\uDCF1' : warningLockInfo.device_type === 'tablet' ? '\uD83D\uDCF1' : '\uD83D\uDCBB'}
+                {' '}{warningLockInfo.device_type}
+                {' \u2014 connected '}
+                {new Date(warningLockInfo.connected_at).toLocaleTimeString()}
+              </p>
+            )}
+
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={() => forceTakeover(lockWarningSessionId)}
+                className="w-full py-3 rounded-xl text-sm font-bold transition-all"
+                style={{
+                  background: 'rgba(251, 191, 36, 0.15)',
+                  border: '1px solid rgba(251, 191, 36, 0.3)',
+                  color: 'rgb(251, 191, 36)',
+                }}
+              >
+                Take Over Session
+              </button>
+              <button
+                type="button"
+                onClick={dismissLockWarning}
+                className="w-full py-2.5 rounded-xl text-sm font-medium transition-all"
+                style={{
+                  background: 'rgba(255, 255, 255, 0.05)',
+                  border: '1px solid rgba(255, 255, 255, 0.1)',
+                  color: 'var(--text-secondary)',
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body,
+      )}
     </div>
   );
 }

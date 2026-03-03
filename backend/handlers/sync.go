@@ -2,8 +2,11 @@ package handlers
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -13,6 +16,32 @@ import (
 	"nebulide/database"
 	"nebulide/utils"
 )
+
+// ---------- types ----------
+
+type syncClientMsg struct {
+	Type       string `json:"type"`                  // device_register | heartbeat | force_takeover
+	DeviceID   string `json:"device_id,omitempty"`
+	DeviceType string `json:"device_type,omitempty"` // phone | tablet | desktop
+	SessionID  string `json:"session_id,omitempty"`  // workspace session UUID
+}
+
+type syncServerMsg struct {
+	Type      string    `json:"type"`                 // register_ok | workspace_locked | workspace_unlocked | force_disconnected
+	SessionID string    `json:"session_id,omitempty"`
+	LockedBy  *LockInfo `json:"locked_by,omitempty"`
+}
+
+// LockInfo describes the device currently holding a workspace lock.
+// Exported so workspace_sessions.go can reuse it.
+type LockInfo struct {
+	DeviceID    string `json:"device_id"`
+	DeviceType  string `json:"device_type"`
+	UserID      string `json:"user_id"`
+	ConnectedAt string `json:"connected_at"`
+}
+
+// ---------- handler ----------
 
 type SyncHandler struct {
 	cfg      *config.Config
@@ -30,8 +59,9 @@ func NewSyncHandler(cfg *config.Config) *SyncHandler {
 	}
 }
 
-// HandleWebSocket subscribes to Redis pub/sub for the authenticated user
-// and forwards events to the connected WebSocket client.
+// HandleWebSocket is a bidirectional sync channel.
+// It subscribes to Redis pub/sub for the user AND processes client messages
+// for device registration, heartbeat and lock management.
 func (h *SyncHandler) HandleWebSocket(c *gin.Context) {
 	token := c.Query("token")
 	if token == "" {
@@ -59,7 +89,8 @@ func (h *SyncHandler) HandleWebSocket(c *gin.Context) {
 		return
 	}
 
-	channel := "ws:user:" + claims.UserID.String()
+	userID := claims.UserID.String()
+	channel := "ws:user:" + userID
 	log.Printf("[Sync] Subscribing to %s", channel)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -68,7 +99,21 @@ func (h *SyncHandler) HandleWebSocket(c *gin.Context) {
 	pubsub := database.RDB.Subscribe(ctx, channel)
 	defer pubsub.Close()
 
-	// Ping/pong keepalive
+	// --- connection state ---
+	var (
+		deviceID        string
+		deviceType      string
+		activeSessionID string
+		mu              sync.Mutex // protects conn writes
+	)
+
+	sendJSON := func(msg syncServerMsg) {
+		mu.Lock()
+		defer mu.Unlock()
+		conn.WriteJSON(msg)
+	}
+
+	// --- ping / pong keepalive ---
 	conn.SetReadDeadline(time.Now().Add(45 * time.Second))
 	conn.SetPongHandler(func(string) error {
 		conn.SetReadDeadline(time.Now().Add(45 * time.Second))
@@ -81,7 +126,10 @@ func (h *SyncHandler) HandleWebSocket(c *gin.Context) {
 		for {
 			select {
 			case <-ticker.C:
-				if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second)); err != nil {
+				mu.Lock()
+				err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(5*time.Second))
+				mu.Unlock()
+				if err != nil {
 					cancel()
 					return
 				}
@@ -91,7 +139,28 @@ func (h *SyncHandler) HandleWebSocket(c *gin.Context) {
 		}
 	}()
 
-	// Redis → WS: forward pub/sub messages to client
+	// --- lock heartbeat goroutine (refreshes Redis TTL every 15s) ---
+	go func() {
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if activeSessionID != "" && deviceID != "" {
+					if !h.refreshLock(ctx, activeSessionID, deviceID) {
+						sendJSON(syncServerMsg{
+							Type:      "workspace_unlocked",
+							SessionID: activeSessionID,
+						})
+					}
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	// --- Redis → WS: forward pub/sub messages ---
 	go func() {
 		ch := pubsub.Channel()
 		for {
@@ -101,7 +170,10 @@ func (h *SyncHandler) HandleWebSocket(c *gin.Context) {
 					cancel()
 					return
 				}
-				if err := conn.WriteMessage(websocket.TextMessage, []byte(msg.Payload)); err != nil {
+				mu.Lock()
+				err := conn.WriteMessage(websocket.TextMessage, []byte(msg.Payload))
+				mu.Unlock()
+				if err != nil {
 					cancel()
 					return
 				}
@@ -111,13 +183,197 @@ func (h *SyncHandler) HandleWebSocket(c *gin.Context) {
 		}
 	}()
 
-	// WS → /dev/null: just keep the read loop alive to detect disconnects
+	// --- WS read loop: process client messages ---
 	for {
-		_, _, err := conn.ReadMessage()
+		_, raw, err := conn.ReadMessage()
 		if err != nil {
 			break
 		}
+
+		var msg syncClientMsg
+		if err := json.Unmarshal(raw, &msg); err != nil {
+			continue
+		}
+
+		switch msg.Type {
+		case "device_register":
+			deviceID = msg.DeviceID
+			deviceType = msg.DeviceType
+
+			if msg.SessionID == "" {
+				sendJSON(syncServerMsg{Type: "register_ok"})
+				continue
+			}
+
+			// Release old lock if switching workspaces
+			if activeSessionID != "" && activeSessionID != msg.SessionID {
+				h.releaseLock(ctx, activeSessionID, deviceID)
+				h.publishLockEvent(userID, "workspace_unlocked", activeSessionID, nil)
+			}
+
+			existing, lockErr := h.acquireLock(ctx, msg.SessionID, userID, deviceID, deviceType)
+			if lockErr != nil {
+				// Another device holds the lock
+				activeSessionID = msg.SessionID
+				sendJSON(syncServerMsg{
+					Type:      "workspace_locked",
+					SessionID: msg.SessionID,
+					LockedBy:  existing,
+				})
+			} else {
+				activeSessionID = msg.SessionID
+				sendJSON(syncServerMsg{Type: "register_ok", SessionID: msg.SessionID})
+				h.publishLockEvent(userID, "workspace_locked", msg.SessionID, existing)
+			}
+
+		case "heartbeat":
+			if activeSessionID != "" && deviceID != "" {
+				if !h.refreshLock(ctx, activeSessionID, deviceID) {
+					sendJSON(syncServerMsg{
+						Type:      "workspace_unlocked",
+						SessionID: activeSessionID,
+					})
+				}
+			}
+
+		case "force_takeover":
+			if msg.SessionID != "" && deviceID != "" {
+				info := h.forceTakeover(ctx, msg.SessionID, userID, deviceID, deviceType)
+				activeSessionID = msg.SessionID
+				sendJSON(syncServerMsg{Type: "register_ok", SessionID: msg.SessionID})
+				h.publishLockEvent(userID, "force_disconnected", msg.SessionID, info)
+			}
+		}
 	}
 
-	log.Printf("[Sync] Client disconnected from %s", channel)
+	// --- cleanup: release lock on disconnect ---
+	if activeSessionID != "" && deviceID != "" {
+		h.releaseLock(context.Background(), activeSessionID, deviceID)
+		h.publishLockEvent(userID, "workspace_unlocked", activeSessionID, nil)
+	}
+
+	log.Printf("[Sync] Client disconnected from %s device=%s", channel, deviceID)
+}
+
+// ---------- Redis lock helpers ----------
+
+func lockKey(sessionID string) string {
+	return "workspace_lock:" + sessionID
+}
+
+// acquireLock tries to acquire an exclusive lock.
+// Returns our lockInfo on success, or the existing holder's lockInfo + error.
+func (h *SyncHandler) acquireLock(ctx context.Context, sessionID, userID, deviceID, deviceType string) (*LockInfo, error) {
+	key := lockKey(sessionID)
+	info := LockInfo{
+		DeviceID:    deviceID,
+		DeviceType:  deviceType,
+		UserID:      userID,
+		ConnectedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	data, _ := json.Marshal(info)
+
+	ok, err := database.RDB.SetNX(ctx, key, string(data), 45*time.Second).Result()
+	if err != nil {
+		return nil, err
+	}
+	if ok {
+		return &info, nil
+	}
+
+	// Lock exists — check if same device (reconnect / another tab)
+	existing, err := database.RDB.Get(ctx, key).Result()
+	if err != nil {
+		return nil, fmt.Errorf("workspace_locked")
+	}
+	var existingInfo LockInfo
+	if err := json.Unmarshal([]byte(existing), &existingInfo); err != nil {
+		return nil, fmt.Errorf("workspace_locked")
+	}
+
+	if existingInfo.DeviceID == deviceID {
+		database.RDB.Expire(ctx, key, 45*time.Second)
+		return &info, nil
+	}
+
+	return &existingInfo, fmt.Errorf("workspace_locked")
+}
+
+// refreshLock renews the TTL if we still own the lock.
+func (h *SyncHandler) refreshLock(ctx context.Context, sessionID, deviceID string) bool {
+	key := lockKey(sessionID)
+	existing, err := database.RDB.Get(ctx, key).Result()
+	if err != nil {
+		return false
+	}
+	var info LockInfo
+	if err := json.Unmarshal([]byte(existing), &info); err != nil {
+		return false
+	}
+	if info.DeviceID != deviceID {
+		return false
+	}
+	database.RDB.Expire(ctx, key, 45*time.Second)
+	return true
+}
+
+// releaseLock atomically deletes the lock only if we still own it.
+func (h *SyncHandler) releaseLock(ctx context.Context, sessionID, deviceID string) {
+	key := lockKey(sessionID)
+	script := `
+		local data = redis.call('GET', KEYS[1])
+		if data then
+			local info = cjson.decode(data)
+			if info.device_id == ARGV[1] then
+				return redis.call('DEL', KEYS[1])
+			end
+		end
+		return 0
+	`
+	database.RDB.Eval(ctx, script, []string{key}, deviceID)
+}
+
+// forceTakeover unconditionally sets the lock, evicting the previous owner.
+func (h *SyncHandler) forceTakeover(ctx context.Context, sessionID, userID, deviceID, deviceType string) *LockInfo {
+	key := lockKey(sessionID)
+	info := LockInfo{
+		DeviceID:    deviceID,
+		DeviceType:  deviceType,
+		UserID:      userID,
+		ConnectedAt: time.Now().UTC().Format(time.RFC3339),
+	}
+	data, _ := json.Marshal(info)
+	database.RDB.Set(ctx, key, string(data), 45*time.Second)
+	return &info
+}
+
+// GetLockInfo reads the current lock for a workspace session. Returns nil if unlocked.
+func GetLockInfo(ctx context.Context, sessionID string) *LockInfo {
+	if database.RDB == nil {
+		return nil
+	}
+	data, err := database.RDB.Get(ctx, lockKey(sessionID)).Result()
+	if err != nil {
+		return nil
+	}
+	var info LockInfo
+	if err := json.Unmarshal([]byte(data), &info); err != nil {
+		return nil
+	}
+	return &info
+}
+
+func (h *SyncHandler) publishLockEvent(userID, eventType, sessionID string, info *LockInfo) {
+	if database.RDB == nil {
+		return
+	}
+	event := map[string]interface{}{
+		"type":       eventType,
+		"session_id": sessionID,
+	}
+	if info != nil {
+		event["locked_by"] = info
+	}
+	data, _ := json.Marshal(event)
+	database.RDB.Publish(context.Background(), "ws:user:"+userID, string(data))
 }

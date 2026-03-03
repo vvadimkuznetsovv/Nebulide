@@ -1,12 +1,15 @@
 import { create } from 'zustand';
 import {
   type WorkspaceSession,
+  type LockInfo,
   getWorkspaceSessions,
   getLatestWorkspaceSession,
   createWorkspaceSession,
   updateWorkspaceSession,
   deleteWorkspaceSession,
 } from '../api/workspaceSessions';
+import { getDeviceId, detectDeviceType } from '../utils/deviceId';
+import { sendSyncMessage } from '../utils/syncBridge';
 import { useWorkspaceStore, type WorkspaceSnapshot } from './workspaceStore';
 import { useLayoutStore, type LayoutSnapshot } from './layoutStore';
 import { destroyAllTerminalSessions } from '../components/terminal/Terminal';
@@ -26,10 +29,18 @@ interface FullSnapshot {
   layout: LayoutSnapshot;
 }
 
+type LockStatus = 'free' | 'owner' | 'blocked';
+
 interface WorkspaceSessionState {
   sessions: WorkspaceSession[];
   activeSessionId: string | null;
   loading: boolean;
+
+  // Lock state per workspace
+  lockStatus: Record<string, LockStatus>;
+  lockInfo: Record<string, LockInfo>;
+  showLockWarning: boolean;
+  lockWarningSessionId: string | null;
 
   loadSessions: () => Promise<void>;
   initSession: () => Promise<void>;
@@ -39,12 +50,21 @@ interface WorkspaceSessionState {
   renameSession: (id: string, name: string) => Promise<void>;
   deleteSession: (id: string) => Promise<void>;
   updateSessionsList: (sessions: WorkspaceSession[]) => void;
+
+  // Lock actions
+  setLockState: (sessionId: string, status: LockStatus, info?: LockInfo) => void;
+  forceTakeover: (sessionId: string) => void;
+  dismissLockWarning: () => void;
 }
 
 export const useWorkspaceSessionStore = create<WorkspaceSessionState>((set, get) => ({
   sessions: [],
   activeSessionId: localStorage.getItem(ACTIVE_WS_KEY),
   loading: false,
+  lockStatus: {},
+  lockInfo: {},
+  showLockWarning: false,
+  lockWarningSessionId: null,
 
   loadSessions: async () => {
     try {
@@ -146,8 +166,14 @@ export const useWorkspaceSessionStore = create<WorkspaceSessionState>((set, get)
   },
 
   switchSession: async (id) => {
-    const { activeSessionId } = get();
+    const { activeSessionId, lockStatus: ls } = get();
     if (activeSessionId === id) return;
+
+    // If target workspace is locked by another device, show warning instead
+    if (ls[id] === 'blocked') {
+      set({ showLockWarning: true, lockWarningSessionId: id });
+      return;
+    }
 
     try {
       // Save current session
@@ -264,5 +290,44 @@ export const useWorkspaceSessionStore = create<WorkspaceSessionState>((set, get)
 
   updateSessionsList: (sessions) => {
     set({ sessions });
+  },
+
+  // --- Lock actions ---
+
+  setLockState: (sessionId, status, info) => {
+    set((state) => {
+      const newLockStatus = { ...state.lockStatus, [sessionId]: status };
+      const newLockInfo = { ...state.lockInfo };
+
+      if (info) {
+        newLockInfo[sessionId] = info;
+      } else if (status === 'free') {
+        delete newLockInfo[sessionId];
+      }
+
+      // Show warning modal if the ACTIVE session is blocked
+      const isActiveBlocked = status === 'blocked' && sessionId === state.activeSessionId;
+
+      return {
+        lockStatus: newLockStatus,
+        lockInfo: newLockInfo,
+        showLockWarning: isActiveBlocked || state.showLockWarning,
+        lockWarningSessionId: isActiveBlocked ? sessionId : state.lockWarningSessionId,
+      };
+    });
+  },
+
+  forceTakeover: (sessionId) => {
+    sendSyncMessage({
+      type: 'force_takeover',
+      device_id: getDeviceId(),
+      device_type: detectDeviceType(),
+      session_id: sessionId,
+    });
+    set({ showLockWarning: false, lockWarningSessionId: null });
+  },
+
+  dismissLockWarning: () => {
+    set({ showLockWarning: false, lockWarningSessionId: null });
   },
 }));

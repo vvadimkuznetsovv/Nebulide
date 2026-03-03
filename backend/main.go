@@ -131,10 +131,14 @@ func main() {
 	// Serve frontend static files
 	r.Static("/assets", "./static/assets")
 	r.StaticFile("/favicon.svg", "./static/favicon.svg")
-	r.StaticFile("/", "./static/index.html")
-	r.NoRoute(func(c *gin.Context) {
+
+	// SPA index.html — no-cache so browsers always get fresh asset references after deploy
+	serveIndex := func(c *gin.Context) {
+		c.Header("Cache-Control", "no-cache, no-store, must-revalidate")
 		c.File("./static/index.html")
-	})
+	}
+	r.GET("/", serveIndex)
+	r.NoRoute(serveIndex)
 
 	fmt.Printf("Server starting on :%s\n", cfg.Port)
 	if err := r.Run(":" + cfg.Port); err != nil {

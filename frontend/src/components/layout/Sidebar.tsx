@@ -9,6 +9,7 @@ import toast from 'react-hot-toast';
 import { QRCodeSVG } from 'qrcode.react';
 import { panelIcons, panelTitles } from './PanelContent';
 import type { BasePanelId } from '../../store/layoutUtils';
+import { getDeviceId } from '../../utils/deviceId';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -19,7 +20,7 @@ const allPanels: BasePanelId[] = ['chat', 'files', 'editor', 'preview', 'termina
 
 export default function Sidebar({ isOpen, onClose }: SidebarProps) {
   const { visibility, toggleVisibility, openNewTerminal } = useLayoutStore();
-  const { sessions: wsSessions, activeSessionId, switchSession, createSession, renameSession, deleteSession } = useWorkspaceSessionStore();
+  const { sessions: wsSessions, activeSessionId, switchSession, createSession, renameSession, deleteSession, lockStatus, lockInfo } = useWorkspaceSessionStore();
   const [showSettings, setShowSettings] = useState(false);
   const [newWsName, setNewWsName] = useState('');
   const [showNewWsInput, setShowNewWsInput] = useState(false);
@@ -267,6 +268,8 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
             <div className="space-y-1 max-h-48 overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
               {wsSessions.map((ws) => {
                 const isActive = ws.id === activeSessionId;
+                const wsLock = lockStatus[ws.id];
+                const isLockedByOther = wsLock === 'blocked' || (ws.lock && ws.lock.device_id !== getDeviceId());
                 return (
                   <div
                     key={ws.id}
@@ -283,12 +286,20 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                       setTimeout(() => renameInputRef.current?.focus(), 50);
                     }}
                   >
-                    {/* Active indicator */}
+                    {/* Status indicator: active / locked / free */}
                     <div
                       className="w-2 h-2 rounded-full flex-shrink-0"
                       style={{
-                        background: isActive ? 'var(--accent-bright)' : 'rgba(255,255,255,0.15)',
-                        boxShadow: isActive ? '0 0 6px rgba(127,0,255,0.5)' : 'none',
+                        background: isActive
+                          ? 'var(--accent-bright)'
+                          : isLockedByOther
+                            ? 'rgb(251, 191, 36)'
+                            : 'rgba(255,255,255,0.15)',
+                        boxShadow: isActive
+                          ? '0 0 6px rgba(127,0,255,0.5)'
+                          : isLockedByOther
+                            ? '0 0 6px rgba(251,191,36,0.4)'
+                            : 'none',
                       }}
                     />
 
@@ -327,12 +338,17 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                       </span>
                     )}
 
-                    {/* Device tag */}
-                    {ws.device_tag && (
+                    {/* Device / lock info */}
+                    {isLockedByOther ? (
+                      <span className="text-xs flex-shrink-0 flex items-center gap-1" style={{ color: 'rgba(251,191,36,0.6)', fontSize: '10px' }}>
+                        {(ws.lock?.device_type || lockInfo[ws.id]?.device_type) === 'phone' ? '\uD83D\uDCF1' : '\uD83D\uDCBB'}
+                        <span>In use</span>
+                      </span>
+                    ) : ws.device_tag ? (
                       <span className="text-xs flex-shrink-0" style={{ color: 'rgba(255,255,255,0.2)', fontSize: '10px' }}>
                         {ws.device_tag}
                       </span>
-                    )}
+                    ) : null}
 
                     {/* Delete button — only visible on hover, not for active session */}
                     {!isActive && wsSessions.length > 1 && (

@@ -87,6 +87,9 @@ export default function FileTreeItem({
     stopPropagation: true,
   });
 
+  // Guard: prevent blur from re-submitting after Enter/Escape
+  const renameSubmittedRef = useRef(false);
+
   // Mobile double-tap detection: two taps on same file within 5s
   const lastTapRef = useRef<{ path: string; time: number } | null>(null);
 
@@ -179,10 +182,17 @@ export default function FileTreeItem({
           title="Rename"
           autoFocus
           onKeyDown={(e) => {
-            if (e.key === 'Enter') onRenameSubmit?.(e.currentTarget.value.trim());
-            if (e.key === 'Escape') onRenameCancel?.();
+            if (e.key === 'Enter') {
+              renameSubmittedRef.current = true;
+              onRenameSubmit?.(e.currentTarget.value.trim());
+            }
+            if (e.key === 'Escape') {
+              renameSubmittedRef.current = true;
+              onRenameCancel?.();
+            }
           }}
           onBlur={(e) => {
+            if (renameSubmittedRef.current) { renameSubmittedRef.current = false; return; }
             const val = e.currentTarget.value.trim();
             if (val && val !== file.name) onRenameSubmit?.(val);
             else onRenameCancel?.();
