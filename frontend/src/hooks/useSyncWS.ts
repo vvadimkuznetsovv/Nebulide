@@ -129,7 +129,7 @@ export function useSyncWS() {
         wsRef.current.close();
         wsRef.current = null;
       }
-      syncWs = null;
+      setSyncWs(null);
     };
   }, []);
 }
