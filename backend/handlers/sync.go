@@ -198,11 +198,15 @@ func (h *SyncHandler) HandleWebSocket(c *gin.Context) {
 	for {
 		_, raw, err := conn.ReadMessage()
 		if err != nil {
+			log.Printf("[Sync] ReadMessage error deviceID=%s: %v", deviceID, err)
 			break
 		}
 
+		log.Printf("[Sync] raw msg from deviceID=%s: %s", deviceID, string(raw))
+
 		var msg syncClientMsg
 		if err := json.Unmarshal(raw, &msg); err != nil {
+			log.Printf("[Sync] unmarshal error deviceID=%s: %v raw=%s", deviceID, err, string(raw))
 			continue
 		}
 
