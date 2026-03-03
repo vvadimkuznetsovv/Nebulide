@@ -213,13 +213,24 @@ func (h *SyncHandler) HandleWebSocket(c *gin.Context) {
 
 			existing, lockErr := h.acquireLock(ctx, msg.SessionID, userID, deviceID, deviceType)
 			if lockErr != nil {
-				// Another device holds the lock
-				activeSessionID = msg.SessionID
-				sendJSON(syncServerMsg{
-					Type:      "workspace_locked",
-					SessionID: msg.SessionID,
-					LockedBy:  existing,
-				})
+				// Another device holds the lock — check priority
+				isMobileHolder := existing.DeviceType == "Phone" || existing.DeviceType == "Tablet"
+
+				if isMobileHolder {
+					// Mobile holds lock → block new device (mobile priority)
+					activeSessionID = msg.SessionID
+					sendJSON(syncServerMsg{
+						Type:      "workspace_locked",
+						SessionID: msg.SessionID,
+						LockedBy:  existing,
+					})
+				} else {
+					// Desktop holds lock → auto-takeover (last-device-wins)
+					info := h.forceTakeover(ctx, msg.SessionID, userID, deviceID, deviceType)
+					activeSessionID = msg.SessionID
+					sendJSON(syncServerMsg{Type: "register_ok", SessionID: msg.SessionID})
+					h.publishLockEvent(userID, "force_disconnected", msg.SessionID, info)
+				}
 			} else {
 				activeSessionID = msg.SessionID
 				sendJSON(syncServerMsg{Type: "register_ok", SessionID: msg.SessionID})

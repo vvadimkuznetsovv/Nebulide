@@ -31,7 +31,7 @@ export default function EditorPanel() {
     setActiveTab,
     setFileTreeVisible,
   } = useWorkspaceStore();
-  const { visibility, toggleVisibility } = useLayoutStore();
+  const { showPanel } = useLayoutStore();
 
   const isMobile = useSyncExternalStore(subscribeToMedia, getIsMobile);
   const fileTreePanelRef = usePanelRef();
@@ -125,7 +125,7 @@ export default function EditorPanel() {
               onFileSelect={(path) => {
                 if (isPreviewableFile(path)) {
                   openPreviewFile(path);
-                  if (!visibility.preview) toggleVisibility('preview');
+                  showPanel('preview');
                 } else {
                   openFile(path, false);
                   ensureEditorVisible();
@@ -134,7 +134,7 @@ export default function EditorPanel() {
               onFileDoubleClick={(path) => {
                 if (isPreviewableFile(path)) {
                   openPreviewFile(path);
-                  if (!visibility.preview) toggleVisibility('preview');
+                  showPanel('preview');
                 } else {
                   openFile(path, true);
                   ensureEditorVisible();
@@ -143,7 +143,7 @@ export default function EditorPanel() {
               onFileOpenNewTab={(path) => {
                 if (isPreviewableFile(path)) {
                   openPreviewFile(path);
-                  if (!visibility.preview) toggleVisibility('preview');
+                  showPanel('preview');
                 } else {
                   openFile(path, true);
                   ensureEditorVisible();

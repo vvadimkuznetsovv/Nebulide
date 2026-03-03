@@ -235,16 +235,55 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 		return
 	}
 
-	// Delete used refresh token
-	database.DB.Delete(&rt)
-
 	var user models.User
 	if err := database.DB.First(&user, "id = ?", rt.UserID).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 		return
 	}
 
-	h.issueFullTokens(c, user)
+	// Generate new tokens
+	accessToken, err := utils.GenerateAccessToken(h.cfg.JWTSecret, user.ID, user.Username, false, h.cfg.JWTExpiry)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate access token"})
+		return
+	}
+
+	refreshToken, refreshHash, err := utils.GenerateRefreshToken()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate refresh token"})
+		return
+	}
+
+	newRT := models.RefreshToken{
+		ID:        uuid.New(),
+		UserID:    user.ID,
+		TokenHash: refreshHash,
+		ExpiresAt: time.Now().Add(h.cfg.JWTRefreshExpiry),
+	}
+
+	// Atomic: delete old token + create new token in one transaction
+	tx := database.DB.Begin()
+	if err := tx.Delete(&rt).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Token rotation failed"})
+		return
+	}
+	if err := tx.Create(&newRT).Error; err != nil {
+		tx.Rollback()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Token rotation failed"})
+		return
+	}
+	tx.Commit()
+
+	c.JSON(http.StatusOK, gin.H{
+		"access_token":  accessToken,
+		"refresh_token": refreshToken,
+		"user": gin.H{
+			"id":           user.ID,
+			"username":     user.Username,
+			"totp_enabled": user.TOTPEnabled,
+		},
+	})
 }
 
 func (h *AuthHandler) Logout(c *gin.Context) {
@@ -287,7 +326,10 @@ func (h *AuthHandler) issueFullTokens(c *gin.Context, user models.User) {
 		TokenHash: refreshHash,
 		ExpiresAt: time.Now().Add(h.cfg.JWTRefreshExpiry),
 	}
-	database.DB.Create(&rt)
+	if err := database.DB.Create(&rt).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to persist refresh token"})
+		return
+	}
 
 	c.JSON(http.StatusOK, gin.H{
 		"access_token":  accessToken,

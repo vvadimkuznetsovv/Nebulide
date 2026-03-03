@@ -61,6 +61,7 @@ interface LayoutState {
   movePanelToEdge: (panelId: PanelId, edge: 'left' | 'right' | 'top' | 'bottom') => void;
   updateSizes: (groupId: string, sizes: number[]) => void;
   toggleVisibility: (panelId: PanelId) => void;
+  showPanel: (panelId: PanelId) => void;
   resetLayout: () => void;
 
   // Detached editors
@@ -243,6 +244,23 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
         if (node && node.panelIds.length > 1) {
           newLayout = setNodeActiveTab(state.layout, node.id, panelId);
         }
+      }
+
+      const next = { ...state, layout: newLayout, visibility: newVis };
+      saveToStorage(next);
+      return { layout: newLayout, visibility: newVis };
+    });
+  },
+
+  showPanel: (panelId) => {
+    set((state) => {
+      const newVis = { ...state.visibility, [panelId]: true };
+      let newLayout = state.layout;
+
+      // Always activate the panel in its node (make it the active tab)
+      const node = findPanelNode(state.layout, panelId);
+      if (node) {
+        newLayout = setNodeActiveTab(state.layout, node.id, panelId);
       }
 
       const next = { ...state, layout: newLayout, visibility: newVis };
