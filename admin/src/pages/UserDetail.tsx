@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getUser, getUserTerminals, killTerminal, deleteWorkspace, deleteUser, type UserDetail as UserDetailType, type TerminalSession } from '../api/admin';
 import ConfirmDialog from '../components/ConfirmDialog';
@@ -13,7 +13,7 @@ function formatBytes(bytes: number): string {
 
 type TabId = 'workspace' | 'terminals';
 
-const tabs: { id: TabId; label: string; icon: JSX.Element }[] = [
+const tabs: { id: TabId; label: string; icon: ReactNode }[] = [
   {
     id: 'workspace',
     label: 'Workspace',

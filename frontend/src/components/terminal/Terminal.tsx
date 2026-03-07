@@ -46,6 +46,8 @@ interface TermSession {
   reconnectTimer: number | null;
   reconnectAttempts: number;
   notifyRerender: (() => void) | null;
+  lastCols: number;
+  lastRows: number;
 }
 
 const sessions = new Map<string, TermSession>();
@@ -76,6 +78,8 @@ function createXterm(instanceId: string): TermSession {
     reconnectTimer: null,
     reconnectAttempts: 0,
     notifyRerender: null,
+    lastCols: 0,
+    lastRows: 0,
   };
 
   const xterm = new XTerm({
@@ -458,7 +462,13 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
       s.fitAddon.fit();
       const dims = s.fitAddon.proposeDimensions();
       if (dims && s.ws?.readyState === WebSocket.OPEN) {
-        s.ws.send(JSON.stringify({ type: 'resize', rows: dims.rows, cols: dims.cols }));
+        // Only send resize when dimensions actually changed — prevents
+        // redundant SIGWINCH signals that cause prompt duplication on mobile
+        if (dims.cols !== s.lastCols || dims.rows !== s.lastRows) {
+          s.lastCols = dims.cols;
+          s.lastRows = dims.rows;
+          s.ws.send(JSON.stringify({ type: 'resize', rows: dims.rows, cols: dims.cols }));
+        }
       }
     } catch { /* ignore */ }
   }, [instanceId]);
@@ -484,14 +494,18 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
         s.xterm.open(el);
       }
       s.container = el;
+      // Refresh viewport after re-attachment to prevent visual artifacts
+      s.xterm.refresh(0, s.xterm.rows - 1);
     }
 
-    setTimeout(fit, 50);
+    // Delay fit to let DOM settle (especially on mobile tab switches)
+    setTimeout(fit, 100);
 
-    let rafId = 0;
+    let resizeTimer = 0;
     const resizeObserver = new ResizeObserver(() => {
-      cancelAnimationFrame(rafId);
-      rafId = requestAnimationFrame(() => fit());
+      // Debounce 150ms — prevents rapid-fire resize during tab switch animations
+      clearTimeout(resizeTimer);
+      resizeTimer = window.setTimeout(() => fit(), 150);
     });
     resizeObserver.observe(el);
 
@@ -515,7 +529,7 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
 
     return () => {
       console.log(`[Terminal] useEffect CLEANUP id=${instanceIdRef.current} persistent=${persistentRef.current}`);
-      cancelAnimationFrame(rafId);
+      clearTimeout(resizeTimer);
       resizeObserver.disconnect();
       writeDisposable.dispose();
       document.removeEventListener('visibilitychange', onVisibilityChange);
