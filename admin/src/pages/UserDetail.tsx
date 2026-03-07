@@ -87,17 +87,31 @@ export default function UserDetail() {
           <table className="glass-table">
             <thead>
               <tr>
+                <th>PID</th>
                 <th>Instance</th>
                 <th>Status</th>
+                <th>CPU</th>
+                <th>RAM</th>
+                <th>Command</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {terminals.map((t) => (
                 <tr key={t.session_key}>
+                  <td style={{ fontFamily: 'monospace', fontSize: '13px' }}>{t.pid || '—'}</td>
                   <td style={{ fontFamily: 'monospace' }}>{t.instance_id}</td>
                   <td>
                     <span className={`badge ${t.alive ? 'active' : ''}`}>{t.alive ? 'Alive' : 'Dead'}</span>
+                  </td>
+                  <td style={{ fontFamily: 'monospace', fontSize: '13px' }}>
+                    {t.cpu_percent > 0 ? t.cpu_percent.toFixed(1) + '%' : '—'}
+                  </td>
+                  <td style={{ fontFamily: 'monospace', fontSize: '13px' }}>
+                    {t.memory_rss_bytes > 0 ? formatBytes(t.memory_rss_bytes) : '—'}
+                  </td>
+                  <td style={{ color: 'var(--text-muted)', fontSize: '12px', fontFamily: 'monospace', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {t.command || '—'}
                   </td>
                   <td>
                     <button

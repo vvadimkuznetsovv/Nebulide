@@ -16,9 +16,12 @@ export interface UserDetail extends UserListItem {
 
 export interface TerminalSession {
   session_key: string;
-  user_id: string;
   instance_id: string;
   alive: boolean;
+  pid: number;
+  memory_rss_bytes: number;
+  cpu_percent: number;
+  command: string;
 }
 
 export interface Invite {

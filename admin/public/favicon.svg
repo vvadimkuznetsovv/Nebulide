@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <filter id="lava" x="-50%" y="-50%" width="200%" height="200%" color-interpolation-filters="sRGB">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="5.5" result="blur"/>
+      <feColorMatrix in="blur" type="matrix"
+        values="1 0 0 0 0
+                0 1 0 0 0
+                0 0 1 0 0
+                0 0 0 20 -9"
+        result="merged"/>
+      <feGaussianBlur in="merged" stdDeviation="3.5" result="glow1"/>
+      <feGaussianBlur in="merged" stdDeviation="7"   result="glow2"/>
+      <feMerge>
+        <feMergeNode in="glow2"/>
+        <feMergeNode in="glow1"/>
+        <feMergeNode in="merged"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <rect width="100" height="100" rx="22" fill="#030108"/>
+
+  <g filter="url(#lava)">
+    <!-- Большой — сольётся со средним -->
+    <ellipse cx="38" cy="43" rx="19" ry="16" transform="rotate(-20, 38, 43)" fill="#7F00FF"/>
+    <!-- Средний — рядом с большим -->
+    <ellipse cx="58" cy="59" rx="15" ry="13" transform="rotate(-8, 58, 59)" fill="#7F00FF"/>
+    <!-- Маленький правый верх -->
+    <ellipse cx="77" cy="28" rx="10" ry="12" transform="rotate(15, 77, 28)" fill="#7F00FF"/>
+    <!-- Крошечный левый низ -->
+    <ellipse cx="29" cy="78" rx="8" ry="10" transform="rotate(25, 29, 78)" fill="#7F00FF"/>
+  </g>
+</svg>

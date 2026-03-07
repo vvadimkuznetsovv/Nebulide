@@ -182,11 +182,12 @@ export default function Monitoring() {
                 <thead>
                   <tr>
                     <th>PID</th>
-                    <th>Пользователь</th>
-                    <th>Инстанс</th>
-                    <th>Статус</th>
+                    <th>User</th>
+                    <th>Instance</th>
+                    <th>Status</th>
+                    <th>CPU</th>
                     <th>RAM</th>
-                    <th>Команда</th>
+                    <th>Command</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -201,6 +202,9 @@ export default function Monitoring() {
                         <span className={`badge ${p.alive ? 'active' : 'danger'}`}>
                           {p.alive ? 'alive' : 'dead'}
                         </span>
+                      </td>
+                      <td style={{ fontFamily: 'monospace', fontSize: '13px', color: p.cpu_percent > 50 ? 'var(--warning)' : 'var(--text-primary)' }}>
+                        {p.cpu_percent > 0 ? p.cpu_percent.toFixed(1) + '%' : '—'}
                       </td>
                       <td style={{ fontFamily: 'monospace', fontSize: '13px' }}>
                         {p.memory_rss_bytes > 0 ? formatBytes(p.memory_rss_bytes) : '—'}

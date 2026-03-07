@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"os/exec"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -146,14 +148,44 @@ func (h *AdminHandler) DeleteUser(c *gin.Context) {
 
 // ── Terminals ──
 
+type terminalDetail struct {
+	SessionKey  string  `json:"session_key"`
+	InstanceID  string  `json:"instance_id"`
+	Alive       bool    `json:"alive"`
+	PID         int     `json:"pid"`
+	MemoryRSS   int64   `json:"memory_rss_bytes"`
+	CPUPercent  float64 `json:"cpu_percent"`
+	Command     string  `json:"command"`
+}
+
 func (h *AdminHandler) ListTerminals(c *gin.Context) {
 	if !requireAdmin(c) {
 		return
 	}
 
 	id := c.Param("id")
-	sessions := h.terminal.ListUserSessions(id)
-	c.JSON(http.StatusOK, sessions)
+	allSessions := h.terminal.ListSessionsWithPID()
+	prefix := "term:" + id + ":"
+	var result []terminalDetail
+	for _, s := range allSessions {
+		if !strings.HasPrefix(s.Key, prefix) {
+			continue
+		}
+		td := terminalDetail{
+			SessionKey: s.Key,
+			InstanceID: s.InstanceID,
+			Alive:      s.Alive,
+			PID:        s.PID,
+		}
+		if runtime.GOOS == "linux" && s.PID > 0 {
+			td.MemoryRSS, td.Command, td.CPUPercent = readProcStats(s.PID)
+		}
+		result = append(result, td)
+	}
+	if result == nil {
+		result = []terminalDetail{}
+	}
+	c.JSON(http.StatusOK, result)
 }
 
 func (h *AdminHandler) KillTerminal(c *gin.Context) {
@@ -328,20 +360,27 @@ func (h *AdminHandler) Monitoring(c *gin.Context) {
 
 		// Read process stats from /proc on Linux
 		if runtime.GOOS == "linux" && s.PID > 0 {
-			pi.MemoryRSS, pi.Command = readProcStats(s.PID)
+			pi.MemoryRSS, pi.Command, pi.CPUPercent = readProcStats(s.PID)
 		}
 
 		processes = append(processes, pi)
 	}
 
 	// System info
+	cpuCount := runtime.NumCPU()
+	if runtime.GOOS == "linux" {
+		if n := countCPUCores(); n > 0 {
+			cpuCount = n
+		}
+	}
 	sys := systemInfo{
-		CPUCount:   runtime.NumCPU(),
+		CPUCount:   cpuCount,
 		GoRoutines: runtime.NumGoroutine(),
 	}
 
 	if runtime.GOOS == "linux" {
 		sys.MemTotal, sys.MemUsed, sys.MemPercent = readMemInfo()
+		sys.DiskTotal, sys.DiskUsed, sys.DiskPercent = readDiskInfo("/")
 	}
 
 	c.JSON(http.StatusOK, monitoringResponse{
@@ -350,8 +389,8 @@ func (h *AdminHandler) Monitoring(c *gin.Context) {
 	})
 }
 
-// readProcStats reads RSS and command from /proc/{pid}.
-func readProcStats(pid int) (rss int64, command string) {
+// readProcStats reads RSS, command, and CPU% from /proc/{pid}.
+func readProcStats(pid int) (rss int64, command string, cpuPercent float64) {
 	// RSS from /proc/{pid}/statm (resident pages)
 	statm, err := os.ReadFile(fmt.Sprintf("/proc/%d/statm", pid))
 	if err == nil {
@@ -371,7 +410,94 @@ func readProcStats(pid int) (rss int64, command string) {
 			command = command[:120] + "..."
 		}
 	}
+
+	// CPU% — snapshot utime+stime, sleep 200ms, snapshot again
+	cpuPercent = readProcCPU(pid)
 	return
+}
+
+// readProcCPU measures CPU usage over a short interval.
+func readProcCPU(pid int) float64 {
+	readTicks := func() (int64, int64, bool) {
+		stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+		if err != nil {
+			return 0, 0, false
+		}
+		// Fields after last ')' — fields[0]=utime(13), fields[1]=stime(14) (0-indexed from after ')')
+		s := string(stat)
+		idx := strings.LastIndex(s, ") ")
+		if idx < 0 {
+			return 0, 0, false
+		}
+		fields := strings.Fields(s[idx+2:])
+		if len(fields) < 13 {
+			return 0, 0, false
+		}
+		utime, _ := strconv.ParseInt(fields[11], 10, 64)
+		stime, _ := strconv.ParseInt(fields[12], 10, 64)
+
+		// System total from /proc/stat
+		sysStat, err := os.ReadFile("/proc/stat")
+		if err != nil {
+			return 0, 0, false
+		}
+		firstLine := strings.SplitN(string(sysStat), "\n", 2)[0]
+		cpuFields := strings.Fields(firstLine)
+		var total int64
+		for _, f := range cpuFields[1:] {
+			v, _ := strconv.ParseInt(f, 10, 64)
+			total += v
+		}
+		return utime + stime, total, true
+	}
+
+	proc1, sys1, ok1 := readTicks()
+	if !ok1 {
+		return 0
+	}
+	time.Sleep(200 * time.Millisecond)
+	proc2, sys2, ok2 := readTicks()
+	if !ok2 || sys2 == sys1 {
+		return 0
+	}
+	return float64(proc2-proc1) / float64(sys2-sys1) * 100 * float64(runtime.NumCPU())
+}
+
+// readDiskInfo reads disk usage via `df` command (works in Docker/Linux).
+func readDiskInfo(path string) (total, used int64, percent float64) {
+	out, err := exec.Command("df", "-B1", path).Output()
+	if err != nil {
+		return
+	}
+	lines := strings.Split(strings.TrimSpace(string(out)), "\n")
+	if len(lines) < 2 {
+		return
+	}
+	fields := strings.Fields(lines[1])
+	if len(fields) < 4 {
+		return
+	}
+	total, _ = strconv.ParseInt(fields[1], 10, 64)
+	used, _ = strconv.ParseInt(fields[2], 10, 64)
+	if total > 0 {
+		percent = float64(used) / float64(total) * 100
+	}
+	return
+}
+
+// countCPUCores counts physical CPU cores from /proc/cpuinfo.
+func countCPUCores() int {
+	data, err := os.ReadFile("/proc/cpuinfo")
+	if err != nil {
+		return 0
+	}
+	count := 0
+	for _, line := range strings.Split(string(data), "\n") {
+		if strings.HasPrefix(line, "processor") {
+			count++
+		}
+	}
+	return count
 }
 
 // readMemInfo reads system memory from /proc/meminfo.
