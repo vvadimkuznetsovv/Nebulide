@@ -681,8 +681,20 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                   {!isActive && wsSessions.length > 1 && (
                     <button
                       type="button"
-                      className="opacity-0 group-hover:opacity-100 transition-opacity w-5 h-5 rounded-md flex items-center justify-center flex-shrink-0"
-                      style={{ color: 'rgba(255,255,255,0.3)' }}
+                      className="opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0"
+                      style={{
+                        width: '22px',
+                        height: '22px',
+                        borderRadius: '7px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        background: 'rgba(127, 0, 255, 0.15)',
+                        border: '1px solid rgba(160, 100, 255, 0.4)',
+                        color: 'rgba(255,255,255,0.8)',
+                        backdropFilter: 'blur(8px)',
+                        boxShadow: '0 0 6px 1px rgba(127,0,255,0.2)',
+                      }}
                       onClick={(e) => {
                         e.stopPropagation();
                         if (window.confirm(`Delete workspace "${ws.name}"?`)) {
@@ -691,7 +703,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                       }}
                       title="Delete workspace"
                     >
-                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
                         <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
                       </svg>
                     </button>

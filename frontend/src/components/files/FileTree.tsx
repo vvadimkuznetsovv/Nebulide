@@ -62,21 +62,30 @@ function getMenuItems(target: FileEntry | null): ContextMenuItem[] {
   ];
 }
 
-const EXPANDED_KEY = 'nebulide-expanded-folders:';
+const EXPANDED_KEY = 'nebulide-expanded-folders';
+const CURRENT_PATH_KEY = 'nebulide-filetree-path';
 
-function saveExpandedFolders(root: string, folders: Set<string>) {
+function saveExpandedFolders(folders: Set<string>) {
   try {
-    localStorage.setItem(EXPANDED_KEY + root, JSON.stringify([...folders]));
+    localStorage.setItem(EXPANDED_KEY, JSON.stringify([...folders]));
   } catch { /* quota exceeded — ignore */ }
 }
 
-function loadExpandedFolders(root: string): Set<string> {
+function loadExpandedFolders(): Set<string> {
   try {
-    const saved = localStorage.getItem(EXPANDED_KEY + root);
+    const saved = localStorage.getItem(EXPANDED_KEY);
     return saved ? new Set(JSON.parse(saved) as string[]) : new Set();
   } catch {
     return new Set();
   }
+}
+
+function saveCurrentPath(path: string) {
+  try { localStorage.setItem(CURRENT_PATH_KEY, path); } catch { /* ignore */ }
+}
+
+function loadCurrentPath(): string | null {
+  try { return localStorage.getItem(CURRENT_PATH_KEY); } catch { return null; }
 }
 
 export default function FileTree({ rootPath, onFileSelect, onFileDoubleClick, onFileOpenNewTab }: FileTreeProps) {
@@ -107,6 +116,7 @@ export default function FileTree({ rootPath, onFileSelect, onFileDoubleClick, on
       const { data } = await listFiles(path);
       setFiles(data.files || []);
       setCurrentPath(data.path);
+      saveCurrentPath(data.path);
     } catch (err) {
       console.error('Failed to list files:', err);
     } finally {
@@ -134,13 +144,13 @@ export default function FileTree({ rootPath, onFileSelect, onFileDoubleClick, on
       setExpandedFolders(prev => {
         const next = new Set(prev);
         next.delete(folderPath);
-        saveExpandedFolders(currentPath, next);
+        saveExpandedFolders(next);
         return next;
       });
     } else {
       setExpandedFolders(prev => {
         const next = new Set(prev).add(folderPath);
-        saveExpandedFolders(currentPath, next);
+        saveExpandedFolders(next);
         return next;
       });
       if (!childrenCache.has(folderPath)) {
@@ -153,7 +163,7 @@ export default function FileTree({ rootPath, onFileSelect, onFileDoubleClick, on
           setExpandedFolders(prev => {
             const next = new Set(prev);
             next.delete(folderPath);
-            saveExpandedFolders(currentPath, next);
+            saveExpandedFolders(next);
             return next;
           });
         } finally {
@@ -221,18 +231,21 @@ export default function FileTree({ rootPath, onFileSelect, onFileDoubleClick, on
   useEffect(() => {
     setChildrenCache(new Map());
     setCreatingInFolder(null);
-    const root = rootPath || '';
 
     // Restore expanded folders from localStorage
-    const saved = loadExpandedFolders(root);
+    const saved = loadExpandedFolders();
     setExpandedFolders(saved);
+
+    // Restore last viewed path (if no explicit rootPath override)
+    const initialPath = rootPath || loadCurrentPath() || undefined;
 
     // Load root files, then re-fetch children for all saved expanded folders
     setLoading(true);
-    listFiles(rootPath)
+    listFiles(initialPath)
       .then(({ data }) => {
         setFiles(data.files || []);
         setCurrentPath(data.path);
+        saveCurrentPath(data.path);
         // Fetch children for each expanded folder in parallel
         if (saved.size > 0) {
           const fetches = [...saved].map((fp) =>
@@ -253,7 +266,7 @@ export default function FileTree({ rootPath, onFileSelect, onFileDoubleClick, on
             // Remove folders that no longer exist
             if (validExpanded.size < saved.size) {
               setExpandedFolders(validExpanded);
-              saveExpandedFolders(root, validExpanded);
+              saveExpandedFolders(validExpanded);
             }
           });
         }
