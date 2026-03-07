@@ -29,130 +29,17 @@ function ProgressBar({ percent, color }: { percent: number; color: string }) {
   );
 }
 
-const MAX_HISTORY = 60; // 60 points × 5s = 5 minutes
 const ACID_GREEN = '#39ff14';
-
-
-function CpuChart({ history }: { history: number[] }) {
-  const w = 600;
-  const h = 140;
-  const padL = 36;
-  const padR = 8;
-  const padT = 8;
-  const padB = 24;
-  const chartW = w - padL - padR;
-  const chartH = h - padT - padB;
-
-  const points = history.map((val, i) => {
-    const x = padL + (i / (MAX_HISTORY - 1)) * chartW;
-    const y = padT + chartH - (Math.min(val, 100) / 100) * chartH;
-    return `${x},${y}`;
-  });
-
-  const linePath = points.length > 1 ? `M${points.join('L')}` : '';
-  const areaPath = points.length > 1
-    ? `M${padL + (0 / (MAX_HISTORY - 1)) * chartW},${padT + chartH}L${points.join('L')}L${padL + ((history.length - 1) / (MAX_HISTORY - 1)) * chartW},${padT + chartH}Z`
-    : '';
-
-  const gridLines = [0, 25, 50, 75, 100];
-
-  return (
-    <div className="stat-card" style={{ padding: '16px', marginBottom: '28px' }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '12px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={ACID_GREEN} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-          </svg>
-          <span style={{ color: 'var(--text-primary)', fontSize: '15px', fontWeight: 600 }}>CPU Load</span>
-        </div>
-        <span style={{
-          color: ACID_GREEN,
-          fontSize: '22px',
-          fontWeight: 700,
-          fontFamily: 'monospace',
-          textShadow: `0 0 8px rgba(57,255,20,0.5)`,
-        }}>
-          {history.length > 0 ? history[history.length - 1].toFixed(1) + '%' : '—'}
-        </span>
-      </div>
-
-      <svg viewBox={`0 0 ${w} ${h}`} width="100%" style={{ display: 'block' }}>
-        <defs>
-          <linearGradient id="cpuGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor={ACID_GREEN} stopOpacity="0.3" />
-            <stop offset="100%" stopColor={ACID_GREEN} stopOpacity="0.02" />
-          </linearGradient>
-          <filter id="glow">
-            <feGaussianBlur stdDeviation="2" result="blur" />
-            <feMerge>
-              <feMergeNode in="blur" />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
-          </filter>
-        </defs>
-
-        {/* Grid lines */}
-        {gridLines.map((val) => {
-          const y = padT + chartH - (val / 100) * chartH;
-          return (
-            <g key={val}>
-              <line x1={padL} y1={y} x2={w - padR} y2={y} stroke="rgba(255,255,255,0.06)" strokeWidth="1" />
-              <text x={padL - 6} y={y + 4} fill="rgba(255,255,255,0.3)" fontSize="10" textAnchor="end" fontFamily="monospace">
-                {val}%
-              </text>
-            </g>
-          );
-        })}
-
-        {/* Time labels */}
-        <text x={padL} y={h - 4} fill="rgba(255,255,255,0.25)" fontSize="9" fontFamily="monospace">5m ago</text>
-        <text x={w - padR} y={h - 4} fill="rgba(255,255,255,0.25)" fontSize="9" textAnchor="end" fontFamily="monospace">now</text>
-
-        {/* Area fill */}
-        {areaPath && (
-          <path d={areaPath} fill="url(#cpuGrad)" />
-        )}
-
-        {/* Line */}
-        {linePath && (
-          <path d={linePath} fill="none" stroke={ACID_GREEN} strokeWidth="2" filter="url(#glow)" strokeLinejoin="round" />
-        )}
-
-        {/* Current value dot */}
-        {history.length > 0 && (
-          <circle
-            cx={padL + ((history.length - 1) / (MAX_HISTORY - 1)) * chartW}
-            cy={padT + chartH - (Math.min(history[history.length - 1], 100) / 100) * chartH}
-            r="4"
-            fill={ACID_GREEN}
-            style={{ filter: `drop-shadow(0 0 6px ${ACID_GREEN})` }}
-          />
-        )}
-      </svg>
-    </div>
-  );
-}
 
 export default function Monitoring() {
   const [data, setData] = useState<MonitoringData | null>(null);
   const [error, setError] = useState('');
   const [autoRefresh, setAutoRefresh] = useState(true);
   const intervalRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
-  const cpuHistoryRef = useRef<number[]>([]);
-  const [cpuHistory, setCpuHistory] = useState<number[]>([]);
 
   const fetchData = () => {
     getMonitoring()
-      .then((r) => {
-        setData(r.data);
-        setError('');
-        // Accumulate CPU history
-        const cpu = r.data.system.cpu_percent ?? 0;
-        const hist = [...cpuHistoryRef.current, cpu];
-        if (hist.length > MAX_HISTORY) hist.splice(0, hist.length - MAX_HISTORY);
-        cpuHistoryRef.current = hist;
-        setCpuHistory(hist);
-      })
+      .then((r) => { setData(r.data); setError(''); })
       .catch(() => setError('Failed to load monitoring data'));
   };
 
@@ -208,9 +95,6 @@ export default function Monitoring() {
         <p style={{ color: 'var(--text-muted)' }}>Loading...</p>
       ) : (
         <>
-          {/* CPU Chart */}
-          <CpuChart history={cpuHistory} />
-
           {/* System stats cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4" style={{ marginBottom: '28px' }}>
             {/* CPU */}

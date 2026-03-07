@@ -51,6 +51,19 @@ export const getUserTerminals = (id: string) => api.get<TerminalSession[]>(`/adm
 export const killTerminal = (userId: string, instanceId: string) =>
   api.delete(`/admin/users/${userId}/terminals/${instanceId}`);
 
+// Sessions
+export interface WorkspaceSession {
+  id: string;
+  user_id: string;
+  name: string;
+  device_tag: string;
+  created_at: string;
+  updated_at: string;
+}
+export const getUserSessions = (id: string) => api.get<WorkspaceSession[]>(`/admin/users/${id}/sessions`);
+export const deleteUserSession = (userId: string, sessionId: string) =>
+  api.delete(`/admin/users/${userId}/sessions/${sessionId}`);
+
 // Workspace
 export const getWorkspaceStats = (id: string) => api.get(`/admin/users/${id}/workspace/stats`);
 export const deleteWorkspace = (id: string) => api.delete(`/admin/users/${id}/workspace`);

@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getUser, getUserTerminals, killTerminal, deleteWorkspace, deleteUser, type UserDetail as UserDetailType, type TerminalSession } from '../api/admin';
+import { getUser, getUserTerminals, getUserSessions, killTerminal, deleteWorkspace, deleteUser, deleteUserSession, type UserDetail as UserDetailType, type TerminalSession, type WorkspaceSession } from '../api/admin';
 import ConfirmDialog from '../components/ConfirmDialog';
 
 function formatBytes(bytes: number): string {
@@ -11,9 +11,20 @@ function formatBytes(bytes: number): string {
   return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 }
 
-type TabId = 'workspace' | 'terminals';
+type TabId = 'sessions' | 'workspace' | 'terminals';
 
 const tabs: { id: TabId; label: string; icon: ReactNode }[] = [
+  {
+    id: 'sessions',
+    label: 'Sessions',
+    icon: (
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <rect x="2" y="3" width="20" height="14" rx="2" />
+        <line x1="8" y1="21" x2="16" y2="21" />
+        <line x1="12" y1="17" x2="12" y2="21" />
+      </svg>
+    ),
+  },
   {
     id: 'workspace',
     label: 'Workspace',
@@ -40,13 +51,15 @@ export default function UserDetail() {
   const navigate = useNavigate();
   const [user, setUser] = useState<UserDetailType | null>(null);
   const [terminals, setTerminals] = useState<TerminalSession[]>([]);
+  const [sessions, setSessions] = useState<WorkspaceSession[]>([]);
   const [confirm, setConfirm] = useState<{ type: string; data?: string } | null>(null);
-  const [activeTab, setActiveTab] = useState<TabId>('workspace');
+  const [activeTab, setActiveTab] = useState<TabId>('sessions');
 
   const load = () => {
     if (!id) return;
     getUser(id).then((r) => setUser(r.data));
     getUserTerminals(id).then((r) => setTerminals(r.data));
+    getUserSessions(id).then((r) => setSessions(r.data));
   };
 
   useEffect(load, [id]);
@@ -61,6 +74,9 @@ export default function UserDetail() {
       load();
     } else if (confirm.type === 'kill-terminal' && confirm.data) {
       await killTerminal(id, confirm.data);
+      load();
+    } else if (confirm.type === 'delete-session' && confirm.data) {
+      await deleteUserSession(id, confirm.data);
       load();
     }
     setConfirm(null);
@@ -147,6 +163,18 @@ export default function UserDetail() {
           >
             {tab.icon}
             {tab.label}
+            {tab.id === 'sessions' && sessions.length > 0 && (
+              <span style={{
+                background: 'rgba(127,0,255,0.3)',
+                color: 'var(--accent-bright)',
+                fontSize: '11px',
+                padding: '1px 6px',
+                borderRadius: '10px',
+                fontWeight: 600,
+              }}>
+                {sessions.length}
+              </span>
+            )}
             {tab.id === 'terminals' && aliveTerminals.length > 0 && (
               <span style={{
                 background: 'rgba(127,0,255,0.3)',
@@ -164,6 +192,63 @@ export default function UserDetail() {
       </div>
 
       {/* Tab content */}
+      {activeTab === 'sessions' && (
+        <div>
+          {sessions.length === 0 ? (
+            <div className="stat-card" style={{ padding: '32px', textAlign: 'center' }}>
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--text-tertiary)" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ margin: '0 auto 12px' }}>
+                <rect x="2" y="3" width="20" height="14" rx="2" />
+                <line x1="8" y1="21" x2="16" y2="21" />
+                <line x1="12" y1="17" x2="12" y2="21" />
+              </svg>
+              <p style={{ color: 'var(--text-muted)' }}>No workspace sessions</p>
+            </div>
+          ) : (
+            <div className="glass-table-wrap">
+              <table className="glass-table">
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Device</th>
+                    <th>Updated</th>
+                    <th>Created</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sessions.map((s) => (
+                    <tr key={s.id}>
+                      <td style={{ fontWeight: 500 }}>{s.name}</td>
+                      <td>
+                        {s.device_tag ? (
+                          <span className="badge active" style={{ fontSize: '11px' }}>{s.device_tag}</span>
+                        ) : (
+                          <span style={{ color: 'var(--text-muted)' }}>—</span>
+                        )}
+                      </td>
+                      <td style={{ color: 'var(--text-muted)', fontSize: '13px' }}>
+                        {new Date(s.updated_at).toLocaleString()}
+                      </td>
+                      <td style={{ color: 'var(--text-muted)', fontSize: '13px' }}>
+                        {new Date(s.created_at).toLocaleString()}
+                      </td>
+                      <td>
+                        <button
+                          className="glass-btn danger small"
+                          onClick={() => setConfirm({ type: 'delete-session', data: s.id })}
+                        >
+                          Delete
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+
       {activeTab === 'workspace' && (
         <div>
           <div className="stat-card" style={{ padding: '20px', marginBottom: '16px' }}>
@@ -272,11 +357,13 @@ export default function UserDetail() {
         open={!!confirm}
         title={
           confirm?.type === 'delete-user' ? 'Delete User' :
-          confirm?.type === 'delete-workspace' ? 'Clear Workspace' : 'Kill Terminal'
+          confirm?.type === 'delete-workspace' ? 'Clear Workspace' :
+          confirm?.type === 'delete-session' ? 'Delete Session' : 'Kill Terminal'
         }
         message={
           confirm?.type === 'delete-user' ? `Permanently delete "${user.username}" and all their data?` :
           confirm?.type === 'delete-workspace' ? `Clear all files in "${user.username}" workspace?` :
+          confirm?.type === 'delete-session' ? `Delete this workspace session?` :
           `Kill terminal "${confirm?.data}"?`
         }
         confirmLabel={confirm?.type === 'kill-terminal' ? 'Kill' : 'Delete'}

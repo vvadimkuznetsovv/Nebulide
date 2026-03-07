@@ -111,6 +111,30 @@ func (h *AdminHandler) GetUser(c *gin.Context) {
 	})
 }
 
+func (h *AdminHandler) ListUserSessions(c *gin.Context) {
+	if !requireAdmin(c) {
+		return
+	}
+	id := c.Param("id")
+	var sessions []models.WorkspaceSession
+	database.DB.Where("user_id = ?", id).Order("updated_at DESC").Find(&sessions)
+	c.JSON(http.StatusOK, sessions)
+}
+
+func (h *AdminHandler) DeleteUserSession(c *gin.Context) {
+	if !requireAdmin(c) {
+		return
+	}
+	userID := c.Param("id")
+	sessionID := c.Param("sessionId")
+	result := database.DB.Where("id = ? AND user_id = ?", sessionID, userID).Delete(&models.WorkspaceSession{})
+	if result.RowsAffected == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
 func (h *AdminHandler) DeleteUser(c *gin.Context) {
 	if !requireAdmin(c) {
 		return
@@ -491,7 +515,7 @@ func readSystemCPU() float64 {
 	if !ok1 {
 		return 0
 	}
-	time.Sleep(100 * time.Millisecond)
+	time.Sleep(500 * time.Millisecond)
 	idle2, total2, ok2 := readTotal()
 	if !ok2 || total2 == total1 {
 		return 0

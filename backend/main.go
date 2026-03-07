@@ -132,6 +132,8 @@ func main() {
 		admin.DELETE("/users/:id", adminHandler.DeleteUser)
 		admin.GET("/users/:id/terminals", adminHandler.ListTerminals)
 		admin.DELETE("/users/:id/terminals/:instanceId", adminHandler.KillTerminal)
+		admin.GET("/users/:id/sessions", adminHandler.ListUserSessions)
+		admin.DELETE("/users/:id/sessions/:sessionId", adminHandler.DeleteUserSession)
 		admin.GET("/users/:id/workspace/stats", adminHandler.WorkspaceStats)
 		admin.DELETE("/users/:id/workspace", adminHandler.DeleteWorkspace)
 		admin.GET("/stats", adminHandler.Stats)
