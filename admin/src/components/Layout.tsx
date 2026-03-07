@@ -7,7 +7,7 @@ const navItems = [
   { to: '/', label: 'Dashboard', icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0h4' },
   { to: '/users', label: 'Users', icon: 'M12 4.354a4 4 0 110 5.292M15 21H3v-1a6 6 0 0112 0v1zm0 0h6v-1a6 6 0 00-9-5.197M13 7a4 4 0 11-8 0 4 4 0 018 0z' },
   { to: '/invites', label: 'Invites', icon: 'M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z' },
-  { to: '/monitoring', label: 'Нагрузка', icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z' },
+  { to: '/monitoring', label: 'Monitoring', icon: 'M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z' },
 ];
 
 export default function Layout() {
@@ -21,15 +21,29 @@ export default function Layout() {
   };
 
   return (
-    <div className="min-h-screen flex" style={{ background: 'var(--bg-primary)' }}>
+    <div className="min-h-screen flex" style={{ position: 'relative' }}>
+      {/* Lava lamp background */}
+      <div className="lava-lamp">
+        <div className="lava-blob lava-blob-1" />
+        <div className="lava-blob lava-blob-2" />
+        <div className="lava-blob lava-blob-3" />
+        <div className="lava-blob lava-blob-4" />
+        <div className="lava-blob lava-blob-5" />
+        <div className="lava-blob lava-blob-6" />
+        <div className="lava-glow" />
+      </div>
+
       {/* Sidebar */}
       <aside
         className="flex flex-col"
         style={{
           width: '220px',
+          position: 'relative',
+          zIndex: 10,
           background: 'rgba(255,255,255,0.04)',
           borderRight: '1px solid var(--glass-border)',
           backdropFilter: 'blur(20px)',
+          WebkitBackdropFilter: 'blur(20px)',
         }}
       >
         <div style={{ padding: '20px 16px', borderBottom: '1px solid var(--glass-border)' }}>
@@ -63,7 +77,7 @@ export default function Layout() {
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 overflow-auto" style={{ padding: '24px 32px' }}>
+      <main className="flex-1 overflow-auto" style={{ padding: '24px 32px', position: 'relative', zIndex: 10 }}>
         <Outlet />
       </main>
     </div>

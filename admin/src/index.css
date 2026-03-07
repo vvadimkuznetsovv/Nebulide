@@ -422,23 +422,22 @@
      ========================================== */
   .mega-prefix {
     background: linear-gradient(120deg,
-      #a855f7 0%, #e0b0ff 20%,
-      #c084fc 40%, #f0d0ff 55%,
-      #a855f7 70%, #d8b4fe 85%,
-      #a855f7 100%);
+      #7F00FF 0%, #A64DFF 18%,
+      #9333EA 35%, #B366FF 50%,
+      #7F00FF 65%, #A64DFF 82%,
+      #7F00FF 100%);
     background-size: 250% 100%;
     -webkit-background-clip: text;
     background-clip: text;
     -webkit-text-fill-color: transparent;
-    filter: drop-shadow(0 0 18px rgba(168,85,247,0.9))
-            drop-shadow(0 0 40px rgba(127,0,255,0.6))
-            drop-shadow(0 0 6px rgba(200,160,255,0.8));
+    filter: drop-shadow(0 0 6px rgba(127,0,255,0.8))
+            drop-shadow(0 0 14px rgba(127,0,255,0.4));
     animation: megaNeon 4s ease-in-out infinite alternate;
   }
   @keyframes megaNeon {
-    0%   { filter: drop-shadow(0 0 14px rgba(168,85,247,0.8)) drop-shadow(0 0 30px rgba(127,0,255,0.5)) drop-shadow(0 0 4px rgba(200,160,255,0.7)); }
-    50%  { filter: drop-shadow(0 0 22px rgba(168,85,247,1))   drop-shadow(0 0 50px rgba(127,0,255,0.7)) drop-shadow(0 0 8px rgba(220,180,255,0.9)); }
-    100% { filter: drop-shadow(0 0 16px rgba(168,85,247,0.85)) drop-shadow(0 0 35px rgba(127,0,255,0.55)) drop-shadow(0 0 5px rgba(200,160,255,0.75)); }
+    0%   { filter: drop-shadow(0 0 5px rgba(127,0,255,0.7)) drop-shadow(0 0 12px rgba(127,0,255,0.3)); }
+    50%  { filter: drop-shadow(0 0 8px rgba(127,0,255,0.9)) drop-shadow(0 0 18px rgba(127,0,255,0.45)); }
+    100% { filter: drop-shadow(0 0 6px rgba(127,0,255,0.75)) drop-shadow(0 0 14px rgba(127,0,255,0.35)); }
   }
 
   .sidebar-glass-logo {
