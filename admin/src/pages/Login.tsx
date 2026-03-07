@@ -188,13 +188,10 @@ export default function Login() {
 
             <div style={{ height: '1px', background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent)', margin: '4px 0' }} />
 
-            <button type="submit" className="glass-btn primary" disabled={loading}
+            <button type="submit" className="btn-accent" disabled={loading}
               style={{
                 width: '100%', padding: '18px', borderRadius: '9999px',
                 fontSize: '16px', fontWeight: 700, letterSpacing: '0.02em',
-                background: loading ? 'rgba(127,0,255,0.15)' : 'rgba(127,0,255,0.25)',
-                borderColor: 'rgba(127,0,255,0.5)',
-                boxShadow: loading ? 'none' : '0 0 25px rgba(127,0,255,0.2), inset 0 1px 0 rgba(255,255,255,0.1)',
               }}>
               {loading ? 'Signing in...' : 'Sign In'}
             </button>
