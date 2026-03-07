@@ -21,6 +21,9 @@ jobs:
             echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S git -C /opt/nebulide pull origin main
             echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S npm ci --prefix /opt/nebulide/frontend
             echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S npm run build --prefix /opt/nebulide/frontend
+            echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S npm ci --prefix /opt/nebulide/admin
+            echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S npm run build --prefix /opt/nebulide/admin
+            echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S bash -c 'cp -r /opt/nebulide/admin/dist/* /var/www/mega/dist/'
             echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S sh -c 'cd /opt/nebulide/backend && /usr/local/go/bin/go build -o nebulide .'
             echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S docker compose -f /opt/nebulide/docker-compose.yml build
             echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S docker compose -f /opt/nebulide/docker-compose.yml down
