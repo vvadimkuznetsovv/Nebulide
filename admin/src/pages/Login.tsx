@@ -181,9 +181,24 @@ export default function Login() {
             </div>
 
             {error && (
-              <p style={{ color: 'var(--danger)', fontSize: '13px', textAlign: 'center' }}>
-                {error}
-              </p>
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: '10px',
+                padding: '14px 18px', borderRadius: '16px',
+                background: 'rgba(248, 113, 113, 0.08)',
+                border: '1px solid rgba(248, 113, 113, 0.2)',
+                backdropFilter: 'blur(8px)',
+              }}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--danger)" strokeWidth="2" strokeLinecap="round" style={{ flexShrink: 0 }}>
+                  <circle cx="12" cy="12" r="10" />
+                  <line x1="12" y1="8" x2="12" y2="12" />
+                  <line x1="12" y1="16" x2="12.01" y2="16" />
+                </svg>
+                <span style={{ color: 'rgba(248, 113, 113, 0.9)', fontSize: '13px', fontWeight: 500 }}>
+                  {error === 'Admin access required'
+                    ? 'This account does not have admin privileges'
+                    : error}
+                </span>
+              </div>
             )}
 
             <div style={{ height: '1px', background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent)', margin: '4px 0' }} />
