@@ -177,11 +177,23 @@
      GLASS CARD
      ========================================== */
   .glass-card {
+    position: relative;
     background: rgba(255, 255, 255, 0.04);
     border: 1px solid var(--glass-border);
     border-radius: 16px;
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
+    box-shadow: inset 0 1px 1px rgba(255,255,255,0.12), inset 0 -1px 1px rgba(0,0,0,0.08), 0 8px 40px rgba(0,0,0,0.35);
+    overflow: hidden;
+  }
+  .glass-card::before {
+    content: ''; position: absolute; inset: 0; border-radius: inherit;
+    background: linear-gradient(145deg, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0.03) 30%, transparent 55%);
+    pointer-events: none; z-index: 1;
+  }
+  .glass-card::after {
+    content: ''; position: absolute; inset: 0; z-index: -1; border-radius: inherit;
+    -webkit-backdrop-filter: blur(16px) saturate(170%) brightness(1.1);
+    backdrop-filter: blur(16px) saturate(170%) brightness(1.1);
+    isolation: isolate;
   }
 
   /* ==========================================
@@ -377,34 +389,46 @@
   }
 
   /* ==========================================
-     MEGA LOGO — shimmer animations
+     MEGA LOGO — neon purple glow
      ========================================== */
   .mega-prefix {
     background: linear-gradient(120deg,
-      rgba(127,0,255,0.6) 0%, rgba(166,77,255,1) 15%,
-      rgba(127,0,255,0.5) 30%, rgba(200,130,255,1) 50%,
-      rgba(127,0,255,0.4) 70%, rgba(166,77,255,0.9) 85%,
-      rgba(127,0,255,0.6) 100%);
+      #a855f7 0%, #e0b0ff 20%,
+      #c084fc 40%, #f0d0ff 55%,
+      #a855f7 70%, #d8b4fe 85%,
+      #a855f7 100%);
     background-size: 250% 100%;
     -webkit-background-clip: text;
     background-clip: text;
     -webkit-text-fill-color: transparent;
-    filter: drop-shadow(0 0 12px rgba(127,0,255,0.6));
-    animation: logoShine 8s ease-in-out infinite;
+    filter: drop-shadow(0 0 18px rgba(168,85,247,0.9))
+            drop-shadow(0 0 40px rgba(127,0,255,0.6))
+            drop-shadow(0 0 6px rgba(200,160,255,0.8));
+    animation: megaNeon 4s ease-in-out infinite alternate;
+  }
+  @keyframes megaNeon {
+    0%   { filter: drop-shadow(0 0 14px rgba(168,85,247,0.8)) drop-shadow(0 0 30px rgba(127,0,255,0.5)) drop-shadow(0 0 4px rgba(200,160,255,0.7)); }
+    50%  { filter: drop-shadow(0 0 22px rgba(168,85,247,1))   drop-shadow(0 0 50px rgba(127,0,255,0.7)) drop-shadow(0 0 8px rgba(220,180,255,0.9)); }
+    100% { filter: drop-shadow(0 0 16px rgba(168,85,247,0.85)) drop-shadow(0 0 35px rgba(127,0,255,0.55)) drop-shadow(0 0 5px rgba(200,160,255,0.75)); }
   }
 
   .sidebar-glass-logo {
-    background: linear-gradient(120deg,
-      rgba(255,255,255,0.6) 0%, rgba(255,255,255,1) 20%,
-      rgba(255,255,255,0.5) 40%, rgba(255,255,255,1) 60%,
-      rgba(255,255,255,0.5) 80%, rgba(255,255,255,1) 100%);
+    background: linear-gradient(
+      120deg,
+      rgba(255,255,255,0.4) 0%,
+      rgba(255,255,255,0.85) 15%,
+      rgba(255,255,255,0.35) 30%,
+      rgba(255,255,255,0.9) 50%,
+      rgba(255,255,255,0.3) 70%,
+      rgba(255,255,255,0.8) 85%,
+      rgba(255,255,255,0.4) 100%
+    );
     background-size: 250% 100%;
     -webkit-background-clip: text;
     background-clip: text;
     -webkit-text-fill-color: transparent;
-    filter: drop-shadow(0 0 8px rgba(255,255,255,0.3));
+    filter: drop-shadow(0 1px 3px rgba(0,0,0,0.4)) drop-shadow(0 0 12px rgba(255,255,255,0.1));
     animation: logoShine 8s ease-in-out infinite;
-    animation-delay: -4s;
   }
 
   @keyframes logoShine {

@@ -139,7 +139,7 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
   return createPortal(
     <div
       className="fixed inset-0 z-[100] flex items-center justify-center p-4"
-      style={{ background: 'rgba(0, 0, 0, 0.7)', WebkitBackdropFilter: 'blur(8px)', backdropFilter: 'blur(8px)' }}
+      style={{ background: 'rgba(0, 0, 0, 0.8)', WebkitBackdropFilter: 'blur(16px) brightness(0.6)', backdropFilter: 'blur(16px) brightness(0.6)' }}
       onClick={onClose}
     >
       <div
