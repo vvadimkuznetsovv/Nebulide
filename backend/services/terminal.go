@@ -120,7 +120,9 @@ func defaultShell() string {
 }
 
 // GetOrCreate returns an existing alive session or creates a new one.
-func (s *TerminalService) GetOrCreate(sessionKey string, workingDir string) (*TerminalSession, error) {
+// If sandboxed is true (Linux only), the shell runs in an isolated mount namespace
+// where other users' workspaces are hidden behind tmpfs.
+func (s *TerminalService) GetOrCreate(sessionKey string, workingDir string, sandboxed bool, username string, extraEnv map[string]string) (*TerminalSession, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -141,11 +143,11 @@ func (s *TerminalService) GetOrCreate(sessionKey string, workingDir string) (*Te
 		log.Printf("[TerminalService] no existing session, creating new key=%s", sessionKey)
 	}
 
-	return s.createLocked(sessionKey, workingDir)
+	return s.createLocked(sessionKey, workingDir, sandboxed, username, extraEnv)
 }
 
 // Create always creates a new session, closing any existing one.
-func (s *TerminalService) Create(sessionKey string, workingDir string) (*TerminalSession, error) {
+func (s *TerminalService) Create(sessionKey string, workingDir string, sandboxed bool, username string, extraEnv map[string]string) (*TerminalSession, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -154,12 +156,12 @@ func (s *TerminalService) Create(sessionKey string, workingDir string) (*Termina
 		delete(s.sessions, sessionKey)
 	}
 
-	return s.createLocked(sessionKey, workingDir)
+	return s.createLocked(sessionKey, workingDir, sandboxed, username, extraEnv)
 }
 
-func (s *TerminalService) createLocked(sessionKey string, workingDir string) (*TerminalSession, error) {
+func (s *TerminalService) createLocked(sessionKey string, workingDir string, sandboxed bool, username string, extraEnv map[string]string) (*TerminalSession, error) {
 	shell := defaultShell()
-	log.Printf("[TerminalService] createLocked shell=%s dir=%s key=%s", shell, workingDir, sessionKey)
+	log.Printf("[TerminalService] createLocked shell=%s dir=%s sandboxed=%v user=%s key=%s", shell, workingDir, sandboxed, username, sessionKey)
 
 	// Verify working directory exists, fall back to /tmp
 	if _, err := os.Stat(workingDir); err != nil {
@@ -172,8 +174,24 @@ func (s *TerminalService) createLocked(sessionKey string, workingDir string) (*T
 		return nil, err
 	}
 
-	cmd := p.Command(shell)
-	cmd.Dir = workingDir
+	// On Linux with sandboxing, use sandboxed-shell wrapper that creates an
+	// isolated mount namespace hiding other users' workspaces.
+	var cmd *gopty.Cmd
+	if sandboxed && runtime.GOOS == "linux" {
+		sandboxScript := "/usr/local/bin/sandboxed-shell"
+		if _, err := os.Stat(sandboxScript); err == nil {
+			log.Printf("[TerminalService] using sandboxed shell for user=%s key=%s", username, sessionKey)
+			cmd = p.Command(sandboxScript, workingDir, username)
+			cmd.Dir = workingDir
+		} else {
+			log.Printf("[TerminalService] sandboxed-shell not found, falling back to direct shell key=%s", sessionKey)
+			cmd = p.Command(shell)
+			cmd.Dir = workingDir
+		}
+	} else {
+		cmd = p.Command(shell)
+		cmd.Dir = workingDir
+	}
 
 	// Build environment: ensure critical vars exist for shell init
 	env := os.Environ()
@@ -196,6 +214,9 @@ func (s *TerminalService) createLocked(sessionKey string, workingDir string) (*T
 		env = append(env, "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
 	}
 	env = append(env, "TERM=xterm-256color", "COLORTERM=truecolor")
+	for k, v := range extraEnv {
+		env = append(env, k+"="+v)
+	}
 	cmd.Env = env
 
 	if err := cmd.Start(); err != nil {
@@ -312,4 +333,134 @@ func (ts *TerminalSession) Close() {
 	if ts.Cmd != nil && ts.Cmd.Process != nil {
 		ts.Cmd.Process.Kill()
 	}
+}
+
+// ── Admin management methods ──
+
+// SessionInfo holds metadata about a terminal session for admin listing.
+type SessionInfo struct {
+	Key        string `json:"session_key"`
+	UserID     string `json:"user_id"`
+	InstanceID string `json:"instance_id"`
+	Alive      bool   `json:"alive"`
+}
+
+// parseSessionKey splits "term:{userID}:{instanceId}" into parts.
+func parseSessionKey(key string) (userID, instanceID string) {
+	parts := strings.SplitN(key, ":", 3)
+	if len(parts) == 3 {
+		return parts[1], parts[2]
+	}
+	return "", ""
+}
+
+// ListSessions returns info about all active terminal sessions.
+func (s *TerminalService) ListSessions() []SessionInfo {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]SessionInfo, 0, len(s.sessions))
+	for key, sess := range s.sessions {
+		uid, iid := parseSessionKey(key)
+		result = append(result, SessionInfo{
+			Key:        key,
+			UserID:     uid,
+			InstanceID: iid,
+			Alive:      sess.IsAlive(),
+		})
+	}
+	return result
+}
+
+// ListUserSessions returns terminal sessions for a specific user.
+func (s *TerminalService) ListUserSessions(userID string) []SessionInfo {
+	prefix := "term:" + userID + ":"
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var result []SessionInfo
+	for key, sess := range s.sessions {
+		if strings.HasPrefix(key, prefix) {
+			_, iid := parseSessionKey(key)
+			result = append(result, SessionInfo{
+				Key:        key,
+				UserID:     userID,
+				InstanceID: iid,
+				Alive:      sess.IsAlive(),
+			})
+		}
+	}
+	return result
+}
+
+// KillSession terminates a specific terminal session by key.
+func (s *TerminalService) KillSession(sessionKey string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	session, ok := s.sessions[sessionKey]
+	if !ok {
+		return false
+	}
+	session.Close()
+	delete(s.sessions, sessionKey)
+	return true
+}
+
+// KillUserSessions terminates all terminal sessions for a user.
+func (s *TerminalService) KillUserSessions(userID string) int {
+	prefix := "term:" + userID + ":"
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	count := 0
+	for key, sess := range s.sessions {
+		if strings.HasPrefix(key, prefix) {
+			sess.Close()
+			delete(s.sessions, key)
+			count++
+		}
+	}
+	return count
+}
+
+// CountUserSessions returns the number of active sessions for a user.
+func (s *TerminalService) CountUserSessions(userID string) int {
+	prefix := "term:" + userID + ":"
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	count := 0
+	for key, sess := range s.sessions {
+		if strings.HasPrefix(key, prefix) && sess.IsAlive() {
+			count++
+		}
+	}
+	return count
+}
+
+// SessionProcessInfo holds PID + session metadata for monitoring.
+type SessionProcessInfo struct {
+	Key        string `json:"session_key"`
+	UserID     string `json:"user_id"`
+	InstanceID string `json:"instance_id"`
+	Alive      bool   `json:"alive"`
+	PID        int    `json:"pid"`
+}
+
+// ListSessionsWithPID returns all sessions with their process PIDs.
+func (s *TerminalService) ListSessionsWithPID() []SessionProcessInfo {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	result := make([]SessionProcessInfo, 0, len(s.sessions))
+	for key, sess := range s.sessions {
+		uid, iid := parseSessionKey(key)
+		pid := 0
+		if sess.Cmd != nil && sess.Cmd.Process != nil {
+			pid = sess.Cmd.Process.Pid
+		}
+		result = append(result, SessionProcessInfo{
+			Key:        key,
+			UserID:     uid,
+			InstanceID: iid,
+			Alive:      sess.IsAlive(),
+			PID:        pid,
+		})
+	}
+	return result
 }

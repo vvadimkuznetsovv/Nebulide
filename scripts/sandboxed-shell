@@ -1,0 +1,122 @@
+#!/bin/sh
+# Sandboxed shell for per-user PTY isolation.
+# Usage: sandboxed-shell <workspace_dir> <username>
+#
+# Creates a new mount namespace where:
+# - /home/nebulide/workspaces is replaced with tmpfs (hides all user dirs)
+# - /home/nebulide/workspace is replaced with tmpfs (hides admin workspace)
+# - /root/.ssh is replaced with tmpfs (hides admin SSH keys)
+# - Only the specified workspace is bind-mounted back
+#
+# Creates a per-user Linux account (if not exists), drops privileges via su.
+# The user retains full access to system tools (ssh, git, pip, etc.)
+# but cannot see any other user's files or admin secrets.
+#
+# Requires: CAP_SYS_ADMIN (for unshare --mount)
+
+WORKSPACE="$1"
+USERNAME="$2"
+
+if [ -z "$WORKSPACE" ] || [ -z "$USERNAME" ]; then
+    echo "Usage: sandboxed-shell <workspace_dir> <username>" >&2
+    exit 1
+fi
+
+# Defense in depth: reject shell metacharacters in username.
+# Registration already validates [a-zA-Z0-9_-], but double-check here.
+case "$USERNAME" in
+    *[!a-zA-Z0-9_-]*) echo "Invalid username: contains disallowed characters" >&2; exit 1;;
+esac
+
+# Pass secrets via env vars (not positional args) to avoid /proc/PID/cmdline exposure.
+# /proc/PID/environ is readable only by process owner (0400), cmdline is world-readable (0444).
+export _SBX_WS="$WORKSPACE"
+export _SBX_USER="$USERNAME"
+export _SBX_APIKEY="${ANTHROPIC_API_KEY:-}"
+export _SBX_DBPASS="${DEV_DB_PASSWORD:-devpass}"
+export _SBX_TGTOKEN="${TG_SEND_TOKEN:-}"
+
+# Heredoc with quoted delimiter ('SCRIPT') prevents all variable expansion.
+# Env vars _SBX_* are inherited across exec and accessible inside.
+exec unshare --mount /bin/sh << 'SCRIPT'
+WORKSPACE="$_SBX_WS"
+USERNAME="$_SBX_USER"
+API_KEY="$_SBX_APIKEY"
+DEV_DB_PASS="$_SBX_DBPASS"
+TG_TOKEN="$_SBX_TGTOKEN"
+
+# Clear sandbox env vars from process environment
+unset _SBX_WS _SBX_USER _SBX_APIKEY _SBX_DBPASS _SBX_TGTOKEN
+
+# 1. Bind user workspace and shared folder to temp (before hiding)
+mkdir -p /tmp/.sandbox-ws /tmp/.sandbox-shared
+mount --bind "$WORKSPACE" /tmp/.sandbox-ws
+mount --bind /home/nebulide/shared /tmp/.sandbox-shared 2>/dev/null || true
+
+# 2. Hide ALL workspaces with tmpfs overlays
+mount -t tmpfs tmpfs /home/nebulide/workspaces 2>/dev/null
+mount -t tmpfs tmpfs /home/nebulide/workspace 2>/dev/null
+
+# 3. Hide admin SSH keys from non-admin users
+mount -t tmpfs tmpfs /root/.ssh 2>/dev/null
+
+# 4. Restore user workspace and shared folder from temp
+mkdir -p "$WORKSPACE"
+mount --bind /tmp/.sandbox-ws "$WORKSPACE"
+mkdir -p /home/nebulide/shared
+mount --bind /tmp/.sandbox-shared /home/nebulide/shared 2>/dev/null || true
+
+# 5. Create Linux user if not exists (idempotent)
+if ! id "$USERNAME" >/dev/null 2>&1; then
+    adduser -D -s /bin/bash -h "$WORKSPACE" -G nebulide "$USERNAME" 2>/dev/null || true
+fi
+
+# 6. Ensure workspace ownership
+chown "$USERNAME:nebulide" "$WORKSPACE"
+
+# 7. Set up per-user SSH directory in workspace
+mkdir -p "$WORKSPACE/.ssh"
+chmod 700 "$WORKSPACE/.ssh"
+chown "$USERNAME:nebulide" "$WORKSPACE/.ssh"
+
+# 8. Create .bashrc for user if not exists
+BASHRC="$WORKSPACE/.bashrc"
+if [ ! -f "$BASHRC" ]; then
+    printf '%s\n' \
+        '# Nebulide user shell' \
+        'export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"' \
+        '' \
+        '# Activate Python venv if exists' \
+        '[ -f "$HOME/.venv/bin/activate" ] && . "$HOME/.venv/bin/activate"' \
+        > "$BASHRC"
+    chown "$USERNAME:nebulide" "$BASHRC"
+fi
+
+# 9. Write user env vars to temp file to avoid shell injection in su -c.
+#    USERNAME and WORKSPACE are validated (alphanumeric only), safe for unquoted use.
+#    API_KEY and DEV_DB_PASS may contain special chars — escape single quotes AND strip
+#    newlines/control chars to prevent env var injection via heredoc line breaks.
+ENV_FILE="/tmp/.sandbox-env-$$"
+escape_sq() { printf '%s' "$1" | tr -d '\n\r' | sed "s/'/'\\\\''/g"; }
+
+cat > "$ENV_FILE" << ENVEOF
+export HOME='$WORKSPACE'
+export USER='$USERNAME'
+export TERM=xterm-256color
+export COLORTERM=truecolor
+export PATH='/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
+export PGHOST=postgres
+export PGPORT=5432
+export PGUSER=dev
+export ANTHROPIC_API_KEY='$(escape_sq "$API_KEY")'
+export PGPASSWORD='$(escape_sq "$DEV_DB_PASS")'
+export TG_SEND_TOKEN='$(escape_sq "$TG_TOKEN")'
+ENVEOF
+chmod 600 "$ENV_FILE"
+chown "$USERNAME" "$ENV_FILE"
+
+# 10. Drop privileges and launch shell.
+#     su -c sources the env file, cleans it up, activates venv, and starts bash.
+cd "$WORKSPACE"
+exec su -s /bin/bash - "$USERNAME" -c ". $ENV_FILE; rm -f $ENV_FILE; cd $WORKSPACE; [ -f $WORKSPACE/.venv/bin/activate ] && . $WORKSPACE/.venv/bin/activate; exec /bin/bash --login"
+SCRIPT

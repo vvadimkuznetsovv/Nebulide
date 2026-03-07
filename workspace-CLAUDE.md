@@ -61,13 +61,34 @@ ssh user@server-ip
 
 If connecting for the first time, the host key will be automatically added to known_hosts.
 
+## Shared Folder
+
+A shared folder is available at `/home/nebulide/shared/` — all users can read and write files here.
+Use it to share files between users:
+```bash
+cp myfile.txt /home/nebulide/shared/
+ls /home/nebulide/shared/
+```
+
+## Sending Files to Telegram
+
+Use `tg-send` to send files from your workspace to your Telegram:
+```bash
+tg-send myfile.txt
+tg-send /home/nebulide/shared/report.pdf
+```
+Requires Telegram ID to be configured in Nebulide Settings.
+The Telegram bot also accepts files sent to it — they are saved to `~/uploads/`.
+
 ## File Structure
 
 ```
 /home/nebulide/workspace/     ← your main working directory (persisted)
   projects/                  ← project files go here
+  uploads/                   ← files received from Telegram bot
   .packages                  ← auto-generated list of persisted apk packages
+/home/nebulide/shared/       ← shared folder (read+write for all users)
 /tmp/                        ← temporary files (persisted between restarts)
 ```
 
-All files in /home/nebulide/workspace/ and /tmp/ survive container restarts.
+All files in /home/nebulide/workspace/, /home/nebulide/shared/, and /tmp/ survive container restarts.

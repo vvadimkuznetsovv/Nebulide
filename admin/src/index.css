@@ -1,0 +1,427 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --bg-primary: #030108;
+    --accent: #7F00FF;
+    --accent-bright: #A64DFF;
+    --accent-glow: rgba(127, 0, 255, 0.4);
+    --accent-soft: rgba(127, 0, 255, 0.15);
+    --text-primary: rgba(255, 255, 255, 0.95);
+    --text-secondary: rgba(255, 255, 255, 0.55);
+    --text-tertiary: rgba(255, 255, 255, 0.3);
+    --text-muted: rgba(255, 255, 255, 0.45);
+    --glass-border: rgba(255, 255, 255, 0.15);
+    --glass-border-hover: rgba(255, 255, 255, 0.25);
+    --glass-hover: rgba(255, 255, 255, 0.08);
+    --danger: #f87171;
+    --danger-glow: rgba(248, 113, 113, 0.3);
+    --warning: #fbbf24;
+    --success: #4ade80;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html {
+    overflow: hidden;
+  }
+  body {
+    min-height: 100vh;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Inter', system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  #root { min-height: 100vh; }
+
+  input, textarea, select, button {
+    font-family: inherit; color: inherit; background: none;
+    border: none; outline: none; -webkit-appearance: none; appearance: none;
+  }
+  input::placeholder, textarea::placeholder { color: var(--text-tertiary); }
+
+  input:-webkit-autofill,
+  input:-webkit-autofill:hover,
+  input:-webkit-autofill:focus,
+  input:-webkit-autofill:active {
+    -webkit-text-fill-color: rgba(255, 255, 255, 0.95) !important;
+    -webkit-box-shadow: 0 0 0px 1000px rgba(0, 0, 0, 0.4) inset !important;
+    transition: background-color 600000s 0s, color 600000s 0s !important;
+    caret-color: var(--accent) !important;
+    border-radius: inherit !important;
+  }
+}
+
+@layer components {
+
+  /* ==========================================
+     LAVA LAMP — sharp neon purple blobs (matches main frontend)
+     ========================================== */
+  .lava-lamp {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    background: #030108;
+    overflow: hidden;
+    filter: contrast(4);
+  }
+
+  .lava-blob {
+    position: absolute;
+    border-radius: 42% 58% 55% 45% / 53% 44% 56% 47%;
+    will-change: transform;
+  }
+
+  .lava-blob-1 {
+    width: 420px; height: 420px;
+    top: 5%; left: 8%;
+    background: #7F00FF;
+    filter: blur(22px);
+    box-shadow: 0 0 80px 35px rgba(127, 0, 255, 0.5);
+    animation: lava1 28s cubic-bezier(0.4, 0, 0.6, 1) infinite alternate;
+  }
+  .lava-blob-2 {
+    width: 350px; height: 350px;
+    bottom: 8%; right: 10%;
+    background: #7F00FF;
+    filter: blur(20px);
+    box-shadow: 0 0 70px 30px rgba(127, 0, 255, 0.45);
+    animation: lava2 32s cubic-bezier(0.4, 0, 0.6, 1) infinite alternate;
+  }
+  .lava-blob-3 {
+    width: 300px; height: 300px;
+    top: 45%; left: 55%;
+    background: #7F00FF;
+    filter: blur(18px);
+    box-shadow: 0 0 60px 25px rgba(127, 0, 255, 0.45);
+    animation: lava3 24s cubic-bezier(0.4, 0, 0.6, 1) infinite alternate;
+  }
+  .lava-blob-4 {
+    width: 260px; height: 260px;
+    top: 15%; right: 18%;
+    background: #7F00FF;
+    filter: blur(16px);
+    box-shadow: 0 0 55px 22px rgba(127, 0, 255, 0.45);
+    animation: lava4 30s cubic-bezier(0.4, 0, 0.6, 1) infinite alternate;
+  }
+  .lava-blob-5 {
+    width: 220px; height: 220px;
+    bottom: 30%; left: 15%;
+    background: #7F00FF;
+    filter: blur(16px);
+    box-shadow: 0 0 50px 20px rgba(127, 0, 255, 0.45);
+    animation: lava5 34s cubic-bezier(0.4, 0, 0.6, 1) infinite alternate;
+  }
+  .lava-blob-6 {
+    width: 320px; height: 320px;
+    top: 65%; left: 5%;
+    background: #7F00FF;
+    filter: blur(20px);
+    box-shadow: 0 0 65px 28px rgba(127, 0, 255, 0.45);
+    animation: lava6 26s cubic-bezier(0.4, 0, 0.6, 1) infinite alternate;
+  }
+
+  .lava-glow {
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(ellipse 40% 35% at 15% 20%, rgba(127, 0, 255, 0.08) 0%, transparent 70%),
+      radial-gradient(ellipse 35% 40% at 85% 80%, rgba(127, 0, 255, 0.06) 0%, transparent 70%);
+    pointer-events: none;
+  }
+
+  @keyframes lava1 {
+    0%   { transform: translate(0,0) scale(1);            border-radius: 40% 60% 55% 45% / 58% 42% 60% 40%; }
+    25%  { transform: translate(6vw,10vh) scale(1.04);     border-radius: 52% 48% 42% 58% / 45% 55% 48% 52%; }
+    50%  { transform: translate(14vw,20vh) scale(1.07);    border-radius: 58% 42% 48% 52% / 40% 60% 42% 58%; }
+    75%  { transform: translate(18vw,12vh) scale(1.02);    border-radius: 45% 55% 60% 40% / 55% 45% 52% 48%; }
+    100% { transform: translate(22vw,6vh) scale(0.97);     border-radius: 55% 45% 42% 58% / 48% 52% 58% 42%; }
+  }
+  @keyframes lava2 {
+    0%   { transform: translate(0,0) scale(1);             border-radius: 58% 42% 52% 48% / 42% 58% 45% 55%; }
+    25%  { transform: translate(-8vw,-6vh) scale(1.05);     border-radius: 45% 55% 58% 42% / 55% 45% 52% 48%; }
+    50%  { transform: translate(-14vw,-14vh) scale(1.02);   border-radius: 52% 48% 42% 58% / 48% 52% 58% 42%; }
+    75%  { transform: translate(-18vw,-8vh) scale(0.97);    border-radius: 42% 58% 55% 45% / 58% 42% 42% 58%; }
+    100% { transform: translate(-20vw,-3vh) scale(1.03);    border-radius: 55% 45% 48% 52% / 42% 58% 55% 45%; }
+  }
+  @keyframes lava3 {
+    0%   { transform: translate(0,0) scale(1) rotate(0deg);         border-radius: 48% 52% 42% 58% / 55% 45% 52% 48%; }
+    25%  { transform: translate(-8vw,-6vh) scale(1.06) rotate(8deg);  border-radius: 55% 45% 52% 48% / 42% 58% 45% 55%; }
+    50%  { transform: translate(-14vw,-12vh) scale(1.03) rotate(14deg); border-radius: 42% 58% 58% 42% / 52% 48% 55% 45%; }
+    75%  { transform: translate(-4vw,8vh) scale(0.97) rotate(4deg);  border-radius: 58% 42% 45% 55% / 45% 55% 48% 52%; }
+    100% { transform: translate(8vw,16vh) scale(0.96) rotate(-6deg); border-radius: 45% 55% 55% 45% / 52% 48% 42% 58%; }
+  }
+  @keyframes lava4 {
+    0%   { transform: translate(0,0) scale(1);             border-radius: 52% 48% 58% 42% / 45% 55% 42% 58%; }
+    25%  { transform: translate(-5vw,10vh) scale(1.05);     border-radius: 42% 58% 48% 52% / 55% 45% 55% 45%; }
+    50%  { transform: translate(-10vw,18vh) scale(1.02);    border-radius: 55% 45% 42% 58% / 48% 52% 58% 42%; }
+    75%  { transform: translate(-4vw,14vh) scale(0.97);     border-radius: 48% 52% 55% 45% / 42% 58% 45% 55%; }
+    100% { transform: translate(3vw,8vh) scale(0.98);      border-radius: 58% 42% 45% 55% / 55% 45% 52% 48%; }
+  }
+  @keyframes lava5 {
+    0%   { transform: translate(0,0) scale(1);             border-radius: 45% 55% 58% 42% / 52% 48% 42% 58%; }
+    25%  { transform: translate(8vw,-8vh) scale(1.04);      border-radius: 55% 45% 42% 58% / 45% 55% 55% 45%; }
+    50%  { transform: translate(14vw,-14vh) scale(1.06);    border-radius: 48% 52% 55% 45% / 58% 42% 48% 52%; }
+    75%  { transform: translate(10vw,-10vh) scale(0.98);    border-radius: 58% 42% 48% 52% / 42% 58% 55% 45%; }
+    100% { transform: translate(6vw,-5vh) scale(0.96);     border-radius: 42% 58% 52% 48% / 55% 45% 42% 58%; }
+  }
+  @keyframes lava6 {
+    0%   { transform: translate(0,0) scale(1);             border-radius: 55% 45% 42% 58% / 48% 52% 55% 45%; }
+    25%  { transform: translate(10vw,-4vh) scale(1.05);     border-radius: 42% 58% 55% 45% / 55% 45% 42% 58%; }
+    50%  { transform: translate(20vw,-8vh) scale(1.02);     border-radius: 52% 48% 48% 52% / 42% 58% 52% 48%; }
+    75%  { transform: translate(16vw,-14vh) scale(0.97);    border-radius: 48% 52% 55% 45% / 58% 42% 45% 55%; }
+    100% { transform: translate(12vw,-18vh) scale(0.98);    border-radius: 58% 42% 42% 58% / 45% 55% 55% 45%; }
+  }
+
+  /* ==========================================
+     GLASS CARD
+     ========================================== */
+  .glass-card {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--glass-border);
+    border-radius: 16px;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+  }
+
+  /* ==========================================
+     GLASS INPUT
+     ========================================== */
+  .glass-input {
+    width: 100%;
+    padding: 12px 16px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--glass-border);
+    border-radius: 10px;
+    color: var(--text-primary);
+    font-size: 14px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+  }
+  .glass-input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-soft);
+  }
+
+  /* ==========================================
+     GLASS BUTTONS
+     ========================================== */
+  .glass-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 20px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--glass-border);
+    border-radius: 10px;
+    color: var(--text-primary);
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+  }
+  .glass-btn:hover {
+    background: var(--glass-hover);
+    border-color: var(--glass-border-hover);
+  }
+  .glass-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .glass-btn.primary {
+    background: rgba(127, 0, 255, 0.2);
+    border-color: rgba(127, 0, 255, 0.4);
+    color: var(--accent-bright);
+  }
+  .glass-btn.primary:hover {
+    background: rgba(127, 0, 255, 0.3);
+    border-color: rgba(127, 0, 255, 0.6);
+    box-shadow: 0 0 20px rgba(127, 0, 255, 0.2);
+  }
+
+  .glass-btn.danger {
+    color: var(--danger);
+    border-color: rgba(248, 113, 113, 0.3);
+  }
+  .glass-btn.danger:hover {
+    background: rgba(248, 113, 113, 0.1);
+    border-color: rgba(248, 113, 113, 0.5);
+    box-shadow: 0 0 15px var(--danger-glow);
+  }
+
+  .glass-btn.small {
+    padding: 6px 14px;
+    font-size: 13px;
+    border-radius: 8px;
+  }
+
+  /* ==========================================
+     GLASS TABLE
+     ========================================== */
+  .glass-table-wrap {
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid var(--glass-border);
+    border-radius: 12px;
+    overflow: hidden;
+    backdrop-filter: blur(10px);
+  }
+
+  .glass-table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .glass-table thead {
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .glass-table th {
+    padding: 12px 16px;
+    text-align: left;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border-bottom: 1px solid var(--glass-border);
+  }
+
+  .glass-table td {
+    padding: 12px 16px;
+    font-size: 14px;
+    color: var(--text-primary);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+  }
+
+  .glass-table tbody tr {
+    transition: background 0.15s;
+  }
+  .glass-table tbody tr:hover {
+    background: rgba(255, 255, 255, 0.04);
+  }
+  .glass-table tbody tr:last-child td {
+    border-bottom: none;
+  }
+
+  /* ==========================================
+     NAV LINK
+     ========================================== */
+  .nav-link {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    color: var(--text-secondary);
+    font-size: 14px;
+    font-weight: 500;
+    text-decoration: none;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-bottom: 2px;
+  }
+  .nav-link:hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.06);
+  }
+  .nav-link.active {
+    color: var(--accent-bright);
+    background: rgba(127, 0, 255, 0.12);
+    border: 1px solid rgba(127, 0, 255, 0.2);
+  }
+
+  /* ==========================================
+     STAT CARD
+     ========================================== */
+  .stat-card {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--glass-border);
+    border-radius: 12px;
+    padding: 20px;
+    backdrop-filter: blur(10px);
+    transition: border-color 0.2s;
+  }
+  .stat-card:hover {
+    border-color: var(--glass-border-hover);
+  }
+
+  /* ==========================================
+     BADGES
+     ========================================== */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-muted);
+  }
+  .badge.active {
+    background: rgba(74, 222, 128, 0.15);
+    color: var(--success);
+  }
+  .badge.admin {
+    background: rgba(127, 0, 255, 0.2);
+    color: var(--accent-bright);
+  }
+  .badge.user {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-secondary);
+  }
+  .badge.danger {
+    background: rgba(248, 113, 113, 0.15);
+    color: var(--danger);
+  }
+
+  /* ==========================================
+     MEGA LOGO — shimmer animations
+     ========================================== */
+  .mega-prefix {
+    background: linear-gradient(120deg,
+      rgba(127,0,255,0.6) 0%, rgba(166,77,255,1) 15%,
+      rgba(127,0,255,0.5) 30%, rgba(200,130,255,1) 50%,
+      rgba(127,0,255,0.4) 70%, rgba(166,77,255,0.9) 85%,
+      rgba(127,0,255,0.6) 100%);
+    background-size: 250% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    filter: drop-shadow(0 0 12px rgba(127,0,255,0.6));
+    animation: logoShine 8s ease-in-out infinite;
+  }
+
+  .sidebar-glass-logo {
+    background: linear-gradient(120deg,
+      rgba(255,255,255,0.6) 0%, rgba(255,255,255,1) 20%,
+      rgba(255,255,255,0.5) 40%, rgba(255,255,255,1) 60%,
+      rgba(255,255,255,0.5) 80%, rgba(255,255,255,1) 100%);
+    background-size: 250% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    filter: drop-shadow(0 0 8px rgba(255,255,255,0.3));
+    animation: logoShine 8s ease-in-out infinite;
+    animation-delay: -4s;
+  }
+
+  @keyframes logoShine {
+    0%, 100% { background-position: 0% 50%; }
+    50% { background-position: 100% 50%; }
+  }
+
+  /* ==========================================
+     SCROLLBAR
+     ========================================== */
+  ::-webkit-scrollbar { width: 6px; height: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(127, 0, 255, 0.3);
+    border-radius: 3px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(127, 0, 255, 0.5);
+  }
+}

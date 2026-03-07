@@ -439,6 +439,11 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
   const [row2Open, setRow2Open] = useState(() =>
     localStorage.getItem('nebulide-terminal-toolbar-r2') !== 'closed',
   );
+  const [followMode, setFollowMode] = useState(() =>
+    localStorage.getItem('nebulide-terminal-follow') !== 'off',
+  );
+  const followModeRef = useRef(true);
+  followModeRef.current = followMode;
   const selRef = useRef({ startRow: 0, startCol: 0, endRow: 0, endCol: 0 });
 
   // Long-press for mobile context menu
@@ -490,6 +495,11 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
     });
     resizeObserver.observe(el);
 
+    // Auto-follow: scroll to bottom on new terminal output
+    const writeDisposable = s.xterm.onWriteParsed(() => {
+      if (followModeRef.current) s.xterm.scrollToBottom();
+    });
+
     // Reconnect when page becomes visible (phone woke from sleep/background).
     // setTimeout timers are frozen during background — this ensures immediate reconnect.
     const onVisibilityChange = () => {
@@ -507,6 +517,7 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
       console.log(`[Terminal] useEffect CLEANUP id=${instanceIdRef.current} persistent=${persistentRef.current}`);
       cancelAnimationFrame(rafId);
       resizeObserver.disconnect();
+      writeDisposable.dispose();
       document.removeEventListener('visibilitychange', onVisibilityChange);
       // Destroy session on unmount only for non-persistent (detached) terminals
       if (!persistentRef.current) {
@@ -518,8 +529,13 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
   }, [instanceId]);
 
   useEffect(() => {
-    if (active) setTimeout(fit, 50);
-  }, [active, fit]);
+    if (active) {
+      setTimeout(() => {
+        fit();
+        sessions.get(instanceId)?.xterm.focus();
+      }, 50);
+    }
+  }, [active, fit, instanceId]);
 
   // ── Touch scroll (swipe up/down to scroll terminal output) ──
   useEffect(() => {
@@ -610,8 +626,11 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
         s?.xterm.write('\x1b[2J\x1b[H');
         break;
       case 'clear-all':
-        // Clear scrollback but keep current viewport (preserves prompt)
+        // Clear xterm buffer + resync shell state (prevents broken CLI tools like claude)
         s?.xterm.clear();
+        if (s?.ws?.readyState === WebSocket.OPEN) {
+          s.ws.send(new TextEncoder().encode('reset\n'));
+        }
         break;
       case 'reconnect':
         forceReconnect(instanceId);
@@ -907,6 +926,28 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
             <div className="terminal-toolbar-sep" />
             <button
               type="button"
+              className="terminal-toolbar-btn"
+              onPointerDown={(e) => e.preventDefault()}
+              onClick={() => sessions.get(instanceId)?.xterm.scrollToBottom()}
+              title="Scroll to bottom"
+            >
+              {'\u2913'}
+            </button>
+            <button
+              type="button"
+              className={`terminal-toolbar-btn${followMode ? ' active' : ''}`}
+              onPointerDown={(e) => e.preventDefault()}
+              onClick={() => setFollowMode((v) => {
+                localStorage.setItem('nebulide-terminal-follow', v ? 'off' : 'on');
+                return !v;
+              })}
+              title="Auto-follow: scroll to bottom on new output"
+            >
+              AF
+            </button>
+            <div className="terminal-toolbar-sep" />
+            <button
+              type="button"
               className={`terminal-toolbar-btn${row2Open ? ' active' : ''}`}
               onPointerDown={(e) => e.preventDefault()}
               onClick={() => setRow2Open((v) => {
@@ -932,6 +973,10 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
       {/* Row 2: common actions (toggled by f-V) */}
       {row2Open && toolbarOpen && (
         <div className="terminal-toolbar">
+          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => sendKey('\x1b')}>
+            Esc
+          </button>
+          <div className="terminal-toolbar-sep" />
           <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={copyTermSelection}>
             Copy
           </button>

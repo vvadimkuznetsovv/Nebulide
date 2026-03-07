@@ -1,6 +1,7 @@
 import { useRef } from 'react';
+import { useDraggable, useDroppable } from '@dnd-kit/core';
 import type { FileEntry } from '../../api/files';
-import { useLongPress } from '../../hooks/useLongPress';
+import { useLongPress, mergeEventHandlers } from '../../hooks/useLongPress';
 
 interface FileTreeItemProps {
   file: FileEntry;
@@ -9,6 +10,7 @@ interface FileTreeItemProps {
   isLoading?: boolean;
   isSelected?: boolean;
   isContextTarget?: boolean;
+  isDragOver?: boolean;
   onClick: () => void;
   onDoubleClick?: () => void;
   onContextMenu: (x: number, y: number, file: FileEntry) => void;
@@ -17,7 +19,7 @@ interface FileTreeItemProps {
   onRenameCancel?: () => void;
 }
 
-const FILE_ICONS: Record<string, string> = {
+export const FILE_ICONS: Record<string, string> = {
   '.ts': 'TS',
   '.tsx': 'TX',
   '.js': 'JS',
@@ -41,7 +43,7 @@ const FILE_ICONS: Record<string, string> = {
   '.doc': 'WD',
 };
 
-const FILE_COLORS: Record<string, string> = {
+export const FILE_COLORS: Record<string, string> = {
   '.ts': '#3b82f6',
   '.tsx': '#3b82f6',
   '.js': '#eab308',
@@ -58,13 +60,13 @@ const FILE_COLORS: Record<string, string> = {
   '.doc': '#2563eb',
 };
 
-function getIcon(file: FileEntry): string {
+export function getFileIcon(file: FileEntry): string {
   if (file.is_dir) return '';
   const ext = '.' + file.name.split('.').pop()?.toLowerCase();
   return FILE_ICONS[ext] || '--';
 }
 
-function getColor(file: FileEntry): string {
+export function getFileColor(file: FileEntry): string {
   if (file.is_dir) return 'var(--accent)';
   const ext = '.' + file.name.split('.').pop()?.toLowerCase();
   return FILE_COLORS[ext] || 'var(--text-secondary)';
@@ -79,13 +81,36 @@ function formatSize(bytes: number): string {
 const DOUBLE_TAP_MS = 5000;
 
 export default function FileTreeItem({
-  file, depth, isExpanded, isLoading, isSelected, isContextTarget,
+  file, depth, isExpanded, isLoading, isSelected, isContextTarget, isDragOver,
   onClick, onDoubleClick, onContextMenu, isRenaming, onRenameSubmit, onRenameCancel,
 }: FileTreeItemProps) {
   const { handlers: longPressHandlers, longPressedRef } = useLongPress({
     onLongPress: (x, y) => onContextMenu(x, y, file),
     stopPropagation: true,
   });
+
+  // DnD: every item is draggable
+  // NOTE: DON'T spread attributes — they apply CSS transform which clips inside overflow:auto
+  const { listeners: dragListeners, setNodeRef: setDragRef, isDragging } = useDraggable({
+    id: `file:${file.path}`,
+    data: { file },
+  });
+
+  // DnD: folders are droppable targets
+  const { setNodeRef: setDropRef, isOver } = useDroppable({
+    id: `folder:${file.path}`,
+    data: { file },
+    disabled: !file.is_dir,
+  });
+
+  // Merge refs for folder items (both draggable + droppable)
+  const setRef = (el: HTMLElement | null) => {
+    setDragRef(el);
+    if (file.is_dir) setDropRef(el);
+  };
+
+  // Merge long-press + drag listeners
+  const mergedHandlers = mergeEventHandlers(longPressHandlers, dragListeners);
 
   // Guard: prevent blur from re-submitting after Enter/Escape
   const renameSubmittedRef = useRef(false);
@@ -117,24 +142,28 @@ export default function FileTreeItem({
     onClick();
   };
 
+  const dropHighlight = file.is_dir && (isOver || isDragOver);
+
   return (
     <button
+      ref={setRef}
       type="button"
       onClick={isRenaming ? undefined : handleClick}
       onDoubleClick={isRenaming || file.is_dir ? undefined : () => onDoubleClick?.()}
       onContextMenu={handleContextMenu}
-      {...longPressHandlers}
-      className={`file-tree-item relative w-full flex items-center gap-1.5 py-1.5 text-sm text-left transition-all duration-150 select-none${isSelected ? ' selected' : ''}${isContextTarget ? ' context-target' : ''}`}
+      {...mergedHandlers}
+      className={`file-tree-item relative w-full flex items-center gap-1.5 py-1.5 text-sm text-left transition-all duration-150 select-none${isSelected ? ' selected' : ''}${isContextTarget ? ' context-target' : ''}${dropHighlight ? ' drop-target' : ''}`}
       style={{
-        paddingLeft: `${depth * 4}px`,
+        paddingLeft: `${8 + depth * 16}px`,
         paddingRight: '8px',
         color: 'var(--text-primary)',
         WebkitTouchCallout: 'none',
+        opacity: isDragging ? 0.3 : 1,
       }}
     >
       {/* Indent guide lines — one per ancestor level */}
       {depth > 0 && Array.from({ length: depth }, (_, i) => (
-        <span key={i} className="file-tree-indent-guide" style={{ left: `${4 + i * 6 + 11}px` }} />
+        <span key={i} className="file-tree-indent-guide" style={{ left: `${8 + i * 16 + 11}px` }} />
       ))}
       {/* Chevron for directories / spacer for files */}
       {file.is_dir ? (
@@ -161,9 +190,9 @@ export default function FileTreeItem({
       {!file.is_dir && (
         <span
           className="w-5 text-[10px] font-mono text-center shrink-0 font-bold"
-          style={{ color: getColor(file) }}
+          style={{ color: getFileColor(file) }}
         >
-          {getIcon(file)}
+          {getFileIcon(file)}
         </span>
       )}
       {isRenaming ? (

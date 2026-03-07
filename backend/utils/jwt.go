@@ -15,6 +15,7 @@ type TokenClaims struct {
 	UserID   uuid.UUID `json:"user_id"`
 	Username string    `json:"username"`
 	Partial  bool      `json:"partial,omitempty"` // true if TOTP not yet verified
+	Purpose  string    `json:"purpose,omitempty"` // scoped token (e.g. "tg-send"); empty = regular access token
 	jwt.RegisteredClaims
 }
 
@@ -51,6 +52,23 @@ func ParseToken(secret string, tokenString string) (*TokenClaims, error) {
 	}
 
 	return claims, nil
+}
+
+// GenerateScopedToken creates a JWT restricted to a specific purpose.
+// These tokens are rejected by AuthRequired middleware (regular API access).
+func GenerateScopedToken(secret string, userID uuid.UUID, username string, purpose string, expiry time.Duration) (string, error) {
+	claims := TokenClaims{
+		UserID:   userID,
+		Username: username,
+		Purpose:  purpose,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(expiry)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			ID:        uuid.New().String(),
+		},
+	}
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString([]byte(secret))
 }
 
 func GenerateRefreshToken() (string, string, error) {

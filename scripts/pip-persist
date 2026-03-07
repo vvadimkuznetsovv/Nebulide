@@ -1,9 +1,9 @@
 #!/bin/bash
 # Wrapper around "pip install" that uses the persistent venv.
 # Usage: pip-persist numpy pandas flask
-# The venv lives in /home/nebulide/workspace/.venv (survives deploys).
+# The venv lives in $HOME/.venv (per-user workspace, survives deploys).
 
-VENV_DIR="/home/nebulide/workspace/.venv"
+VENV_DIR="${HOME}/.venv"
 
 if [ $# -eq 0 ]; then
   echo "Usage: pip-persist <package1> [package2] ..."

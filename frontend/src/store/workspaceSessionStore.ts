@@ -51,6 +51,9 @@ interface WorkspaceSessionState {
   deleteSession: (id: string) => Promise<void>;
   updateSessionsList: (sessions: WorkspaceSession[]) => void;
 
+  // Sync actions
+  reloadActiveSession: () => Promise<void>;
+
   // Lock actions
   setLockState: (sessionId: string, status: LockStatus, info?: LockInfo) => void;
   forceTakeover: (sessionId: string) => void;
@@ -300,6 +303,28 @@ export const useWorkspaceSessionStore = create<WorkspaceSessionState>((set, get)
 
   updateSessionsList: (sessions) => {
     set({ sessions });
+  },
+
+  // --- Sync: reload active session snapshot from server ---
+
+  reloadActiveSession: async () => {
+    const { activeSessionId } = get();
+    if (!activeSessionId) return;
+    try {
+      const { data } = await getWorkspaceSessions();
+      const fresh = data?.find((s) => s.id === activeSessionId);
+      if (fresh?.snapshot) {
+        const snap = fresh.snapshot as unknown as FullSnapshot;
+        if (snap?.layout && snap?.workspace) {
+          destroyAllTerminalSessions();
+          const panelIdMapping = useWorkspaceStore.getState().restoreFromSnapshot(snap.workspace);
+          useLayoutStore.getState().restoreLayoutFromSnapshot(snap.layout, panelIdMapping);
+        }
+      }
+      set({ sessions: data || [] });
+    } catch {
+      console.warn('[WorkspaceSession] Failed to reload active session');
+    }
   },
 
   // --- Lock actions ---

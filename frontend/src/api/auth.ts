@@ -28,3 +28,6 @@ export const changePassword = (currentPassword: string, newPassword: string) =>
 
 export const register = (username: string, password: string, inviteCode: string) =>
   api.post('/auth/register', { username, password, invite_code: inviteCode });
+
+export const updateTelegramId = (telegramId: number) =>
+  api.put('/auth/telegram-id', { telegram_id: telegramId });

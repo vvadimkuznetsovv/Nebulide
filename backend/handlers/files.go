@@ -21,6 +21,20 @@ func NewFilesHandler(cfg *config.Config) *FilesHandler {
 	return &FilesHandler{cfg: cfg}
 }
 
+// getUserDir returns the workspace directory for the current user.
+// Admin gets the legacy ClaudeWorkingDir; regular users get per-user workspace.
+func (h *FilesHandler) getUserDir(c *gin.Context) string {
+	username, _ := c.Get("username")
+	if u, ok := username.(string); ok && u != "" {
+		// Check if admin (admin uses legacy workspace for backward compat)
+		if u == h.cfg.AdminUsername {
+			return h.cfg.ClaudeWorkingDir
+		}
+		return h.cfg.GetUserWorkspaceDir(u)
+	}
+	return h.cfg.ClaudeWorkingDir
+}
+
 type FileInfo struct {
 	Name    string `json:"name"`
 	Path    string `json:"path"`
@@ -44,28 +58,33 @@ type renameRequest struct {
 }
 
 func (h *FilesHandler) List(c *gin.Context) {
+	userDir := h.getUserDir(c)
 	requestedPath := c.Query("path")
 	if requestedPath == "" {
-		requestedPath = h.cfg.ClaudeWorkingDir
+		requestedPath = userDir
 	}
 
-	fullPath, err := h.safePath(requestedPath)
+	fullPath, err := h.safePathWithBase(requestedPath, userDir)
 	if err != nil {
-		// Path may be from a different OS — fallback to configured working dir
-		requestedPath = h.cfg.ClaudeWorkingDir
-		fullPath, err = h.safePath(requestedPath)
+		// Try shared folder before falling back
+		fullPath, err = h.safePathWithBase(requestedPath, h.cfg.SharedDir)
 		if err != nil {
-			c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
-			return
+			// Path may be from a different OS — fallback to user working dir
+			requestedPath = userDir
+			fullPath, err = h.safePathWithBase(requestedPath, userDir)
+			if err != nil {
+				c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+				return
+			}
 		}
 	}
 
 	entries, err := os.ReadDir(fullPath)
 	if err != nil {
-		// Directory doesn't exist — fallback to configured working dir
-		if requestedPath != h.cfg.ClaudeWorkingDir {
-			requestedPath = h.cfg.ClaudeWorkingDir
-			fullPath, _ = h.safePath(requestedPath)
+		// Directory doesn't exist — fallback to user working dir
+		if requestedPath != userDir {
+			requestedPath = userDir
+			fullPath, _ = h.safePathWithBase(requestedPath, userDir)
 			os.MkdirAll(fullPath, 0755)
 			entries, err = os.ReadDir(fullPath)
 		}
@@ -107,7 +126,7 @@ func (h *FilesHandler) Read(c *gin.Context) {
 		return
 	}
 
-	fullPath, err := h.safePath(requestedPath)
+	fullPath, err := h.safePathForUser(requestedPath, c)
 	if err != nil {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
 		return
@@ -145,7 +164,7 @@ func (h *FilesHandler) Write(c *gin.Context) {
 		return
 	}
 
-	fullPath, err := h.safePath(req.Path)
+	fullPath, err := h.safePathForUser(req.Path, c)
 	if err != nil {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
 		return
@@ -172,10 +191,21 @@ func (h *FilesHandler) Delete(c *gin.Context) {
 		return
 	}
 
-	fullPath, err := h.safePath(requestedPath)
+	fullPath, err := h.safePathForUser(requestedPath, c)
 	if err != nil {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
 		return
+	}
+
+	// Protect root directories from deletion (workspace, shared folder)
+	absPath, _ := filepath.Abs(fullPath)
+	protectedRoots := []string{h.getUserDir(c), h.cfg.SharedDir, h.cfg.ClaudeWorkingDir, h.cfg.WorkspacesRoot}
+	for _, root := range protectedRoots {
+		absRoot, _ := filepath.Abs(root)
+		if absPath == absRoot {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Cannot delete root directory"})
+			return
+		}
 	}
 
 	if err := os.RemoveAll(fullPath); err != nil {
@@ -193,7 +223,7 @@ func (h *FilesHandler) Mkdir(c *gin.Context) {
 		return
 	}
 
-	fullPath, err := h.safePath(req.Path)
+	fullPath, err := h.safePathForUser(req.Path, c)
 	if err != nil {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
 		return
@@ -214,13 +244,13 @@ func (h *FilesHandler) Rename(c *gin.Context) {
 		return
 	}
 
-	fullOldPath, err := h.safePath(req.OldPath)
+	fullOldPath, err := h.safePathForUser(req.OldPath, c)
 	if err != nil {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
 		return
 	}
 
-	fullNewPath, err := h.safePath(req.NewPath)
+	fullNewPath, err := h.safePathForUser(req.NewPath, c)
 	if err != nil {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
 		return
@@ -252,7 +282,7 @@ func (h *FilesHandler) ReadRaw(c *gin.Context) {
 		return
 	}
 
-	fullPath, err := h.safePath(requestedPath)
+	fullPath, err := h.safePathForUser(requestedPath, c)
 	if err != nil {
 		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
 		return
@@ -281,6 +311,8 @@ func (h *FilesHandler) ReadRaw(c *gin.Context) {
 	}
 
 	c.Header("Content-Type", contentType)
+	// Sandbox file preview — block scripts in PDFs/etc from accessing page context (localStorage tokens)
+	c.Header("Content-Security-Policy", "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data: blob:")
 	filename := filepath.Base(fullPath)
 	sanitized := strings.Map(func(r rune) rune {
 		if r == '"' || r == '\\' || r == '\n' || r == '\r' {
@@ -293,13 +325,195 @@ func (h *FilesHandler) ReadRaw(c *gin.Context) {
 }
 
 // safePath ensures the requested path is within the allowed working directory
+// ---------- Search ----------
+
+type SearchMatch struct {
+	LineNumber int    `json:"line_number"`
+	Content    string `json:"content"`
+}
+
+type SearchResult struct {
+	Path    string        `json:"path"`
+	IsDir   bool          `json:"is_dir"`
+	Matches []SearchMatch `json:"matches,omitempty"`
+}
+
+// SearchFiles recursively searches files by name or content.
+// Query params: q (required), type (name|content, default content), include, exclude
+func (h *FilesHandler) SearchFiles(c *gin.Context) {
+	query := c.Query("q")
+	if query == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Query required"})
+		return
+	}
+
+	searchType := c.DefaultQuery("type", "content")
+	includeGlob := c.Query("include")
+	excludeGlob := c.Query("exclude")
+
+	userDir := h.getUserDir(c)
+	basePath, err := h.safePathWithBase(userDir, userDir)
+	if err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	queryLower := strings.ToLower(query)
+	var results []SearchResult
+	totalMatches := 0
+	maxFiles := 100
+	maxMatches := 500
+
+	// Directories to skip
+	skipDirs := map[string]bool{
+		".git": true, "node_modules": true, "__pycache__": true,
+		".next": true, "dist": true, "build": true, ".cache": true,
+		"vendor": true, ".venv": true, "venv": true,
+	}
+
+	filepath.WalkDir(basePath, func(path string, d fs.DirEntry, err error) error {
+		if err != nil || len(results) >= maxFiles || totalMatches >= maxMatches {
+			if d != nil && d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		name := d.Name()
+
+		// Skip hidden files/dirs
+		if strings.HasPrefix(name, ".") && path != basePath {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		// Skip known heavy directories
+		if d.IsDir() && skipDirs[name] {
+			return filepath.SkipDir
+		}
+
+		// Compute relative path for display
+		relPath, _ := filepath.Rel(basePath, path)
+		displayPath := filepath.Join(userDir, relPath)
+
+		// Apply include/exclude globs (on filename)
+		if includeGlob != "" {
+			matched, _ := filepath.Match(includeGlob, name)
+			if !matched {
+				if d.IsDir() {
+					return nil // don't skip dirs — children may match
+				}
+				return nil
+			}
+		}
+		if excludeGlob != "" {
+			matched, _ := filepath.Match(excludeGlob, name)
+			if matched {
+				if d.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+		}
+
+		if searchType == "name" {
+			// Search by filename
+			if strings.Contains(strings.ToLower(name), queryLower) {
+				results = append(results, SearchResult{
+					Path:  displayPath,
+					IsDir: d.IsDir(),
+				})
+				totalMatches++
+			}
+		} else {
+			// Search by content — skip directories and large/binary files
+			if d.IsDir() {
+				return nil
+			}
+
+			info, err := d.Info()
+			if err != nil || info.Size() > 1024*1024 { // Skip > 1MB
+				return nil
+			}
+
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return nil
+			}
+
+			// Skip binary files (check first 512 bytes for null bytes)
+			checkLen := len(data)
+			if checkLen > 512 {
+				checkLen = 512
+			}
+			for i := 0; i < checkLen; i++ {
+				if data[i] == 0 {
+					return nil // binary file
+				}
+			}
+
+			content := string(data)
+			contentLower := strings.ToLower(content)
+
+			if !strings.Contains(contentLower, queryLower) {
+				return nil
+			}
+
+			lines := strings.Split(content, "\n")
+			var matches []SearchMatch
+			for i, line := range lines {
+				if totalMatches >= maxMatches {
+					break
+				}
+				if strings.Contains(strings.ToLower(line), queryLower) {
+					// Truncate long lines
+					displayLine := line
+					if len(displayLine) > 200 {
+						displayLine = displayLine[:200] + "..."
+					}
+					matches = append(matches, SearchMatch{
+						LineNumber: i + 1,
+						Content:    displayLine,
+					})
+					totalMatches++
+				}
+			}
+
+			if len(matches) > 0 {
+				results = append(results, SearchResult{
+					Path:    displayPath,
+					Matches: matches,
+				})
+			}
+		}
+
+		return nil
+	})
+
+	c.JSON(http.StatusOK, gin.H{"results": results})
+}
+
 func (h *FilesHandler) safePath(requestedPath string) (string, error) {
+	return h.safePathWithBase(requestedPath, h.cfg.ClaudeWorkingDir)
+}
+
+func (h *FilesHandler) safePathForUser(requestedPath string, c *gin.Context) (string, error) {
+	if r, err := h.safePathWithBase(requestedPath, h.getUserDir(c)); err == nil {
+		return r, nil
+	}
+	// Fallback: allow access to shared folder
+	return h.safePathWithBase(requestedPath, h.cfg.SharedDir)
+}
+
+func (h *FilesHandler) safePathWithBase(requestedPath string, baseDir string) (string, error) {
 	// Clean and resolve the path
 	cleaned := filepath.Clean(requestedPath)
 
-	// If it's a relative path, join with working dir
+	// If it's a relative path, join with base dir
 	if !filepath.IsAbs(cleaned) {
-		cleaned = filepath.Join(h.cfg.ClaudeWorkingDir, cleaned)
+		cleaned = filepath.Join(baseDir, cleaned)
 	}
 
 	// Resolve to absolute
@@ -308,13 +522,29 @@ func (h *FilesHandler) safePath(requestedPath string) (string, error) {
 		return "", err
 	}
 
+	// Resolve symlinks to prevent symlink-based sandbox escape.
+	// A user could create a symlink workspace/escape -> /etc and bypass the prefix check.
+	// EvalSymlinks only works if the path exists; for new files, resolve the parent.
+	resolved := absPath
+	if r, err := filepath.EvalSymlinks(absPath); err == nil {
+		resolved = r
+	} else if r, err := filepath.EvalSymlinks(filepath.Dir(absPath)); err == nil {
+		resolved = filepath.Join(r, filepath.Base(absPath))
+	}
+
 	// Ensure it's within allowed directory
-	allowedBase, err := filepath.Abs(h.cfg.ClaudeWorkingDir)
+	allowedBase, err := filepath.Abs(baseDir)
 	if err != nil {
 		return "", err
 	}
+	// Also resolve symlinks in the base directory itself
+	if r, err := filepath.EvalSymlinks(allowedBase); err == nil {
+		allowedBase = r
+	}
 
-	if !strings.HasPrefix(absPath, allowedBase) {
+	// Must be exactly the base or a child path (with separator).
+	// Without the separator check, /workspaces/alice would match /workspaces/alicebob.
+	if resolved != allowedBase && !strings.HasPrefix(resolved, allowedBase+string(filepath.Separator)) {
 		return "", fs.ErrPermission
 	}
 

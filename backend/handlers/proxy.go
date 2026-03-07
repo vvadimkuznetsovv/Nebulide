@@ -61,13 +61,13 @@ func CodeServerAuthMiddleware(jwtSecret string) gin.HandlerFunc {
 			return
 		}
 
-		// First valid ?token= request → set a long-lived cookie (7 days) so that
+		// First valid ?token= request → set a short-lived cookie so that
 		// subsequent code-server internal requests (without ?token=) pass auth.
 		if setCookie {
-			longLived, err := utils.GenerateAccessToken(jwtSecret, claims.UserID, claims.Username, false, 7*24*time.Hour)
+			longLived, err := utils.GenerateAccessToken(jwtSecret, claims.UserID, claims.Username, false, 2*time.Hour)
 			if err == nil {
 				c.SetSameSite(http.SameSiteLaxMode)
-				c.SetCookie("nebulide-code-auth", longLived, 7*24*60*60, "/code", "", true, true)
+				c.SetCookie("nebulide-code-auth", longLived, 2*60*60, "/code", "", true, true)
 			}
 		}
 

@@ -1436,6 +1436,11 @@ body { animation: scrollbarShimmer 8s ease-in-out infinite; }
     backdrop-filter: blur(10px);
     animation: glassShimmer 3s ease-in-out infinite;
   }
+  .file-tree-item.drop-target {
+    background: rgba(127, 0, 255, 0.18);
+    border-color: rgba(127, 0, 255, 0.6);
+    box-shadow: 0 0 12px 3px rgba(127, 0, 255, 0.4), inset 0 0 6px rgba(127, 0, 255, 0.15);
+  }
   @media (pointer: coarse) {
     .file-tree-item {
       min-height: 40px;

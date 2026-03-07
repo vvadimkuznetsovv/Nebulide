@@ -2,6 +2,14 @@
 # Wrapper around "apk add" that persists packages across container restarts.
 # Usage: apk-persist python3 postgresql-client curl
 # Packages are saved to /home/nebulide/workspace/.packages and auto-installed on startup.
+# ADMIN ONLY — regular users should use pip-persist for Python packages.
+
+# Only root can install system packages
+if [ "$(id -u)" -ne 0 ]; then
+  echo "Error: apk-persist requires root access (admin terminal only)." >&2
+  echo "Use 'pip-persist <package>' for Python packages in your venv." >&2
+  exit 1
+fi
 
 PACKAGES_FILE="/home/nebulide/workspace/.packages"
 

@@ -2,9 +2,19 @@
 set -e
 
 WORKSPACE="/home/nebulide/workspace"
+WORKSPACES="/home/nebulide/workspaces"
 PACKAGES_FILE="$WORKSPACE/.packages"
 CLAUDE_MD_SRC="/app/CLAUDE.md"
 CLAUDE_MD_DST="$WORKSPACE/CLAUDE.md"
+
+# Ensure per-user workspaces root exists
+mkdir -p "$WORKSPACES"
+
+# Shared folder — read+write for all users (setgid so new files inherit group)
+SHARED="/home/nebulide/shared"
+mkdir -p "$SHARED"
+chown nebulide:nebulide "$SHARED"
+chmod 2775 "$SHARED"
 
 # Copy CLAUDE.md to workspace if not present (first run)
 if [ -f "$CLAUDE_MD_SRC" ] && [ ! -f "$CLAUDE_MD_DST" ]; then
@@ -43,8 +53,8 @@ if [ "$(ls -A "$SSH_TARGET" 2>/dev/null)" ]; then
   echo "[entrypoint] SSH keys configured."
 fi
 
-# Symlink nebulide user SSH → root SSH (same keys, avoids duplication)
-ln -sfn "$SSH_TARGET" /home/nebulide/.ssh
+# NOTE: No global SSH symlink — admin SSH keys stay at /root/.ssh (root-only).
+# Non-admin users get per-user .ssh in their workspace via sandboxed-shell.
 
 # Claude CLI config — symlink /root/.claude.json into the persistent volume
 # so it survives container rebuilds (volume mounts /root/.claude/)
@@ -64,7 +74,7 @@ elif [ ! -e "$CLAUDE_JSON" ]; then
   echo "[entrypoint] Claude CLI config created."
 fi
 
-# Persistent Python venv — lives in workspace volume, survives deploys
+# Persistent Python venv — admin workspace only
 VENV_DIR="$WORKSPACE/.venv"
 if [ ! -d "$VENV_DIR" ]; then
   echo "[entrypoint] Creating persistent Python venv..."
@@ -72,21 +82,28 @@ if [ ! -d "$VENV_DIR" ]; then
   echo "[entrypoint] Python venv created at $VENV_DIR"
 fi
 
-# Auto-activate venv in interactive shells (bash)
-BASHRC="/home/nebulide/.bashrc"
-ACTIVATE_LINE="source $VENV_DIR/bin/activate"
-if ! grep -qF "$ACTIVATE_LINE" "$BASHRC" 2>/dev/null; then
-  echo "$ACTIVATE_LINE" >> "$BASHRC"
-  echo "[entrypoint] Venv auto-activation added to .bashrc"
-fi
-
-# Also activate for root (claude CLI runs as root)
+# Auto-activate venv for root (admin terminal runs as root)
 ROOT_BASHRC="/root/.bashrc"
+ACTIVATE_LINE="source $VENV_DIR/bin/activate"
 if ! grep -qF "$ACTIVATE_LINE" "$ROOT_BASHRC" 2>/dev/null; then
   echo "$ACTIVATE_LINE" >> "$ROOT_BASHRC"
+fi
+# Per-user venv is created by sandboxed-shell on first terminal open.
+
+# Create PostgreSQL dev role for user terminals (idempotent)
+if command -v psql >/dev/null 2>&1; then
+  psql "host=${DB_HOST:-postgres} port=${DB_PORT:-5432} user=${DB_USER:-nebulide} password=${DB_PASSWORD:-nebulide} dbname=${DB_NAME:-nebulide}" -c "
+    DO \$\$ BEGIN
+      IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'dev') THEN
+        CREATE ROLE dev LOGIN PASSWORD '${DEV_DB_PASSWORD:-devpass}' CREATEDB;
+      END IF;
+    END \$\$;
+    REVOKE ALL ON DATABASE ${DB_NAME:-nebulide} FROM dev;
+  " 2>/dev/null && echo "[entrypoint] PostgreSQL dev role ready." || echo "[entrypoint] PostgreSQL dev role setup skipped (DB not ready yet)."
 fi
 
 # Ensure workspace ownership (volume mount may override)
 chown -R nebulide:nebulide /home/nebulide/workspace 2>/dev/null || true
+chown -R nebulide:nebulide /home/nebulide/workspaces 2>/dev/null || true
 
 exec "$@"

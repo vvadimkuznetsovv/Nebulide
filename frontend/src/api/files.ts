@@ -37,6 +37,25 @@ export const mkdirFile = (path: string) =>
 export const renameFile = (oldPath: string, newPath: string) =>
   api.post('/files/rename', { old_path: oldPath, new_path: newPath });
 
+// Search files by name or content
+export interface SearchMatch {
+  line_number: number;
+  content: string;
+}
+
+export interface SearchResult {
+  path: string;
+  is_dir: boolean;
+  matches?: SearchMatch[];
+}
+
+export interface SearchResponse {
+  results: SearchResult[];
+}
+
+export const searchFiles = (params: { q: string; type?: 'content' | 'name'; include?: string; exclude?: string }) =>
+  api.get<SearchResponse>('/files/search', { params });
+
 // Build URL for raw binary file serving (PDF iframe, etc.)
 export function getRawFileUrl(path: string): string {
   const token = localStorage.getItem('access_token');

@@ -14,6 +14,7 @@ type User struct {
 	TOTPSecret   string    `gorm:"size:64;not null" json:"-"`
 	TOTPEnabled  bool      `gorm:"default:false" json:"totp_enabled"`
 	IsAdmin      bool      `gorm:"default:false" json:"is_admin"`
+	TelegramID   int64     `gorm:"default:0" json:"telegram_id"`
 	CreatedAt    time.Time `json:"created_at"`
 	UpdatedAt    time.Time `json:"updated_at"`
 }

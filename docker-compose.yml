@@ -11,6 +11,7 @@ services:
       - /etc/letsencrypt:/etc/letsencrypt:ro
       - /var/www/edulearn/dist:/var/www/edulearn/dist:ro
       - /var/www/smartrs/dist:/var/www/smartrs/dist:ro
+      - /var/www/mega/dist:/var/www/mega/dist:ro
       - nginx_logs:/var/log/nginx
     depends_on:
       - app
@@ -36,6 +37,8 @@ services:
     image: nebulide:latest
     build: .
     restart: unless-stopped
+    cap_add:
+      - SYS_ADMIN
     depends_on:
       - postgres
       - redis
@@ -46,6 +49,8 @@ services:
       REDIS_URL: redis:6379
     volumes:
       - /home/nebulide/workspace:/home/nebulide/workspace
+      - /home/nebulide/workspaces:/home/nebulide/workspaces
+      - shared_data:/home/nebulide/shared
       - /tmp/nebulide:/tmp
       - usr_local:/usr/local
       - ssh_keys:/root/.ssh
@@ -73,5 +78,6 @@ volumes:
   usr_local:
   ssh_keys:
   claude_data:
+  shared_data:
   code-server-config:
   nginx_logs:

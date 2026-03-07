@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { useAuthStore } from '../../store/authStore';
 import { useLayoutStore } from '../../store/layoutStore';
 import { useWorkspaceSessionStore } from '../../store/workspaceSessionStore';
-import { logout, totpSetup, totpConfirm, changePassword } from '../../api/auth';
+import { logout, totpSetup, totpConfirm, changePassword, updateTelegramId } from '../../api/auth';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { QRCodeSVG } from 'qrcode.react';
@@ -14,6 +14,44 @@ import { getDeviceId } from '../../utils/deviceId';
 interface SidebarProps {
   isOpen: boolean;
   onClose: () => void;
+}
+
+function CopyRow({ label, value }: { label: string; value: string }) {
+  const handleCopy = () => {
+    navigator.clipboard.writeText(value).then(
+      () => toast.success(`Copied: ${value}`),
+      () => toast.error('Failed to copy'),
+    );
+  };
+  return (
+    <div
+      className="flex items-center gap-2 px-2.5 py-2 rounded-lg cursor-pointer transition-all duration-150"
+      style={{
+        background: 'rgba(0,0,0,0.2)',
+        border: '1px solid rgba(255,255,255,0.04)',
+      }}
+      onClick={handleCopy}
+      title="Click to copy"
+    >
+      <span className="text-xs flex-shrink-0" style={{ color: 'var(--text-muted)', minWidth: '80px' }}>
+        {label}
+      </span>
+      <span
+        className="text-xs flex-1 truncate"
+        style={{
+          color: 'var(--accent-bright)',
+          fontFamily: "'SF Mono','JetBrains Mono',monospace",
+          fontSize: '11px',
+        }}
+      >
+        {value}
+      </span>
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.25)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="flex-shrink-0">
+        <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+        <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+      </svg>
+    </div>
+  );
 }
 
 const allPanels: BasePanelId[] = ['chat', 'files', 'editor', 'preview', 'terminal'];
@@ -37,6 +75,8 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [changePwLoading, setChangePwLoading] = useState(false);
+  const [telegramIdInput, setTelegramIdInput] = useState('');
+  const [tgIdLoading, setTgIdLoading] = useState(false);
   const clearAuth = useAuthStore((s) => s.clearAuth);
   const user = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
@@ -456,6 +496,52 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
 
               <div className="glass-divider" />
 
+              {/* Telegram ID */}
+              <div>
+                <label className="block text-xs font-semibold mb-3 uppercase tracking-wider" style={{ color: 'var(--text-muted)', fontSize: '11px', letterSpacing: '0.1em' }}>
+                  Telegram ID
+                </label>
+                <div className="space-y-2.5">
+                  <div className="rounded-xl overflow-hidden" style={{ background: 'rgba(0,0,0,0.35)', border: '1px solid var(--glass-border)' }}>
+                    <input
+                      type="text"
+                      value={telegramIdInput || (user?.telegram_id ? String(user.telegram_id) : '')}
+                      onChange={(e) => setTelegramIdInput(e.target.value.replace(/\D/g, ''))}
+                      placeholder="Your Telegram ID"
+                      style={{ width: '100%', padding: '10px 12px', fontSize: '13px', background: 'transparent', border: 'none', color: 'var(--text-primary)', outline: 'none' }}
+                    />
+                  </div>
+                  <p style={{ color: 'var(--text-muted)', fontSize: '11px', lineHeight: 1.4 }}>
+                    Send /start to the bot to get your ID
+                  </p>
+                  <button
+                    type="button"
+                    disabled={tgIdLoading || !telegramIdInput}
+                    className="w-full py-2.5 rounded-xl text-xs font-bold btn-accent"
+                    style={{ opacity: (tgIdLoading || !telegramIdInput) ? 0.3 : 1 }}
+                    onClick={async () => {
+                      const id = parseInt(telegramIdInput, 10);
+                      if (!id) { toast.error('Invalid Telegram ID'); return; }
+                      setTgIdLoading(true);
+                      try {
+                        await updateTelegramId(id);
+                        if (user) setUser({ ...user, telegram_id: id });
+                        toast.success('Telegram ID saved');
+                        setTelegramIdInput('');
+                      } catch {
+                        toast.error('Failed to save Telegram ID');
+                      } finally {
+                        setTgIdLoading(false);
+                      }
+                    }}
+                  >
+                    {tgIdLoading ? 'Saving...' : 'Save'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="glass-divider" />
+
               {/* 2FA */}
               <div>
                 <label className="block text-xs font-semibold mb-3 uppercase tracking-wider" style={{ color: 'var(--text-muted)', fontSize: '11px', letterSpacing: '0.1em' }}>
@@ -482,6 +568,32 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                     Setup 2FA
                   </button>
                 )}
+              </div>
+
+              <div className="glass-divider" />
+
+              {/* Instructions */}
+              <div>
+                <label className="block text-xs font-semibold mb-3 uppercase tracking-wider" style={{ color: 'var(--text-muted)', fontSize: '11px', letterSpacing: '0.1em' }}>
+                  Quick Reference
+                </label>
+                <div className="space-y-2">
+                  <CopyRow label="Workspace" value="~/workspace" />
+                  <CopyRow label="Shared folder" value="/home/nebulide/shared" />
+                  <CopyRow label="Uploads (from TG)" value="~/uploads" />
+
+                  <div className="glass-divider" style={{ margin: '8px 0' }} />
+
+                  <CopyRow label="Send file to TG" value="tg-send <file>" />
+                  <CopyRow label="Install pip pkg" value="pip-persist <pkg>" />
+                  {user?.is_admin && <CopyRow label="Install system pkg" value="apk-persist <pkg>" />}
+
+                  <div className="glass-divider" style={{ margin: '8px 0' }} />
+
+                  <CopyRow label="PostgreSQL" value="psql -h postgres -U dev" />
+                  <CopyRow label="Git push" value="git push origin main" />
+                  <CopyRow label="SSH" value="ssh user@host" />
+                </div>
               </div>
             </div>
           </>

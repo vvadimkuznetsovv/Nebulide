@@ -1,8 +1,10 @@
 import React, { useState, useEffect, useRef, type ReactNode } from 'react';
+import { DndContext, DragOverlay, MouseSensor, TouchSensor, useSensor, useSensors, useDroppable, type DragEndEvent, type DragStartEvent } from '@dnd-kit/core';
 import { listFiles, readFile, deleteFile, writeFile, mkdirFile, renameFile, type FileEntry } from '../../api/files';
-import FileTreeItem from './FileTreeItem';
+import FileTreeItem, { getFileIcon, getFileColor } from './FileTreeItem';
 import ContextMenu, { type ContextMenuItem } from './ContextMenu';
 import { useLongPress } from '../../hooks/useLongPress';
+import { useAuthStore } from '../../store/authStore';
 import toast from 'react-hot-toast';
 
 interface FileTreeProps {
@@ -60,7 +62,25 @@ function getMenuItems(target: FileEntry | null): ContextMenuItem[] {
   ];
 }
 
+const EXPANDED_KEY = 'nebulide-expanded-folders:';
+
+function saveExpandedFolders(root: string, folders: Set<string>) {
+  try {
+    localStorage.setItem(EXPANDED_KEY + root, JSON.stringify([...folders]));
+  } catch { /* quota exceeded — ignore */ }
+}
+
+function loadExpandedFolders(root: string): Set<string> {
+  try {
+    const saved = localStorage.getItem(EXPANDED_KEY + root);
+    return saved ? new Set(JSON.parse(saved) as string[]) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
 export default function FileTree({ rootPath, onFileSelect, onFileDoubleClick, onFileOpenNewTab }: FileTreeProps) {
+  const sharedDir = useAuthStore((s) => s.user?.shared_dir);
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [currentPath, setCurrentPath] = useState(rootPath || '');
   const [loading, setLoading] = useState(false);
@@ -74,6 +94,12 @@ export default function FileTree({ rootPath, onFileSelect, onFileDoubleClick, on
   const [childrenCache, setChildrenCache] = useState<Map<string, FileEntry[]>>(new Map());
   const [loadingFolders, setLoadingFolders] = useState<Set<string>>(new Set());
   const [creatingInFolder, setCreatingInFolder] = useState<string | null>(null);
+
+  // DnD state
+  const [draggedFile, setDraggedFile] = useState<FileEntry | null>(null);
+  const mouseSensor = useSensor(MouseSensor, { activationConstraint: { distance: 8 } });
+  const touchSensor = useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } });
+  const sensors = useSensors(mouseSensor, touchSensor);
 
   const loadFiles = async (path?: string) => {
     setLoading(true);
@@ -108,10 +134,15 @@ export default function FileTree({ rootPath, onFileSelect, onFileDoubleClick, on
       setExpandedFolders(prev => {
         const next = new Set(prev);
         next.delete(folderPath);
+        saveExpandedFolders(currentPath, next);
         return next;
       });
     } else {
-      setExpandedFolders(prev => new Set(prev).add(folderPath));
+      setExpandedFolders(prev => {
+        const next = new Set(prev).add(folderPath);
+        saveExpandedFolders(currentPath, next);
+        return next;
+      });
       if (!childrenCache.has(folderPath)) {
         setLoadingFolders(prev => new Set(prev).add(folderPath));
         try {
@@ -122,6 +153,7 @@ export default function FileTree({ rootPath, onFileSelect, onFileDoubleClick, on
           setExpandedFolders(prev => {
             const next = new Set(prev);
             next.delete(folderPath);
+            saveExpandedFolders(currentPath, next);
             return next;
           });
         } finally {
@@ -135,11 +167,99 @@ export default function FileTree({ rootPath, onFileSelect, onFileDoubleClick, on
     }
   };
 
+  // --- DnD handlers ---
+
+  const handleDragStart = (event: DragStartEvent) => {
+    const file = event.active.data.current?.file as FileEntry | undefined;
+    if (file) setDraggedFile(file);
+  };
+
+  const handleDragEnd = (event: DragEndEvent) => {
+    setDraggedFile(null);
+    const { active, over } = event;
+    if (!over) return;
+
+    const sourceFile = active.data.current?.file as FileEntry | undefined;
+    if (!sourceFile) return;
+
+    // over.id is `folder:PATH` for droppable folders, or `root-drop` for root area
+    const overId = String(over.id);
+    let targetDir: string;
+    if (overId === 'root-drop') {
+      targetDir = currentPath;
+    } else if (overId.startsWith('folder:')) {
+      targetDir = overId.slice('folder:'.length);
+    } else {
+      return;
+    }
+
+    const norm = (p: string) => p.replace(/\\/g, '/');
+    const sourcePath = norm(sourceFile.path);
+    const sourceDir = sourcePath.split('/').slice(0, -1).join('/');
+    const fileName = sourcePath.split('/').pop() || '';
+
+    // Don't move to the same directory
+    if (norm(targetDir) === sourceDir) return;
+    // Don't move a folder into itself or its children
+    if (sourceFile.is_dir && (norm(targetDir) === sourcePath || norm(targetDir).startsWith(sourcePath + '/'))) {
+      toast.error('Cannot move folder into itself');
+      return;
+    }
+
+    const newPath = targetDir + '/' + fileName;
+    renameFile(sourceFile.path, newPath)
+      .then(() => {
+        toast.success(`Moved "${fileName}"`);
+        refreshFolder(sourceDir);
+        refreshFolder(targetDir);
+      })
+      .catch(() => toast.error('Failed to move file'));
+  };
+
+  const handleDragCancel = () => setDraggedFile(null);
+
   useEffect(() => {
-    setExpandedFolders(new Set());
     setChildrenCache(new Map());
     setCreatingInFolder(null);
-    loadFiles(rootPath);
+    const root = rootPath || '';
+
+    // Restore expanded folders from localStorage
+    const saved = loadExpandedFolders(root);
+    setExpandedFolders(saved);
+
+    // Load root files, then re-fetch children for all saved expanded folders
+    setLoading(true);
+    listFiles(rootPath)
+      .then(({ data }) => {
+        setFiles(data.files || []);
+        setCurrentPath(data.path);
+        // Fetch children for each expanded folder in parallel
+        if (saved.size > 0) {
+          const fetches = [...saved].map((fp) =>
+            listFiles(fp)
+              .then(({ data: d }) => [fp, d.files || []] as const)
+              .catch(() => null),
+          );
+          Promise.all(fetches).then((results) => {
+            const cache = new Map<string, FileEntry[]>();
+            const validExpanded = new Set<string>();
+            for (const r of results) {
+              if (r) {
+                cache.set(r[0], r[1]);
+                validExpanded.add(r[0]);
+              }
+            }
+            setChildrenCache(cache);
+            // Remove folders that no longer exist
+            if (validExpanded.size < saved.size) {
+              setExpandedFolders(validExpanded);
+              saveExpandedFolders(root, validExpanded);
+            }
+          });
+        }
+      })
+      .catch((err) => console.error('Failed to list files:', err))
+      .finally(() => setLoading(false));
   }, [rootPath]);
 
   const handleClick = (file: FileEntry) => {
@@ -358,10 +478,32 @@ export default function FileTree({ rootPath, onFileSelect, onFileDoubleClick, on
   };
 
   const handleRefresh = () => {
-    setExpandedFolders(new Set());
+    // Keep expanded folders — only re-fetch data
     setChildrenCache(new Map());
     setCreatingInFolder(null);
-    loadFiles(currentPath);
+    setLoading(true);
+    listFiles(currentPath)
+      .then(({ data }) => {
+        setFiles(data.files || []);
+        setCurrentPath(data.path);
+        // Re-fetch children for expanded folders
+        if (expandedFolders.size > 0) {
+          const fetches = [...expandedFolders].map((fp) =>
+            listFiles(fp)
+              .then(({ data: d }) => [fp, d.files || []] as const)
+              .catch(() => null),
+          );
+          Promise.all(fetches).then((results) => {
+            const cache = new Map<string, FileEntry[]>();
+            for (const r of results) {
+              if (r) cache.set(r[0], r[1]);
+            }
+            setChildrenCache(cache);
+          });
+        }
+      })
+      .catch((err) => console.error('Failed to refresh:', err))
+      .finally(() => setLoading(false));
   };
 
   const canGoUp = currentPath && currentPath !== (rootPath || '');
@@ -373,7 +515,7 @@ export default function FileTree({ rootPath, onFileSelect, onFileDoubleClick, on
   const renderCreationInput = (depth: number) => (
     <div
       className="w-full flex items-center gap-1.5 py-1.5 text-sm"
-      style={{ paddingLeft: `${12 + depth * 16 + 16}px`, paddingRight: '12px' }}
+      style={{ paddingLeft: `${8 + depth * 16 + 20}px`, paddingRight: '12px' }}
     >
       <span
         className="w-5 text-[10px] font-mono text-center shrink-0 font-bold"
@@ -480,6 +622,28 @@ export default function FileTree({ rootPath, onFileSelect, onFileDoubleClick, on
         >
           {currentPath.replace(/\\/g, '/')}
         </span>
+        {sharedDir && (
+          <button
+            type="button"
+            onClick={() => {
+              setExpandedFolders(new Set());
+              setChildrenCache(new Map());
+              setCreatingInFolder(null);
+              loadFiles(sharedDir);
+            }}
+            className="hover:opacity-70 transition-opacity p-0.5"
+            title="Shared folder"
+            style={{ color: currentPath === sharedDir ? 'var(--accent-bright)' : undefined }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+              <circle cx="9" cy="7" r="4" />
+              <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+              <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+            </svg>
+          </button>
+        )}
         <button
           type="button"
           onClick={handleRefresh}
@@ -495,32 +659,64 @@ export default function FileTree({ rootPath, onFileSelect, onFileDoubleClick, on
         </button>
       </div>
 
-      {/* File list */}
-      <div
-        className="flex-1 overflow-y-auto overflow-x-auto py-1 select-none"
-        style={{ WebkitTouchCallout: 'none' }}
-        onContextMenu={handleEmptyContextMenu}
-        {...emptyLongPressHandlers}
+      {/* File list with DnD */}
+      <DndContext
+        sensors={sensors}
+        onDragStart={handleDragStart}
+        onDragEnd={handleDragEnd}
+        onDragCancel={handleDragCancel}
       >
-        {loading ? (
-          <div className="p-4 text-center text-sm" style={{ color: 'var(--text-secondary)' }}>
-            <span className="glow-pulse inline-block">Loading...</span>
-          </div>
-        ) : (
-          <div className="inline-block min-w-full">
-            {/* Root-level inline creation input */}
-            {creatingType && !creatingInFolder && renderCreationInput(0)}
+        <RootDropZone
+          onContextMenu={handleEmptyContextMenu}
+          longPressHandlers={emptyLongPressHandlers}
+        >
+          {loading ? (
+            <div className="p-4 text-center text-sm" style={{ color: 'var(--text-secondary)' }}>
+              <span className="glow-pulse inline-block">Loading...</span>
+            </div>
+          ) : (
+            <div className="inline-block min-w-full">
+              {/* Root-level inline creation input */}
+              {creatingType && !creatingInFolder && renderCreationInput(0)}
 
-            {files.length === 0 && !creatingType ? (
-              <div className="p-4 text-center text-sm" style={{ color: 'var(--text-secondary)' }}>
-                Empty directory
-              </div>
-            ) : (
-              renderItems(files, 0)
-            )}
-          </div>
-        )}
-      </div>
+              {files.length === 0 && !creatingType ? (
+                <div className="p-4 text-center text-sm" style={{ color: 'var(--text-secondary)' }}>
+                  Empty directory
+                </div>
+              ) : (
+                renderItems(files, 0)
+              )}
+            </div>
+          )}
+        </RootDropZone>
+
+        {/* DragOverlay: visual ghost during drag */}
+        <DragOverlay dropAnimation={null}>
+          {draggedFile && (
+            <div
+              className="flex items-center gap-1.5 py-1 px-3 text-sm rounded"
+              style={{
+                background: 'rgba(127, 0, 255, 0.15)',
+                border: '1px solid var(--accent)',
+                color: 'var(--text-primary)',
+                backdropFilter: 'blur(8px)',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {draggedFile.is_dir ? (
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                </svg>
+              ) : (
+                <span className="w-4 text-[10px] font-mono text-center font-bold" style={{ color: getFileColor(draggedFile) }}>
+                  {getFileIcon(draggedFile)}
+                </span>
+              )}
+              {draggedFile.name}
+            </div>
+          )}
+        </DragOverlay>
+      </DndContext>
 
       {/* Context menu */}
       {contextMenu && (
@@ -532,6 +728,34 @@ export default function FileTree({ rootPath, onFileSelect, onFileDoubleClick, on
           onClose={() => setContextMenu(null)}
         />
       )}
+    </div>
+  );
+}
+
+/** Root-level drop zone — accepts file drops into current directory */
+function RootDropZone({
+  children,
+  onContextMenu,
+  longPressHandlers,
+}: {
+  children: React.ReactNode;
+  onContextMenu: (e: React.MouseEvent) => void;
+  longPressHandlers: Record<string, unknown>;
+}) {
+  const { setNodeRef, isOver } = useDroppable({ id: 'root-drop' });
+  return (
+    <div
+      ref={setNodeRef}
+      className="flex-1 overflow-y-auto overflow-x-auto py-1 select-none"
+      style={{
+        WebkitTouchCallout: 'none',
+        outline: isOver ? '2px dashed var(--accent)' : 'none',
+        outlineOffset: '-2px',
+      }}
+      onContextMenu={onContextMenu}
+      {...longPressHandlers}
+    >
+      {children}
     </div>
   );
 }

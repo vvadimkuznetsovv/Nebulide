@@ -47,7 +47,12 @@ func (h *SessionsHandler) Create(c *gin.Context) {
 		req.Title = "New Chat"
 	}
 	if req.WorkingDirectory == "" {
-		req.WorkingDirectory = h.cfg.ClaudeWorkingDir
+		username, _ := c.Get("username")
+		if u, ok := username.(string); ok && u != "" && u != h.cfg.AdminUsername {
+			req.WorkingDirectory = h.cfg.GetUserWorkspaceDir(u)
+		} else {
+			req.WorkingDirectory = h.cfg.ClaudeWorkingDir
+		}
 	}
 
 	session := models.ChatSession{

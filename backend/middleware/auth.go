@@ -40,6 +40,13 @@ func AuthRequired(jwtSecret string) gin.HandlerFunc {
 			return
 		}
 
+		// Reject scoped tokens (e.g. tg-send) from accessing regular API endpoints
+		if claims.Purpose != "" {
+			c.JSON(http.StatusForbidden, gin.H{"error": "Scoped token cannot access this endpoint"})
+			c.Abort()
+			return
+		}
+
 		c.Set("user_id", claims.UserID)
 		c.Set("username", claims.Username)
 		c.Next()

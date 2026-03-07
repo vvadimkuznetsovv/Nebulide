@@ -94,10 +94,28 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 		conn.Close()
 	}()
 
+	// Per-user workspace directory
+	workDir := h.cfg.ClaudeWorkingDir
+	if claims.Username != h.cfg.AdminUsername {
+		workDir = h.cfg.GetUserWorkspaceDir(claims.Username)
+	}
+
+	// Non-admin users get sandboxed shell (mount namespace isolation on Linux)
+	sandboxed := claims.Username != h.cfg.AdminUsername
+
+	// Build extra env vars for the terminal session
+	extraEnv := map[string]string{}
+
+	// Generate TG_SEND_TOKEN — a scoped 30-day JWT restricted to telegram/send endpoint only
+	tgToken, tgErr := utils.GenerateScopedToken(h.cfg.JWTSecret, claims.UserID, claims.Username, "tg-send", 30*24*time.Hour)
+	if tgErr == nil {
+		extraEnv["TG_SEND_TOKEN"] = tgToken
+	}
+
 	// Reuse existing shell or create new one.
 	// Shell lives independently of WebSocket — survives reconnections.
-	log.Printf("[Terminal] calling GetOrCreate key=%s", sessionKey)
-	termSession, err := h.terminal.GetOrCreate(sessionKey, h.cfg.ClaudeWorkingDir)
+	log.Printf("[Terminal] calling GetOrCreate key=%s dir=%s sandboxed=%v user=%s", sessionKey, workDir, sandboxed, claims.Username)
+	termSession, err := h.terminal.GetOrCreate(sessionKey, workDir, sandboxed, claims.Username, extraEnv)
 	if err != nil {
 		log.Printf("[Terminal] failed to create session: %v (key=%s)", err, sessionKey)
 		conn.WriteMessage(websocket.TextMessage, []byte(`{"type":"error","message":"Failed to create terminal"}`))

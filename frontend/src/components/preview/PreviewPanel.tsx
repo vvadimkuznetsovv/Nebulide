@@ -22,6 +22,13 @@ export default function PreviewPanel() {
     const url = urlInput.trim();
     if (!url) return;
     const fullUrl = url.startsWith('http') ? url : `http://${url}`;
+    // Block dangerous protocols (javascript:, data:, vbscript:)
+    try {
+      const parsed = new URL(fullUrl);
+      if (!['http:', 'https:'].includes(parsed.protocol)) return;
+    } catch {
+      return;
+    }
     setPreviewUrl(fullUrl);
     setActivePreviewTab(null);
   };
@@ -140,7 +147,7 @@ export default function PreviewPanel() {
           <iframe
             src={previewUrl}
             className="w-full h-full border-0"
-            sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+            sandbox="allow-scripts allow-forms allow-popups"
             title="Preview"
           />
         )}

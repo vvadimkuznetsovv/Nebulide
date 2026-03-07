@@ -25,12 +25,16 @@ type Config struct {
 
 	ClaudeAllowedTools string
 	ClaudeWorkingDir   string
+	WorkspacesRoot     string
+	SharedDir          string
 
 	RedisURL       string
 	AllowedOrigins []string
 
 	AdminUsername string
 	AdminPassword string
+
+	TelegramBotToken string
 }
 
 func Load() *Config {
@@ -52,12 +56,16 @@ func Load() *Config {
 
 		ClaudeAllowedTools: getEnv("CLAUDE_ALLOWED_TOOLS", "Read,Edit,Write,Bash,Glob,Grep"),
 		ClaudeWorkingDir:   getEnv("CLAUDE_WORKING_DIR", defaultWorkingDir()),
+		WorkspacesRoot:     getEnv("WORKSPACES_ROOT", defaultWorkspacesRoot()),
+		SharedDir:          getEnv("SHARED_DIR", defaultSharedDir()),
 
 		RedisURL:       getEnv("REDIS_URL", "localhost:6379"),
 		AllowedOrigins: parseOrigins(getEnv("ALLOWED_ORIGINS", defaultOrigins())),
 
 		AdminUsername: getEnv("ADMIN_USERNAME", "admin"),
 		AdminPassword: getEnv("ADMIN_PASSWORD", ""),
+
+		TelegramBotToken: getEnv("TELEGRAM_BOT_TOKEN", ""),
 	}
 }
 
@@ -87,6 +95,37 @@ func findProjectRoot() string {
 		}
 	}
 	return ""
+}
+
+func defaultSharedDir() string {
+	if runtime.GOOS == "windows" {
+		if root := findProjectRoot(); root != "" {
+			return filepath.Join(root, "shared")
+		}
+		return filepath.Join(os.Getenv("USERPROFILE"), "shared")
+	}
+	return "/home/nebulide/shared"
+}
+
+func defaultWorkspacesRoot() string {
+	if runtime.GOOS == "windows" {
+		if root := findProjectRoot(); root != "" {
+			return filepath.Join(root, "workspaces")
+		}
+		return filepath.Join(os.Getenv("USERPROFILE"), "workspaces")
+	}
+	return "/home/nebulide/workspaces"
+}
+
+// GetUserWorkspaceDir returns the workspace directory for a given user.
+// Sanitizes username to prevent path traversal (defense-in-depth).
+func (c *Config) GetUserWorkspaceDir(username string) string {
+	// filepath.Base strips directory components: "../../etc" → "etc", "/foo/bar" → "bar"
+	safe := filepath.Base(username)
+	if safe == "." || safe == ".." || safe == "" {
+		safe = "_invalid_"
+	}
+	return filepath.Join(c.WorkspacesRoot, safe)
 }
 
 func defaultWorkingDir() string {
@@ -123,9 +162,9 @@ func parseDuration(s string) time.Duration {
 
 func defaultOrigins() string {
 	if os.Getenv("GIN_MODE") != "release" {
-		return "https://nebulide.ru,http://localhost:5173,http://localhost:8080"
+		return "https://nebulide.ru,https://mega.nebulide.ru,http://localhost:5173,http://localhost:5174,http://localhost:8080"
 	}
-	return "https://nebulide.ru"
+	return "https://nebulide.ru,https://mega.nebulide.ru"
 }
 
 func parseOrigins(s string) []string {

@@ -4,6 +4,7 @@ import { Panel, Group, Separator, usePanelRef, useGroupRef } from 'react-resizab
 import { useWorkspaceStore, isPreviewableFile, type EditorTab } from '../../store/workspaceStore';
 import { useLayoutStore } from '../../store/layoutStore';
 import FileTree from '../files/FileTree';
+import FileSearch from '../files/FileSearch';
 import CodeEditor from './CodeEditor';
 import ContextMenu from '../files/ContextMenu';
 import { useLongPress, mergeEventHandlers } from '../../hooks/useLongPress';
@@ -38,6 +39,7 @@ export default function EditorPanel() {
   const editorCodePanelRef = usePanelRef();
   const groupRef = useGroupRef();
   const activeTab = openTabs.find((t) => t.id === activeTabId) || null;
+  const [fileMode, setFileMode] = useState<'tree' | 'search'>('tree');
 
   // When editor is collapsed and user selects a file or clicks a tab, restore 50/50
   const ensureEditorVisible = useCallback(() => {
@@ -82,7 +84,9 @@ export default function EditorPanel() {
           title={fileTreeVisible ? 'Hide file manager' : 'Show file manager'}
         >
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+            <line x1="3" y1="6" x2="21" y2="6" />
+            <line x1="3" y1="12" x2="21" y2="12" />
+            <line x1="3" y1="18" x2="21" y2="18" />
           </svg>
         </button>
 
@@ -117,39 +121,84 @@ export default function EditorPanel() {
             {/* Stop native touchmove from reaching Monaco's document-level touch tracker
                (prevents "UNKNOWN touch" console spam when scrolling file tree on mobile) */}
             <div
-              className="h-full"
+              className="h-full flex flex-col"
               onTouchMoveCapture={(e) => e.nativeEvent.stopImmediatePropagation()}
             >
-            <FileTree
-              rootPath={activeSession?.working_directory}
-              onFileSelect={(path) => {
-                if (isPreviewableFile(path)) {
-                  openPreviewFile(path);
-                  showPanel('preview');
-                } else {
-                  openFile(path, false);
-                  ensureEditorVisible();
-                }
-              }}
-              onFileDoubleClick={(path) => {
-                if (isPreviewableFile(path)) {
-                  openPreviewFile(path);
-                  showPanel('preview');
-                } else {
-                  openFile(path, true);
-                  ensureEditorVisible();
-                }
-              }}
-              onFileOpenNewTab={(path) => {
-                if (isPreviewableFile(path)) {
-                  openPreviewFile(path);
-                  showPanel('preview');
-                } else {
-                  openFile(path, true);
-                  ensureEditorVisible();
-                }
-              }}
-            />
+              {/* Mode toolbar: tree / search */}
+              <div
+                className="flex items-center gap-1 px-2 py-1 shrink-0"
+                style={{ borderBottom: '1px solid var(--glass-border)' }}
+              >
+                <button
+                  type="button"
+                  className={`editor-toggle-files${fileMode === 'tree' ? ' active' : ''}`}
+                  onClick={() => setFileMode('tree')}
+                  title="File tree"
+                  style={{ padding: '3px 6px' }}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                  </svg>
+                </button>
+                <button
+                  type="button"
+                  className={`editor-toggle-files${fileMode === 'search' ? ' active' : ''}`}
+                  onClick={() => setFileMode('search')}
+                  title="Search files"
+                  style={{ padding: '3px 6px' }}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <circle cx="11" cy="11" r="8" />
+                    <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                  </svg>
+                </button>
+              </div>
+
+              {/* Content: FileTree or FileSearch */}
+              {fileMode === 'tree' ? (
+                <FileTree
+                  rootPath={activeSession?.working_directory}
+                  onFileSelect={(path) => {
+                    if (isPreviewableFile(path)) {
+                      openPreviewFile(path);
+                      showPanel('preview');
+                    } else {
+                      openFile(path, false);
+                      ensureEditorVisible();
+                    }
+                  }}
+                  onFileDoubleClick={(path) => {
+                    if (isPreviewableFile(path)) {
+                      openPreviewFile(path);
+                      showPanel('preview');
+                    } else {
+                      openFile(path, true);
+                      ensureEditorVisible();
+                    }
+                  }}
+                  onFileOpenNewTab={(path) => {
+                    if (isPreviewableFile(path)) {
+                      openPreviewFile(path);
+                      showPanel('preview');
+                    } else {
+                      openFile(path, true);
+                      ensureEditorVisible();
+                    }
+                  }}
+                />
+              ) : (
+                <FileSearch
+                  onFileSelect={(path) => {
+                    if (isPreviewableFile(path)) {
+                      openPreviewFile(path);
+                      showPanel('preview');
+                    } else {
+                      openFile(path, true);
+                      ensureEditorVisible();
+                    }
+                  }}
+                />
+              )}
             </div>
           </Panel>
           <Separator className="resize-handle resize-handle-horizontal">

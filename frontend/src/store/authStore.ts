@@ -5,6 +5,8 @@ interface User {
   username: string;
   totp_enabled: boolean;
   is_admin?: boolean;
+  telegram_id?: number;
+  shared_dir?: string;
 }
 
 interface AuthState {

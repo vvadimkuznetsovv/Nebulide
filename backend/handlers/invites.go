@@ -4,7 +4,9 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"net/http"
+	"os"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -145,6 +147,15 @@ func (h *InviteHandler) Register(c *gin.Context) {
 		return
 	}
 
+	// Validate username characters — prevent path traversal via GetUserWorkspaceDir(username)
+	// Only allow: a-z, A-Z, 0-9, underscore, hyphen
+	for _, ch := range req.Username {
+		if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '_' || ch == '-') {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Username can only contain letters, numbers, underscores and hyphens"})
+			return
+		}
+	}
+
 	// Hash password before transaction (expensive, don't hold lock)
 	hash, err := bcrypt.GenerateFromPassword([]byte(req.Password), bcrypt.DefaultCost)
 	if err != nil {
@@ -206,6 +217,12 @@ func (h *InviteHandler) Register(c *gin.Context) {
 
 	// Clear lockout on success
 	h.lockout.RecordSuccess(c.Request.Context(), "register:"+c.ClientIP())
+
+	// Create per-user workspace directory
+	userWorkspace := h.cfg.GetUserWorkspaceDir(user.Username)
+	if err := os.MkdirAll(userWorkspace, 0755); err != nil {
+		log.Printf("[Register] Failed to create workspace for %s: %v", user.Username, err)
+	}
 
 	c.JSON(http.StatusCreated, gin.H{
 		"message": "Registration successful",

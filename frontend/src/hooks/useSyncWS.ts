@@ -75,9 +75,11 @@ export function useSyncWS() {
               if (msg.session_id) {
                 const prevStatus = store.lockStatus[msg.session_id];
                 store.setLockState(msg.session_id, 'owner');
-                // Was blocked → now owner again → reconnect terminals
+                // Was blocked → now owner again → reload layout + reconnect terminals
                 if (prevStatus === 'blocked') {
-                  reconnectAllTerminalSessions();
+                  store.reloadActiveSession().then(() => {
+                    reconnectAllTerminalSessions();
+                  });
                 }
               }
               break;

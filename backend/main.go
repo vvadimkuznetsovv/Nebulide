@@ -27,9 +27,13 @@ func main() {
 	// Redis
 	database.ConnectRedis(cfg)
 
-	// Ensure workspace directory exists
+	// Ensure workspace directories exist
 	log.Printf("Workspace: %s", cfg.ClaudeWorkingDir)
 	os.MkdirAll(cfg.ClaudeWorkingDir, 0755)
+	log.Printf("Workspaces root: %s", cfg.WorkspacesRoot)
+	os.MkdirAll(cfg.WorkspacesRoot, 0755)
+	log.Printf("Shared dir: %s", cfg.SharedDir)
+	os.MkdirAll(cfg.SharedDir, 0775)
 
 	// Seed admin user
 	seedAdminUser(cfg)
@@ -37,6 +41,19 @@ func main() {
 	// Services
 	claudeService := services.NewClaudeService(cfg.ClaudeAllowedTools)
 	terminalService := services.NewTerminalService()
+
+	// Telegram bot (optional — only starts if TELEGRAM_BOT_TOKEN is set)
+	var telegramBot *services.TelegramBot
+	if cfg.TelegramBotToken != "" {
+		bot, err := services.NewTelegramBot(cfg, database.DB)
+		if err != nil {
+			log.Printf("Telegram bot init failed: %v", err)
+		} else {
+			telegramBot = bot
+			go telegramBot.Start()
+			log.Println("Telegram bot started")
+		}
+	}
 
 	// Handlers
 	lockout := services.NewLoginLockout(database.RDB)
@@ -46,6 +63,7 @@ func main() {
 	terminalHandler := handlers.NewTerminalHandler(cfg, terminalService)
 	filesHandler := handlers.NewFilesHandler(cfg)
 	inviteHandler := handlers.NewInviteHandler(cfg, lockout)
+	adminHandler := handlers.NewAdminHandler(cfg, terminalService)
 	workspaceSessionsHandler := handlers.NewWorkspaceSessionsHandler(cfg)
 	syncHandler := handlers.NewSyncHandler(cfg)
 
@@ -88,6 +106,7 @@ func main() {
 		protected.POST("/auth/totp-setup", authHandler.TOTPSetup)
 		protected.POST("/auth/totp-confirm", authHandler.TOTPConfirm)
 		protected.POST("/auth/change-password", authHandler.ChangePassword)
+		protected.PUT("/auth/telegram-id", authHandler.UpdateTelegramID)
 
 		// Sessions
 		protected.GET("/sessions", sessionsHandler.List)
@@ -103,10 +122,20 @@ func main() {
 		protected.PUT("/workspace-sessions/:id", workspaceSessionsHandler.Update)
 		protected.DELETE("/workspace-sessions/:id", workspaceSessionsHandler.Delete)
 
-		// Invites (admin only — checked inside handler)
-		protected.POST("/admin/invites", inviteHandler.CreateInvite)
-		protected.GET("/admin/invites", inviteHandler.ListInvites)
-		protected.DELETE("/admin/invites/:id", inviteHandler.DeleteInvite)
+		// Admin routes (admin check inside each handler)
+		admin := protected.Group("/admin")
+		admin.POST("/invites", inviteHandler.CreateInvite)
+		admin.GET("/invites", inviteHandler.ListInvites)
+		admin.DELETE("/invites/:id", inviteHandler.DeleteInvite)
+		admin.GET("/users", adminHandler.ListUsers)
+		admin.GET("/users/:id", adminHandler.GetUser)
+		admin.DELETE("/users/:id", adminHandler.DeleteUser)
+		admin.GET("/users/:id/terminals", adminHandler.ListTerminals)
+		admin.DELETE("/users/:id/terminals/:instanceId", adminHandler.KillTerminal)
+		admin.GET("/users/:id/workspace/stats", adminHandler.WorkspaceStats)
+		admin.DELETE("/users/:id/workspace", adminHandler.DeleteWorkspace)
+		admin.GET("/stats", adminHandler.Stats)
+		admin.GET("/monitoring", adminHandler.Monitoring)
 
 		// Files
 		protected.GET("/files", filesHandler.List)
@@ -116,6 +145,13 @@ func main() {
 		protected.DELETE("/files", filesHandler.Delete)
 		protected.POST("/files/mkdir", filesHandler.Mkdir)
 		protected.POST("/files/rename", filesHandler.Rename)
+		protected.GET("/files/search", filesHandler.SearchFiles)
+	}
+
+	// Telegram route (own auth — accepts both regular JWT and scoped tg-send tokens)
+	if telegramBot != nil {
+		telegramHandler := handlers.NewTelegramHandler(cfg, telegramBot)
+		r.POST("/api/telegram/send", telegramHandler.Send)
 	}
 
 	// WebSocket routes (auth via query param)

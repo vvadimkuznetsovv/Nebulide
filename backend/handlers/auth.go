@@ -304,7 +304,37 @@ func (h *AuthHandler) Me(c *gin.Context) {
 		"username":     user.Username,
 		"totp_enabled": user.TOTPEnabled,
 		"is_admin":     user.IsAdmin,
+		"telegram_id":  user.TelegramID,
+		"shared_dir":   h.cfg.SharedDir,
 	})
+}
+
+func (h *AuthHandler) UpdateTelegramID(c *gin.Context) {
+	var req struct {
+		TelegramID int64 `json:"telegram_id"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
+
+	userID, _ := c.Get("user_id")
+
+	// Check uniqueness — prevent two users from claiming the same Telegram ID
+	if req.TelegramID != 0 {
+		var existing models.User
+		if err := database.DB.Where("telegram_id = ? AND id != ?", req.TelegramID, userID).First(&existing).Error; err == nil {
+			c.JSON(http.StatusConflict, gin.H{"error": "This Telegram ID is already linked to another account"})
+			return
+		}
+	}
+
+	if err := database.DB.Model(&models.User{}).Where("id = ?", userID).Update("telegram_id", req.TelegramID).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Telegram ID updated", "telegram_id": req.TelegramID})
 }
 
 func (h *AuthHandler) issueFullTokens(c *gin.Context, user models.User) {

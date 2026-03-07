@@ -1,0 +1,53 @@
+#!/bin/bash
+# Send a file to your Telegram via Nebulide bot.
+# Usage: tg-send <file_path>
+#
+# Requires TG_SEND_TOKEN env var (auto-set in terminal sessions).
+# The file must be in your workspace or the shared folder.
+
+if [ $# -eq 0 ]; then
+  echo "Usage: tg-send <file_path>"
+  echo "Send a file from your workspace to your Telegram."
+  exit 1
+fi
+
+if [ -z "$TG_SEND_TOKEN" ]; then
+  echo "Error: TG_SEND_TOKEN not set." >&2
+  echo "This token is auto-set when you open a terminal in Nebulide." >&2
+  echo "Make sure your Telegram ID is configured in Settings." >&2
+  exit 1
+fi
+
+FILE_PATH="$1"
+
+# Resolve to absolute path if relative
+if [ "${FILE_PATH#/}" = "$FILE_PATH" ]; then
+  FILE_PATH="$(pwd)/$FILE_PATH"
+fi
+
+# Check file exists locally
+if [ ! -f "$FILE_PATH" ]; then
+  echo "Error: File not found: $FILE_PATH" >&2
+  exit 1
+fi
+
+# Escape special JSON characters in file path to prevent JSON injection.
+# Backslash must be escaped first (before we introduce new backslashes).
+SAFE_PATH=$(printf '%s' "$FILE_PATH" | sed 's/\\/\\\\/g; s/"/\\"/g; s/	/\\t/g')
+
+RESPONSE=$(curl -s -w "\n%{http_code}" \
+  -X POST "http://localhost:8080/api/telegram/send" \
+  -H "Authorization: Bearer $TG_SEND_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"file_path\": \"$SAFE_PATH\"}")
+
+HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+BODY=$(echo "$RESPONSE" | sed '$d')
+
+if [ "$HTTP_CODE" = "200" ]; then
+  echo "File sent to Telegram!"
+else
+  ERROR=$(echo "$BODY" | grep -o '"error":"[^"]*"' | head -1 | cut -d'"' -f4)
+  echo "Error: ${ERROR:-Failed to send file (HTTP $HTTP_CODE)}" >&2
+  exit 1
+fi
