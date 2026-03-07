@@ -33,7 +33,7 @@ export default function Monitoring() {
   const [data, setData] = useState<MonitoringData | null>(null);
   const [error, setError] = useState('');
   const [autoRefresh, setAutoRefresh] = useState(true);
-  const intervalRef = useRef<ReturnType<typeof setInterval>>();
+  const intervalRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
 
   const fetchData = () => {
     getMonitoring()

@@ -12,7 +12,7 @@ import { getDeviceId, detectDeviceType } from '../utils/deviceId';
 import { sendSyncMessage } from '../utils/syncBridge';
 import { useWorkspaceStore, type WorkspaceSnapshot } from './workspaceStore';
 import { useLayoutStore, type LayoutSnapshot } from './layoutStore';
-import { destroyAllTerminalSessions } from '../components/terminal/Terminal';
+import { destroyAllTerminalSessions, disconnectAllTerminalSessions } from '../components/terminal/Terminal';
 import toast from 'react-hot-toast';
 
 const ACTIVE_WS_KEY = 'nebulide-active-workspace';
@@ -316,7 +316,9 @@ export const useWorkspaceSessionStore = create<WorkspaceSessionState>((set, get)
       if (fresh?.snapshot) {
         const snap = fresh.snapshot as unknown as FullSnapshot;
         if (snap?.layout && snap?.workspace) {
-          destroyAllTerminalSessions();
+          // Disconnect (not destroy) terminals — keeps sessions in Map so
+          // reconnectAllTerminalSessions() can find and reconnect them after TakeOver.
+          disconnectAllTerminalSessions();
           const panelIdMapping = useWorkspaceStore.getState().restoreFromSnapshot(snap.workspace);
           useLayoutStore.getState().restoreLayoutFromSnapshot(snap.layout, panelIdMapping);
         }
