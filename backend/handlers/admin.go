@@ -318,6 +318,7 @@ type monitoringResponse struct {
 
 type systemInfo struct {
 	CPUCount    int     `json:"cpu_count"`
+	CPUPercent  float64 `json:"cpu_percent"`
 	GoRoutines  int     `json:"goroutines"`
 	MemTotal    int64   `json:"mem_total_bytes"`
 	MemUsed     int64   `json:"mem_used_bytes"`
@@ -379,6 +380,7 @@ func (h *AdminHandler) Monitoring(c *gin.Context) {
 	}
 
 	if runtime.GOOS == "linux" {
+		sys.CPUPercent = readSystemCPU()
 		sys.MemTotal, sys.MemUsed, sys.MemPercent = readMemInfo()
 		sys.DiskTotal, sys.DiskUsed, sys.DiskPercent = readDiskInfo("/")
 	}
@@ -461,6 +463,40 @@ func readProcCPU(pid int) float64 {
 		return 0
 	}
 	return float64(proc2-proc1) / float64(sys2-sys1) * 100 * float64(runtime.NumCPU())
+}
+
+// readSystemCPU measures overall system CPU usage over a 100ms interval.
+func readSystemCPU() float64 {
+	readTotal := func() (idle, total int64, ok bool) {
+		data, err := os.ReadFile("/proc/stat")
+		if err != nil {
+			return 0, 0, false
+		}
+		firstLine := strings.SplitN(string(data), "\n", 2)[0]
+		fields := strings.Fields(firstLine)
+		if len(fields) < 5 {
+			return 0, 0, false
+		}
+		// fields: cpu user nice system idle iowait irq softirq steal ...
+		var sum int64
+		for _, f := range fields[1:] {
+			v, _ := strconv.ParseInt(f, 10, 64)
+			sum += v
+		}
+		idleVal, _ := strconv.ParseInt(fields[4], 10, 64)
+		return idleVal, sum, true
+	}
+
+	idle1, total1, ok1 := readTotal()
+	if !ok1 {
+		return 0
+	}
+	time.Sleep(100 * time.Millisecond)
+	idle2, total2, ok2 := readTotal()
+	if !ok2 || total2 == total1 {
+		return 0
+	}
+	return (1 - float64(idle2-idle1)/float64(total2-total1)) * 100
 }
 
 // readDiskInfo reads disk usage via `df` command (works in Docker/Linux).

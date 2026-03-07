@@ -78,6 +78,7 @@ export interface ProcessInfo {
 
 export interface SystemInfo {
   cpu_count: number;
+  cpu_percent: number;
   goroutines: number;
   mem_total_bytes: number;
   mem_used_bytes: number;
