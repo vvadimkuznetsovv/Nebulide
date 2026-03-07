@@ -211,7 +211,7 @@ export default function Monitoring() {
                         </span>
                       </td>
                       <td style={{ fontFamily: 'monospace', fontSize: '13px', color: p.cpu_percent > 50 ? 'var(--warning)' : 'var(--text-primary)' }}>
-                        {p.cpu_percent > 0 ? p.cpu_percent.toFixed(1) + '%' : '—'}
+                        {p.cpu_percent.toFixed(1)}%
                       </td>
                       <td style={{ fontFamily: 'monospace', fontSize: '13px' }}>
                         {p.memory_rss_bytes > 0 ? formatBytes(p.memory_rss_bytes) : '—'}

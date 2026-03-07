@@ -328,7 +328,7 @@ export default function UserDetail() {
                         <span className={`badge ${t.alive ? 'active' : 'danger'}`}>{t.alive ? 'Alive' : 'Dead'}</span>
                       </td>
                       <td style={{ fontFamily: 'monospace', fontSize: '13px', color: t.cpu_percent > 50 ? 'var(--warning)' : 'var(--text-primary)' }}>
-                        {t.cpu_percent > 0 ? t.cpu_percent.toFixed(1) + '%' : '—'}
+                        {t.cpu_percent.toFixed(1)}%
                       </td>
                       <td style={{ fontFamily: 'monospace', fontSize: '13px' }}>
                         {t.memory_rss_bytes > 0 ? formatBytes(t.memory_rss_bytes) : '—'}

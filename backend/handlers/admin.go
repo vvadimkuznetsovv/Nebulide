@@ -191,6 +191,7 @@ func (h *AdminHandler) ListTerminals(c *gin.Context) {
 	allSessions := h.terminal.ListSessionsWithPID()
 	prefix := "term:" + id + ":"
 	var result []terminalDetail
+	var pids []int
 	for _, s := range allSessions {
 		if !strings.HasPrefix(s.Key, prefix) {
 			continue
@@ -202,9 +203,19 @@ func (h *AdminHandler) ListTerminals(c *gin.Context) {
 			PID:        s.PID,
 		}
 		if runtime.GOOS == "linux" && s.PID > 0 {
-			td.MemoryRSS, td.Command, td.CPUPercent = readProcStats(s.PID)
+			td.MemoryRSS, td.Command = readProcInfo(s.PID)
+			pids = append(pids, s.PID)
 		}
 		result = append(result, td)
+	}
+	// Single CPU measurement for all user's terminal processes
+	if len(pids) > 0 {
+		_, procCPU := measureAllCPU(pids)
+		for i := range result {
+			if cpu, ok := procCPU[result[i].PID]; ok {
+				result[i].CPUPercent = cpu
+			}
+		}
 	}
 	if result == nil {
 		result = []terminalDetail{}
@@ -367,31 +378,8 @@ func (h *AdminHandler) Monitoring(c *gin.Context) {
 
 	// Get all terminal sessions with PIDs
 	sessions := h.terminal.ListSessionsWithPID()
-	processes := make([]processInfo, 0, len(sessions))
 
-	for _, s := range sessions {
-		username := userMap[s.UserID]
-		if username == "" {
-			username = s.UserID
-		}
-
-		pi := processInfo{
-			PID:        s.PID,
-			Username:   username,
-			SessionKey: s.Key,
-			InstanceID: s.InstanceID,
-			Alive:      s.Alive,
-		}
-
-		// Read process stats from /proc on Linux
-		if runtime.GOOS == "linux" && s.PID > 0 {
-			pi.MemoryRSS, pi.Command, pi.CPUPercent = readProcStats(s.PID)
-		}
-
-		processes = append(processes, pi)
-	}
-
-	// System info
+	// System info (non-CPU)
 	cpuCount := runtime.NumCPU()
 	if runtime.GOOS == "linux" {
 		if n := countCPUCores(); n > 0 {
@@ -403,10 +391,41 @@ func (h *AdminHandler) Monitoring(c *gin.Context) {
 		GoRoutines: runtime.NumGoroutine(),
 	}
 
+	// Collect PIDs for CPU measurement
+	var pids []int
+	for _, s := range sessions {
+		if runtime.GOOS == "linux" && s.PID > 0 {
+			pids = append(pids, s.PID)
+		}
+	}
+
+	// Single 500ms measurement window for ALL CPU (system + per-process)
+	var procCPU map[int]float64
 	if runtime.GOOS == "linux" {
-		sys.CPUPercent = readSystemCPU()
+		sys.CPUPercent, procCPU = measureAllCPU(pids)
 		sys.MemTotal, sys.MemUsed, sys.MemPercent = readMemInfo()
 		sys.DiskTotal, sys.DiskUsed, sys.DiskPercent = readDiskInfo("/")
+	}
+
+	// Build process list
+	processes := make([]processInfo, 0, len(sessions))
+	for _, s := range sessions {
+		username := userMap[s.UserID]
+		if username == "" {
+			username = s.UserID
+		}
+		pi := processInfo{
+			PID:        s.PID,
+			Username:   username,
+			SessionKey: s.Key,
+			InstanceID: s.InstanceID,
+			Alive:      s.Alive,
+		}
+		if runtime.GOOS == "linux" && s.PID > 0 {
+			pi.MemoryRSS, pi.Command = readProcInfo(s.PID)
+			pi.CPUPercent = procCPU[s.PID]
+		}
+		processes = append(processes, pi)
 	}
 
 	c.JSON(http.StatusOK, monitoringResponse{
@@ -415,9 +434,8 @@ func (h *AdminHandler) Monitoring(c *gin.Context) {
 	})
 }
 
-// readProcStats reads RSS, command, and CPU% from /proc/{pid}.
-func readProcStats(pid int) (rss int64, command string, cpuPercent float64) {
-	// RSS from /proc/{pid}/statm (resident pages)
+// readProcInfo reads RSS and command from /proc/{pid} (no CPU — handled by measureAllCPU).
+func readProcInfo(pid int) (rss int64, command string) {
 	statm, err := os.ReadFile(fmt.Sprintf("/proc/%d/statm", pid))
 	if err == nil {
 		fields := strings.Fields(string(statm))
@@ -427,8 +445,6 @@ func readProcStats(pid int) (rss int64, command string, cpuPercent float64) {
 			}
 		}
 	}
-
-	// Command from /proc/{pid}/cmdline
 	cmdline, err := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
 	if err == nil {
 		command = strings.ReplaceAll(strings.TrimRight(string(cmdline), "\x00"), "\x00", " ")
@@ -436,62 +452,17 @@ func readProcStats(pid int) (rss int64, command string, cpuPercent float64) {
 			command = command[:120] + "..."
 		}
 	}
-
-	// CPU% — snapshot utime+stime, sleep 200ms, snapshot again
-	cpuPercent = readProcCPU(pid)
 	return
 }
 
-// readProcCPU measures CPU usage over a short interval.
-func readProcCPU(pid int) float64 {
-	readTicks := func() (int64, int64, bool) {
-		stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
-		if err != nil {
-			return 0, 0, false
-		}
-		// Fields after last ')' — fields[0]=utime(13), fields[1]=stime(14) (0-indexed from after ')')
-		s := string(stat)
-		idx := strings.LastIndex(s, ") ")
-		if idx < 0 {
-			return 0, 0, false
-		}
-		fields := strings.Fields(s[idx+2:])
-		if len(fields) < 13 {
-			return 0, 0, false
-		}
-		utime, _ := strconv.ParseInt(fields[11], 10, 64)
-		stime, _ := strconv.ParseInt(fields[12], 10, 64)
+// measureAllCPU takes a single 500ms snapshot to measure system CPU and per-process CPU simultaneously.
+// Returns system CPU% and a map of pid → CPU%.
+func measureAllCPU(pids []int) (sysCPU float64, procCPU map[int]float64) {
+	procCPU = make(map[int]float64)
+	numCPU := float64(runtime.NumCPU())
 
-		// System total from /proc/stat
-		sysStat, err := os.ReadFile("/proc/stat")
-		if err != nil {
-			return 0, 0, false
-		}
-		firstLine := strings.SplitN(string(sysStat), "\n", 2)[0]
-		cpuFields := strings.Fields(firstLine)
-		var total int64
-		for _, f := range cpuFields[1:] {
-			v, _ := strconv.ParseInt(f, 10, 64)
-			total += v
-		}
-		return utime + stime, total, true
-	}
-
-	proc1, sys1, ok1 := readTicks()
-	if !ok1 {
-		return 0
-	}
-	time.Sleep(200 * time.Millisecond)
-	proc2, sys2, ok2 := readTicks()
-	if !ok2 || sys2 == sys1 {
-		return 0
-	}
-	return float64(proc2-proc1) / float64(sys2-sys1) * 100 * float64(runtime.NumCPU())
-}
-
-// readSystemCPU measures overall system CPU usage over a 100ms interval.
-func readSystemCPU() float64 {
-	readTotal := func() (idle, total int64, ok bool) {
+	// Read system idle/total from /proc/stat
+	readSystem := func() (idle, total int64, ok bool) {
 		data, err := os.ReadFile("/proc/stat")
 		if err != nil {
 			return 0, 0, false
@@ -501,7 +472,6 @@ func readSystemCPU() float64 {
 		if len(fields) < 5 {
 			return 0, 0, false
 		}
-		// fields: cpu user nice system idle iowait irq softirq steal ...
 		var sum int64
 		for _, f := range fields[1:] {
 			v, _ := strconv.ParseInt(f, 10, 64)
@@ -511,16 +481,62 @@ func readSystemCPU() float64 {
 		return idleVal, sum, true
 	}
 
-	idle1, total1, ok1 := readTotal()
-	if !ok1 {
-		return 0
+	// Read process utime+stime from /proc/{pid}/stat
+	readProc := func(pid int) (int64, bool) {
+		stat, err := os.ReadFile(fmt.Sprintf("/proc/%d/stat", pid))
+		if err != nil {
+			return 0, false
+		}
+		s := string(stat)
+		idx := strings.LastIndex(s, ") ")
+		if idx < 0 {
+			return 0, false
+		}
+		fields := strings.Fields(s[idx+2:])
+		if len(fields) < 13 {
+			return 0, false
+		}
+		utime, _ := strconv.ParseInt(fields[11], 10, 64)
+		stime, _ := strconv.ParseInt(fields[12], 10, 64)
+		return utime + stime, true
 	}
+
+	// Snapshot T1: system + all processes
+	idle1, total1, sysOK1 := readSystem()
+	procT1 := make(map[int]int64)
+	for _, pid := range pids {
+		if t, ok := readProc(pid); ok {
+			procT1[pid] = t
+		}
+	}
+
 	time.Sleep(500 * time.Millisecond)
-	idle2, total2, ok2 := readTotal()
-	if !ok2 || total2 == total1 {
-		return 0
+
+	// Snapshot T2: system + all processes
+	idle2, total2, sysOK2 := readSystem()
+
+	// System CPU%
+	if sysOK1 && sysOK2 && total2 != total1 {
+		sysCPU = (1 - float64(idle2-idle1)/float64(total2-total1)) * 100
 	}
-	return (1 - float64(idle2-idle1)/float64(total2-total1)) * 100
+
+	// Per-process CPU%
+	sysDelta := float64(total2 - total1)
+	if sysDelta > 0 {
+		for _, pid := range pids {
+			t1, has1 := procT1[pid]
+			if !has1 {
+				continue
+			}
+			t2, ok := readProc(pid)
+			if !ok {
+				continue
+			}
+			procCPU[pid] = float64(t2-t1) / sysDelta * 100 * numCPU
+		}
+	}
+
+	return
 }
 
 // readDiskInfo reads disk usage via `df` command (works in Docker/Linux).

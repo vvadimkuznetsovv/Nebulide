@@ -155,7 +155,7 @@ export default function Dashboard() {
             fontFamily: 'monospace',
             textShadow: '0 0 8px rgba(57,255,20,0.5)',
           }}>
-            {cpuPercent > 0 ? cpuPercent.toFixed(1) + '%' : '—'}
+            {cpuPercent.toFixed(1)}%
           </span>
         </div>
         <CpuChart history={cpuHistory} />
