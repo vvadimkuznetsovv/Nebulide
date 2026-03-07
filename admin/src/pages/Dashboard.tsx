@@ -119,9 +119,7 @@ export default function Dashboard() {
 
   return (
     <div>
-      <h1 style={{ color: 'var(--text-primary)', fontSize: '24px', fontWeight: 700, marginBottom: '24px' }}>
-        Dashboard
-      </h1>
+      <h1 className="page-heading">Dashboard</h1>
 
       {!stats ? (
         <p style={{ color: 'var(--text-muted)' }}>Loading...</p>

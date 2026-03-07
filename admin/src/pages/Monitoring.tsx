@@ -61,9 +61,7 @@ export default function Monitoring() {
   return (
     <div>
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px' }}>
-        <h1 style={{ color: 'var(--text-primary)', fontSize: '24px', fontWeight: 700 }}>
-          Нагрузка
-        </h1>
+        <h1 className="page-heading" style={{ marginBottom: 0 }}>Нагрузка</h1>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
           <button
             className="glass-btn small"

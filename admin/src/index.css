@@ -465,6 +465,57 @@
   }
 
   /* ==========================================
+     PAGE HEADING
+     ========================================== */
+  .page-heading {
+    color: var(--text-primary);
+    font-size: 24px;
+    font-weight: 700;
+    margin-bottom: 24px;
+  }
+
+  /* ==========================================
+     LAYOUT — Sidebar + Main
+     ========================================== */
+  .admin-sidebar {
+    display: flex;
+    flex-direction: column;
+    width: 220px;
+    position: relative;
+    z-index: 10;
+    background: rgba(255,255,255,0.04);
+    border-right: 1px solid var(--glass-border);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+  }
+
+  .admin-main {
+    padding: 24px 32px;
+    position: relative;
+    z-index: 10;
+  }
+
+  .mobile-hamburger {
+    display: none;
+  }
+
+  .sidebar-close-btn {
+    display: none;
+    cursor: pointer;
+    padding: 4px;
+    border-radius: 6px;
+    color: var(--text-muted);
+    transition: color 0.2s;
+  }
+  .sidebar-close-btn:hover {
+    color: var(--text-primary);
+  }
+
+  .sidebar-overlay {
+    display: none;
+  }
+
+  /* ==========================================
      SCROLLBAR
      ========================================== */
   ::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -475,5 +526,133 @@
   }
   ::-webkit-scrollbar-thumb:hover {
     background: rgba(127, 0, 255, 0.5);
+  }
+}
+
+/* ==========================================
+   MOBILE — max-width: 768px
+   ========================================== */
+@media (max-width: 768px) {
+  html {
+    overflow: auto;
+  }
+
+  /* Hamburger button — top-left */
+  .mobile-hamburger {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    position: fixed;
+    top: 12px;
+    left: 12px;
+    z-index: 50;
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    background: rgba(255,255,255,0.08);
+    border: 1px solid var(--glass-border);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    color: var(--text-primary);
+    cursor: pointer;
+  }
+
+  /* Sidebar — off-screen by default, slides in */
+  .admin-sidebar {
+    position: fixed !important;
+    top: 0;
+    left: 0;
+    bottom: 0;
+    width: 260px !important;
+    z-index: 100;
+    transform: translateX(-100%);
+    transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    background: rgba(8, 2, 20, 0.95) !important;
+    backdrop-filter: blur(24px) !important;
+    -webkit-backdrop-filter: blur(24px) !important;
+  }
+  .admin-sidebar.open {
+    transform: translateX(0);
+  }
+
+  .sidebar-close-btn {
+    display: flex !important;
+  }
+
+  /* Overlay behind sidebar */
+  .sidebar-overlay {
+    display: block !important;
+    position: fixed;
+    inset: 0;
+    z-index: 99;
+    background: rgba(0,0,0,0.6);
+    backdrop-filter: blur(2px);
+  }
+
+  /* Main content — full width, reduced padding */
+  .admin-main {
+    padding: 56px 14px 20px 14px !important;
+    width: 100%;
+  }
+
+  /* Stat cards — tighter padding */
+  .stat-card {
+    padding: 14px !important;
+  }
+
+  /* Tables — horizontal scroll */
+  .glass-table-wrap {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch;
+  }
+  .glass-table {
+    min-width: 560px;
+  }
+  .glass-table th,
+  .glass-table td {
+    padding: 10px 12px !important;
+    font-size: 13px !important;
+  }
+
+  /* Buttons — touch-friendly */
+  .glass-btn {
+    padding: 10px 16px !important;
+    min-height: 40px;
+  }
+  .glass-btn.small {
+    padding: 8px 12px !important;
+    min-height: 36px;
+  }
+
+  /* Nav links — bigger tap targets */
+  .nav-link {
+    padding: 12px 14px !important;
+    font-size: 15px !important;
+  }
+
+  /* Page heading */
+  .page-heading {
+    font-size: 20px !important;
+    margin-bottom: 16px !important;
+  }
+
+  /* Lava blobs — reduce for performance */
+  .lava-blob-5,
+  .lava-blob-6 {
+    display: none;
+  }
+  .lava-blob-1 { width: 260px !important; height: 260px !important; }
+  .lava-blob-2 { width: 220px !important; height: 220px !important; }
+  .lava-blob-3 { width: 180px !important; height: 180px !important; }
+  .lava-blob-4 { width: 160px !important; height: 160px !important; }
+  .lava-lamp {
+    filter: contrast(3) !important;
+  }
+
+  /* Reduce backdrop-filter for performance */
+  .stat-card,
+  .glass-table-wrap {
+    backdrop-filter: blur(6px) !important;
+    -webkit-backdrop-filter: blur(6px) !important;
   }
 }

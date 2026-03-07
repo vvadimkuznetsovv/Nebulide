@@ -38,7 +38,7 @@ export default function Invites() {
   return (
     <div>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '24px' }}>
-        <h1 style={{ color: 'var(--text-primary)', fontSize: '24px', fontWeight: 700 }}>Invite Codes</h1>
+        <h1 className="page-heading" style={{ marginBottom: 0 }}>Invite Codes</h1>
         <button className="glass-btn primary" onClick={handleCreate} disabled={creating}>
           {creating ? 'Creating...' : '+ New Invite'}
         </button>

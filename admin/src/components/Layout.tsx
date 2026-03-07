@@ -1,4 +1,5 @@
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { useState, useEffect } from 'react';
+import { NavLink, Outlet, useNavigate, useLocation } from 'react-router-dom';
 import MegaLogo from './MegaLogo';
 import { useAuthStore } from '../store/authStore';
 import { logout } from '../api/auth';
@@ -12,7 +13,14 @@ const navItems = [
 
 export default function Layout() {
   const navigate = useNavigate();
+  const location = useLocation();
   const clearAuth = useAuthStore((s) => s.clearAuth);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // Close sidebar on navigation (mobile)
+  useEffect(() => {
+    setSidebarOpen(false);
+  }, [location.pathname]);
 
   const handleLogout = async () => {
     try { await logout(); } catch { /* ignore */ }
@@ -33,21 +41,41 @@ export default function Layout() {
         <div className="lava-glow" />
       </div>
 
-      {/* Sidebar */}
-      <aside
-        className="flex flex-col"
-        style={{
-          width: '220px',
-          position: 'relative',
-          zIndex: 10,
-          background: 'rgba(255,255,255,0.04)',
-          borderRight: '1px solid var(--glass-border)',
-          backdropFilter: 'blur(20px)',
-          WebkitBackdropFilter: 'blur(20px)',
-        }}
+      {/* Mobile hamburger button */}
+      <button
+        className="mobile-hamburger"
+        onClick={() => setSidebarOpen(true)}
+        aria-label="Open menu"
       >
-        <div style={{ padding: '20px 16px', borderBottom: '1px solid var(--glass-border)' }}>
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+          <line x1="3" y1="6" x2="21" y2="6" />
+          <line x1="3" y1="12" x2="21" y2="12" />
+          <line x1="3" y1="18" x2="21" y2="18" />
+        </svg>
+      </button>
+
+      {/* Mobile overlay */}
+      {sidebarOpen && (
+        <div
+          className="sidebar-overlay"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
+      {/* Sidebar */}
+      <aside className={`admin-sidebar ${sidebarOpen ? 'open' : ''}`}>
+        <div style={{ padding: '20px 16px', borderBottom: '1px solid var(--glass-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <MegaLogo />
+          <button
+            className="sidebar-close-btn"
+            onClick={() => setSidebarOpen(false)}
+            aria-label="Close menu"
+          >
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
         </div>
 
         <nav className="flex-1" style={{ padding: '12px 8px' }}>
@@ -77,7 +105,7 @@ export default function Layout() {
       </aside>
 
       {/* Main content */}
-      <main className="flex-1 overflow-auto" style={{ padding: '24px 32px', position: 'relative', zIndex: 10 }}>
+      <main className="admin-main flex-1 overflow-auto">
         <Outlet />
       </main>
     </div>

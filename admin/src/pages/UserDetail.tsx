@@ -94,7 +94,7 @@ export default function UserDetail() {
         &larr; Back
       </button>
 
-      <h1 style={{ color: 'var(--text-primary)', fontSize: '24px', fontWeight: 700, marginBottom: '4px' }}>
+      <h1 className="page-heading" style={{ marginBottom: '4px' }}>
         {user.username}
         {user.is_admin && <span className="badge admin" style={{ marginLeft: '12px', fontSize: '12px' }}>Admin</span>}
       </h1>

@@ -31,9 +31,7 @@ export default function Users() {
 
   return (
     <div>
-      <h1 style={{ color: 'var(--text-primary)', fontSize: '24px', fontWeight: 700, marginBottom: '24px' }}>
-        Users
-      </h1>
+      <h1 className="page-heading">Users</h1>
 
       <div className="glass-table-wrap">
         <table className="glass-table">
