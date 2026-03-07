@@ -85,10 +85,10 @@ function createXterm(instanceId: string): TermSession {
     scrollback: 5000,
     fontFamily: "'JetBrains Mono', 'Fira Code', 'Cascadia Code', Menlo, monospace",
     theme: {
-      background: '#08081a',
+      background: '#0a0a1a',
       foreground: 'rgba(255, 255, 255, 0.9)',
       cursor: '#6eb4ff',
-      cursorAccent: '#08081a',
+      cursorAccent: '#0a0a1a',
       selectionBackground: 'rgba(110, 180, 255, 0.25)',
       selectionForeground: '#ffffff',
       black: '#484f58',
@@ -892,7 +892,7 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
   return (
     <div
       className="h-full relative flex flex-col"
-      style={{ background: 'rgba(8, 8, 26, 0.85)' }}
+      style={{ background: '#0a0a1a' }}
       onContextMenu={handleContextMenu}
     >
       {/* Row 1: shortcut keys + C-p + f-V + f-C */}
