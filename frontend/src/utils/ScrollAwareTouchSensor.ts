@@ -112,7 +112,6 @@ interface SensorProps {
   onCancel(): void;
   onMove(coordinates: { x: number; y: number }): void;
   onEnd(): void;
-  onAbort(id: string | number): void;
   options: ScrollAwareTouchSensorOptions;
   [key: string]: unknown;
 }
@@ -143,15 +142,14 @@ export class ScrollAwareTouchSensor {
   ];
 
   constructor(props: SensorProps) {
-    const { event, active, onStart, onCancel, onMove, onEnd, onAbort, options } = props;
-    const delay = options.delay ?? 300;
+    const { event, onStart, onCancel, onMove, onEnd, options } = props;
+    const delay = options.delay ?? 700;
     const tolerance = options.tolerance ?? 10;
     const toleranceSq = tolerance * tolerance;
 
     const touchEvent = event as TouchEvent;
     const touch = touchEvent.touches?.[0];
     if (!touch) {
-      onAbort(active);
       onCancel();
       return;
     }
@@ -189,15 +187,14 @@ export class ScrollAwareTouchSensor {
       scrollParent?.removeEventListener('scroll', handleScroll);
     };
 
-    const abort = () => {
+    const cancel = () => {
       if (done) return;
       cleanup();
-      onAbort(active);
       onCancel();
     };
 
     cancelCurrentSensor = () => {
-      if (!activated) abort();
+      if (!activated) cancel();
     };
 
     const hasScrolled = () => {
@@ -208,7 +205,7 @@ export class ScrollAwareTouchSensor {
     };
 
     const handleScroll = () => {
-      if (!activated && hasScrolled()) abort();
+      if (!activated && hasScrolled()) cancel();
     };
 
     const handleMove = (e: TouchEvent) => {
@@ -231,7 +228,7 @@ export class ScrollAwareTouchSensor {
         const dx = t.clientX - initialX;
         const dy = t.clientY - initialY;
         if (dx * dx + dy * dy > toleranceSq) {
-          abort();
+          cancel();
         }
       }
     };
@@ -242,19 +239,18 @@ export class ScrollAwareTouchSensor {
       if (activated) {
         onEnd();
       } else {
-        onAbort(active);
         onCancel();
       }
     };
 
     const handleAbort = () => {
-      abort();
+      cancel();
     };
 
     const timer = setTimeout(() => {
       if (done) return;
       if (hasScrolled()) {
-        abort();
+        cancel();
         return;
       }
       ready = true;
