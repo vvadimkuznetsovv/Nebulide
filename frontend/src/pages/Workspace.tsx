@@ -161,7 +161,7 @@ export default function Workspace() {
     setActiveDragId(null);
     setDragging(null);
 
-    const { active, over } = event;
+    const { over } = event;
     if (!over) return;
     const targetId = String(over.id);
 
