@@ -95,20 +95,22 @@ export default function FileTreeItem({
     data: { file },
   });
 
-  // DnD: folders are droppable targets
+  // DnD: all items are droppable — folders accept into themselves,
+  // files accept into their parent folder (so dropping onto a file
+  // inside folder_A moves the dragged item into folder_A)
+  const droppableId = file.is_dir ? `folder:${file.path}` : `filezone:${file.path}`;
   const { setNodeRef: setDropRef, isOver } = useDroppable({
-    id: `folder:${file.path}`,
+    id: droppableId,
     data: { file },
-    disabled: !file.is_dir,
   });
 
-  // Merge refs for folder items (both draggable + droppable)
+  // Merge refs: every item is both draggable + droppable
   // MUST be useCallback — inline ref functions change identity every render,
   // causing @dnd-kit to re-register nodes → setState → re-render → infinite loop (React #185)
   const setRef = useCallback((el: HTMLElement | null) => {
     setDragRef(el);
-    if (file.is_dir) setDropRef(el);
-  }, [setDragRef, setDropRef, file.is_dir]);
+    setDropRef(el);
+  }, [setDragRef, setDropRef]);
 
   // Merge long-press + drag listeners
   const mergedHandlers = mergeEventHandlers(longPressHandlers, dragListeners);
@@ -151,7 +153,7 @@ export default function FileTreeItem({
       onDoubleClick={isRenaming || file.is_dir ? undefined : () => onDoubleClick?.()}
       onContextMenu={handleContextMenu}
       {...mergedHandlers}
-      className={`file-tree-item relative w-full flex items-center gap-1.5 py-1.5 text-sm text-left transition-all duration-150 select-none${isSelected ? ' selected' : ''}${isContextTarget ? ' context-target' : ''}${file.is_dir && isOver ? ' drop-target' : ''}`}
+      className={`file-tree-item relative w-full flex items-center gap-1.5 py-1.5 text-sm text-left transition-all duration-150 select-none${isSelected ? ' selected' : ''}${isContextTarget ? ' context-target' : ''}${isOver ? ' drop-target' : ''}`}
       style={{
         paddingLeft: `${8 + depth * 16}px`,
         paddingRight: '8px',

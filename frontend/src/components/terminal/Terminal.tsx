@@ -50,6 +50,10 @@ interface TermSession {
   lastRows: number;
   /** Suppress resize events briefly after connect to prevent prompt duplication */
   resizeLocked: boolean;
+  /** Timestamp of last resize message sent — for rate-limiting */
+  lastResizeSent: number;
+  /** Deferred resize timer — fires after cooldown expires */
+  deferredResizeTimer: number;
 }
 
 const sessions = new Map<string, TermSession>();
@@ -83,6 +87,8 @@ function createXterm(instanceId: string): TermSession {
     lastCols: 0,
     lastRows: 0,
     resizeLocked: false,
+    lastResizeSent: 0,
+    deferredResizeTimer: 0,
   };
 
   const xterm = new XTerm({
@@ -190,6 +196,7 @@ async function connectWs(instanceId: string): Promise<void> {
       if (dims && dims.cols >= 10 && dims.rows >= 2) {
         session.lastCols = dims.cols;
         session.lastRows = dims.rows;
+        session.lastResizeSent = Date.now();
         ws.send(JSON.stringify({ type: 'resize', rows: dims.rows, cols: dims.cols }));
       }
     } catch { /* xterm may not be attached yet */ }
@@ -431,22 +438,35 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
     onLongPress: (x, y) => setCtxMenu({ x, y }),
   });
 
+  const RESIZE_COOLDOWN = 800; // min ms between resize messages to backend
+
   const fit = useCallback(() => {
     const s = sessions.get(instanceId);
     if (!s) return;
     // Skip entirely while locked — connectWs already sent the initial resize.
-    // Calling fitAddon.fit() during lock can resize xterm's internal grid
-    // while the layout is still settling, causing garbled output.
     if (s.resizeLocked) return;
     try {
       s.fitAddon.fit();
       const dims = s.fitAddon.proposeDimensions();
-      // Reject invalid dimensions — FitAddon can propose 0×0 or tiny values
-      // during panel transitions, which causes garbled prompt output.
       if (!dims || dims.cols < 10 || dims.rows < 2) return;
       if (dims.cols !== s.lastCols || dims.rows !== s.lastRows) {
         s.lastCols = dims.cols;
         s.lastRows = dims.rows;
+        // Rate-limit: max 1 resize per RESIZE_COOLDOWN ms
+        const now = Date.now();
+        const elapsed = now - s.lastResizeSent;
+        if (elapsed < RESIZE_COOLDOWN) {
+          // Schedule deferred resize after cooldown expires
+          clearTimeout(s.deferredResizeTimer);
+          s.deferredResizeTimer = window.setTimeout(() => {
+            s.lastResizeSent = Date.now();
+            if (s.ws?.readyState === WebSocket.OPEN) {
+              s.ws.send(JSON.stringify({ type: 'resize', rows: s.lastRows, cols: s.lastCols }));
+            }
+          }, RESIZE_COOLDOWN - elapsed);
+          return;
+        }
+        s.lastResizeSent = now;
         if (s.ws?.readyState === WebSocket.OPEN) {
           s.ws.send(JSON.stringify({ type: 'resize', rows: dims.rows, cols: dims.cols }));
         }
@@ -483,12 +503,21 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
     setTimeout(fit, 200);
 
     let resizeTimer = 0;
+    // fitAddon.fit() can change scrollbar visibility → container width changes →
+    // ResizeObserver fires → fit() → scrollbar toggles → loop every 300ms.
+    // Each loop iteration sends SIGWINCH → shell redraws prompt → garbled output.
+    // Fix: ignore ResizeObserver fires triggered by our own fit() call.
+    let fitInProgress = false;
+    const guardedFit = () => {
+      fitInProgress = true;
+      fit();
+      // Reset after a frame — any ResizeObserver fires within this window are self-triggered
+      requestAnimationFrame(() => { fitInProgress = false; });
+    };
     const resizeObserver = new ResizeObserver(() => {
-      // Debounce 300ms — prevents rapid-fire resize during tab switch animations.
-      // Shorter values (100-150ms) cause resize storms on mobile where CSS
-      // transitions take longer, resulting in garbled/repeated prompts.
+      if (fitInProgress) return; // break the loop
       clearTimeout(resizeTimer);
-      resizeTimer = window.setTimeout(() => fit(), 300);
+      resizeTimer = window.setTimeout(guardedFit, 300);
     });
     resizeObserver.observe(el);
 
@@ -513,6 +542,8 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
     return () => {
       console.log(`[Terminal] useEffect CLEANUP id=${instanceIdRef.current} persistent=${persistentRef.current}`);
       clearTimeout(resizeTimer);
+      const sess = sessions.get(instanceIdRef.current);
+      if (sess) clearTimeout(sess.deferredResizeTimer);
       resizeObserver.disconnect();
       writeDisposable.dispose();
       document.removeEventListener('visibilitychange', onVisibilityChange);

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
-import { useDraggable } from '@dnd-kit/core';
+import { useDraggable, useDroppable, useDndContext } from '@dnd-kit/core';
 import { Panel, Group, Separator, usePanelRef, useGroupRef } from 'react-resizable-panels';
 import { useWorkspaceStore, isPreviewableFile, type EditorTab } from '../../store/workspaceStore';
 import { useLayoutStore } from '../../store/layoutStore';
@@ -43,6 +43,25 @@ export default function EditorPanel() {
   const fileTreeRef = useRef<FileTreeHandle>(null);
   const activeTab = openTabs.find((t) => t.id === activeTabId) || null;
   const [fileMode, setFileMode] = useState<'tree' | 'search'>('tree');
+  const [rootPath, setRootPath] = useState('');
+
+  // Folder icon = droppable target for "move to workspace root"
+  const { setNodeRef: setRootDropRef, isOver: isOverRoot } = useDroppable({
+    id: rootPath ? `folder:${rootPath}` : 'folder:__root__',
+    disabled: !rootPath,
+  });
+
+  // Capture workspace root from FileTree after first load
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const root = fileTreeRef.current?.workspaceRoot;
+      if (root && root !== rootPath) {
+        setRootPath(root);
+        clearInterval(interval);
+      }
+    }, 500);
+    return () => clearInterval(interval);
+  }, [rootPath]);
 
   // Ref callback for path breadcrumb — scrolls to end to show filename
   const scrollEndRef = useCallback((el: HTMLDivElement | null) => {
@@ -80,6 +99,10 @@ export default function EditorPanel() {
     if (fileTreeVisible && panel.isCollapsed()) panel.expand();
     else if (!fileTreeVisible && !panel.isCollapsed()) panel.collapse();
   }, [fileTreeVisible, fileTreePanelRef]);
+
+  // Detect when any file is being dragged (for folder icon glow)
+  const { active } = useDndContext();
+  const isDraggingFile = !!active && String(active.id).startsWith('file:');
 
   return (
     <div className="h-full flex flex-col">
@@ -139,11 +162,11 @@ export default function EditorPanel() {
               >
                 {/* Mode: tree / search */}
                 <button
+                  ref={setRootDropRef}
                   type="button"
                   className={`editor-toggle-files${fileMode === 'tree' ? ' active' : ''}`}
                   onClick={() => {
                     if (fileMode === 'tree') {
-                      // Already in tree mode → navigate to workspace root
                       const root = fileTreeRef.current?.workspaceRoot;
                       if (root) fileTreeRef.current?.navigateTo(root);
                     } else {
@@ -151,7 +174,19 @@ export default function EditorPanel() {
                     }
                   }}
                   title={fileMode === 'tree' ? 'Go to workspace root' : 'File tree'}
-                  style={{ padding: '3px 6px' }}
+                  style={{
+                    padding: '3px 6px',
+                    transition: 'background 0.2s, box-shadow 0.2s, border-color 0.2s',
+                    ...(isDraggingFile && isOverRoot ? {
+                      background: 'rgba(127, 0, 255, 0.35)',
+                      boxShadow: '0 0 12px 3px rgba(127, 0, 255, 0.5)',
+                      borderColor: 'rgba(127, 0, 255, 0.8)',
+                    } : isDraggingFile ? {
+                      background: 'rgba(127, 0, 255, 0.12)',
+                      boxShadow: '0 0 6px 1px rgba(127, 0, 255, 0.25)',
+                      borderColor: 'rgba(127, 0, 255, 0.4)',
+                    } : {}),
+                  }}
                 >
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />

@@ -161,17 +161,24 @@ export default function Workspace() {
     const targetId = String(over.id);
 
     // === File tree DnD: move file/folder into target folder ===
-    if (dragId.startsWith('file:') && targetId.startsWith('folder:')) {
+    if (dragId.startsWith('file:') && (targetId.startsWith('folder:') || targetId.startsWith('filezone:'))) {
       const srcPath = dragId.slice('file:'.length);
-      const destFolder = targetId.slice('folder:'.length);
+      // folder: → drop into that folder; filezone: → drop into file's parent folder
+      let destFolder: string;
+      if (targetId.startsWith('folder:')) {
+        destFolder = targetId.slice('folder:'.length);
+      } else {
+        const filePath = targetId.slice('filezone:'.length);
+        destFolder = filePath.split(/[/\\]/).slice(0, -1).join('/');
+      }
       const fileName = srcPath.split(/[/\\]/).pop() || '';
       const destPath = destFolder.replace(/\\/g, '/') + '/' + fileName;
       const normSrc = srcPath.replace(/\\/g, '/');
-      // Don't move onto itself or into same parent
-      if (normSrc === destPath || normSrc.startsWith(destFolder.replace(/\\/g, '/') + '/')) return;
+      const srcParent = normSrc.split('/').slice(0, -1).join('/');
+      // Don't move onto itself, into same parent, or into own subtree
+      if (normSrc === destPath || srcParent === destFolder.replace(/\\/g, '/') || normSrc.startsWith(destFolder.replace(/\\/g, '/') + '/')) return;
       renameFile(srcPath, destPath)
         .then(() => {
-          // Notify FileTree to refresh
           window.dispatchEvent(new CustomEvent('filetree-refresh'));
           import('react-hot-toast').then(m => m.default.success(`Moved ${fileName}`));
         })
