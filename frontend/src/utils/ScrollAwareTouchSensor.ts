@@ -47,16 +47,24 @@ function createProgressRing(x: number, y: number, delayMs: number): {
     transition:opacity 0.15s;
   `;
   el.innerHTML = `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+    <defs>
+      <filter id="glow1"><feGaussianBlur stdDeviation="2.5" result="b"/>
+        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+      <filter id="glow2"><feGaussianBlur stdDeviation="3" result="b"/>
+        <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+      </filter>
+    </defs>
     <circle cx="${size / 2}" cy="${size / 2}" r="${r}"
-      fill="none" stroke="rgba(127,0,255,0.12)" stroke-width="${sw}"/>
+      fill="none" stroke="rgba(160,60,255,0.15)" stroke-width="${sw}"/>
     <circle id="phase1" cx="${size / 2}" cy="${size / 2}" r="${r}"
-      fill="none" stroke="rgba(127,0,255,0.85)" stroke-width="${sw}"
-      stroke-linecap="round"
+      fill="none" stroke="rgb(180,80,255)" stroke-width="${sw}"
+      stroke-linecap="round" filter="url(#glow1)"
       stroke-dasharray="${circ}" stroke-dashoffset="${circ}"
       style="transition:stroke-dashoffset ${delayMs}ms linear;${rot}"/>
     <circle id="phase2" cx="${size / 2}" cy="${size / 2}" r="${r}"
-      fill="none" stroke="rgba(255,255,255,0.9)" stroke-width="${sw}"
-      stroke-linecap="round"
+      fill="none" stroke="rgb(255,255,255)" stroke-width="${sw}"
+      stroke-linecap="round" filter="url(#glow2)"
       stroke-dasharray="${circ}" stroke-dashoffset="${circ}"
       style="${rot}"/>
   </svg>`;
