@@ -14,20 +14,17 @@ IP="${PAM_RHOST:-local}"
 
 GEO=""
 if [ "$IP" != "local" ] && [ -n "$IP" ]; then
-  GEO=$(curl -s --max-time 3 "http://ip-api.com/line/${IP}?fields=country,city" 2>/dev/null | tr '\n' ', ' | sed 's/,$//')
+  GEO=$(curl -s --max-time 3 "http://ip-api.com/line/${IP}?fields=country,city" 2>/dev/null | tr '\n' ',' | sed 's/,$//')
 fi
 
 MSG=$(cat <<EOF
+✅ <b>SSH вход</b>
 🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪
-🟪                                                🟪
-🟪  ✅ <b>SSH LOGIN</b>                    🟪
-🟪                                                🟪
-🟪  👤 <code>${PAM_USER}</code>
-🟪  🖥 <code>${HOST}</code>
-🟪  🌐 <code>${IP}</code>${GEO:+
-🟪  📍 ${GEO}}
-🟪  🕐 ${TIMESTAMP}
-🟪                                                🟪
+👤 <code>${PAM_USER}</code>
+🖥 <code>${HOST}</code>
+🌐 <code>${IP}</code>${GEO:+
+📍 ${GEO}}
+🕐 ${TIMESTAMP}
 🟪🟪🟪🟪🟪🟪🟪🟪🟪🟪
 EOF
 )

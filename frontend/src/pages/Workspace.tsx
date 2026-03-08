@@ -4,7 +4,6 @@ import {
   DndContext,
   DragOverlay,
   MouseSensor,
-  TouchSensor,
   useSensor,
   useSensors,
   pointerWithin,
@@ -130,10 +129,11 @@ export default function Workspace() {
 
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
 
-  // DnD sensors — mouse: distance-based (instant), touch: delay-based (allows native scroll)
+  // DnD sensors — mouse only for outer context (panel/tab drag).
+  // Touch drag on panels is handled by panel headers which have their own touch handling.
+  // NO TouchSensor here — it interfered with FileTree's nested DndContext causing React #185.
   const mouseSensor = useSensor(MouseSensor, { activationConstraint: { distance: 8 } });
-  const touchSensor = useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } });
-  const sensors = useSensors(mouseSensor, touchSensor);
+  const sensors = useSensors(mouseSensor);
 
   // DnD handlers
   const handleDragStart = useCallback((event: DragStartEvent) => {
