@@ -31,3 +31,9 @@ export const register = (username: string, password: string, inviteCode: string)
 
 export const updateTelegramId = (telegramId: number) =>
   api.put('/auth/telegram-id', { telegram_id: telegramId });
+
+export const getTheme = () =>
+  api.get<{ accent_color: string; blobs_enabled: boolean }>('/auth/theme');
+
+export const updateTheme = (accentColor: string, blobsEnabled: boolean) =>
+  api.put('/auth/theme', { accent_color: accentColor, blobs_enabled: blobsEnabled });

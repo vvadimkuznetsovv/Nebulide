@@ -337,6 +337,55 @@ func (h *AuthHandler) UpdateTelegramID(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Telegram ID updated", "telegram_id": req.TelegramID})
 }
 
+func (h *AuthHandler) GetTheme(c *gin.Context) {
+	userID, _ := c.Get("user_id")
+	var user models.User
+	if err := database.DB.First(&user, "id = ?", userID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+	themeJSON := user.ThemeJSON
+	if themeJSON == "" || themeJSON == "{}" {
+		themeJSON = `{"accent_color":"#7F00FF","blobs_enabled":true}`
+	}
+	c.Data(http.StatusOK, "application/json", []byte(themeJSON))
+}
+
+func (h *AuthHandler) UpdateTheme(c *gin.Context) {
+	var req struct {
+		AccentColor  string `json:"accent_color"`
+		BlobsEnabled *bool  `json:"blobs_enabled"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
+	// Validate accent color (hex format)
+	if req.AccentColor != "" && (len(req.AccentColor) != 7 || req.AccentColor[0] != '#') {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid color format"})
+		return
+	}
+
+	userID, _ := c.Get("user_id")
+
+	// Build JSON manually to keep it simple
+	blobsVal := "true"
+	if req.BlobsEnabled != nil && !*req.BlobsEnabled {
+		blobsVal = "false"
+	}
+	accent := req.AccentColor
+	if accent == "" {
+		accent = "#7F00FF"
+	}
+	themeJSON := `{"accent_color":"` + accent + `","blobs_enabled":` + blobsVal + `}`
+
+	if err := database.DB.Model(&models.User{}).Where("id = ?", userID).Update("theme_json", themeJSON).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save theme"})
+		return
+	}
+	c.Data(http.StatusOK, "application/json", []byte(themeJSON))
+}
+
 func (h *AuthHandler) issueFullTokens(c *gin.Context, user models.User) {
 	accessToken, err := utils.GenerateAccessToken(h.cfg.JWTSecret, user.ID, user.Username, false, h.cfg.JWTExpiry)
 	if err != nil {

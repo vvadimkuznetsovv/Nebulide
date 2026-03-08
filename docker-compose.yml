@@ -58,6 +58,7 @@ services:
       - ssh_keys:/root/.ssh
       - ~/.ssh:/root/.ssh-mount:ro
       - claude_data:/root/.claude
+      - telegram_bot_api_data:/var/lib/telegram-bot-api:ro
 
   telegram-bot-api:
     image: aiogram/telegram-bot-api:latest

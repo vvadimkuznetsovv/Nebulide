@@ -117,23 +117,6 @@ func (t *TelegramBot) handleMessage(msg *tgbotapi.Message) {
 	// Sanitize filename
 	fileName = sanitizeFileName(fileName)
 
-	// Download file via Bot API (local server: 2GB limit, official: 20MB)
-	fileURL, err := t.getFileDirectURL(fileID)
-	if err != nil {
-		log.Printf("[TelegramBot] GetFileDirectURL error: %v", err)
-		errMsg := "Ошибка получения файла."
-		if strings.Contains(err.Error(), "file is too big") {
-			if t.cfg.TelegramAPIURL != "" {
-				errMsg = "Файл слишком большой (лимит — 2 ГБ). Попробуй сжать или разделить файл."
-			} else {
-				errMsg = "Файл слишком большой (лимит Telegram Bot API — 20 МБ). Попробуй сжать или разделить файл."
-			}
-		}
-		reply := tgbotapi.NewMessage(chatID, errMsg)
-		t.bot.Send(reply)
-		return
-	}
-
 	// Save to user's workspace/uploads/
 	userDir := t.cfg.GetUserWorkspaceDir(user.Username)
 	if user.Username == t.cfg.AdminUsername {
@@ -155,11 +138,34 @@ func (t *TelegramBot) handleMessage(msg *tgbotapi.Message) {
 		}
 	}
 
-	if err := downloadFile(fileURL, destPath); err != nil {
-		log.Printf("[TelegramBot] download error: %v", err)
-		reply := tgbotapi.NewMessage(chatID, "Ошибка сохранения файла.")
-		t.bot.Send(reply)
-		return
+	// Download/copy file
+	if t.cfg.TelegramAPIURL != "" {
+		// Local Bot API: file_path is an absolute filesystem path on the shared volume
+		if err := t.copyLocalFile(fileID, destPath); err != nil {
+			log.Printf("[TelegramBot] local copy error: %v", err)
+			reply := tgbotapi.NewMessage(chatID, "Ошибка сохранения файла.")
+			t.bot.Send(reply)
+			return
+		}
+	} else {
+		// Official API: download via HTTP
+		fileURL, err := t.bot.GetFileDirectURL(fileID)
+		if err != nil {
+			log.Printf("[TelegramBot] GetFileDirectURL error: %v", err)
+			errMsg := "Ошибка получения файла."
+			if strings.Contains(err.Error(), "file is too big") {
+				errMsg = "Файл слишком большой (лимит Telegram Bot API — 20 МБ). Попробуй сжать или разделить файл."
+			}
+			reply := tgbotapi.NewMessage(chatID, errMsg)
+			t.bot.Send(reply)
+			return
+		}
+		if err := downloadFile(fileURL, destPath); err != nil {
+			log.Printf("[TelegramBot] download error: %v", err)
+			reply := tgbotapi.NewMessage(chatID, "Ошибка сохранения файла.")
+			t.bot.Send(reply)
+			return
+		}
 	}
 
 	savedName := filepath.Base(destPath)
@@ -167,19 +173,35 @@ func (t *TelegramBot) handleMessage(msg *tgbotapi.Message) {
 	t.bot.Send(reply)
 }
 
-// getFileDirectURL returns the download URL for a file.
-// For local Bot API server, rewrites the URL to point to the local endpoint.
-func (t *TelegramBot) getFileDirectURL(fileID string) (string, error) {
-	fileURL, err := t.bot.GetFileDirectURL(fileID)
+// copyLocalFile uses bot.GetFile to get the local filesystem path from the
+// Telegram Bot API local server, then copies the file directly from the shared
+// Docker volume (/var/lib/telegram-bot-api/...) instead of HTTP download.
+func (t *TelegramBot) copyLocalFile(fileID, destPath string) error {
+	file, err := t.bot.GetFile(tgbotapi.FileConfig{FileID: fileID})
 	if err != nil {
-		return "", err
+		return fmt.Errorf("getFile: %w", err)
 	}
-	if t.cfg.TelegramAPIURL != "" {
-		original := fileURL
-		fileURL = strings.Replace(fileURL, "https://api.telegram.org", t.cfg.TelegramAPIURL, 1)
-		log.Printf("[TelegramBot] file URL rewrite: %s → %s", original, fileURL)
+	srcPath := file.FilePath
+	log.Printf("[TelegramBot] local copy: %s → %s", srcPath, destPath)
+
+	src, err := os.Open(srcPath)
+	if err != nil {
+		return fmt.Errorf("open source %s: %w", srcPath, err)
 	}
-	return fileURL, nil
+	defer src.Close()
+
+	dst, err := os.Create(destPath)
+	if err != nil {
+		return fmt.Errorf("create dest: %w", err)
+	}
+	defer dst.Close()
+
+	n, err := io.Copy(dst, src)
+	if err != nil {
+		return fmt.Errorf("copy: %w", err)
+	}
+	log.Printf("[TelegramBot] copied %d bytes → %s", n, destPath)
+	return nil
 }
 
 // SendFile sends a file from the filesystem to a Telegram chat.

@@ -3,6 +3,9 @@ import { createRoot } from 'react-dom/client'
 import SwipeableToaster from './components/SwipeableToaster'
 import './index.css'
 import App from './App'
+import { loadTheme } from './utils/theme'
+
+loadTheme();
 
 // iOS virtual keyboard: adjust #root height to visible viewport.
 // Without this, panels hide behind the keyboard when input is focused.

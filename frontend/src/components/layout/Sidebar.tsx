@@ -10,6 +10,7 @@ import { QRCodeSVG } from 'qrcode.react';
 import { panelIcons, panelTitles } from './PanelContent';
 import type { BasePanelId } from '../../store/layoutUtils';
 import { getDeviceId } from '../../utils/deviceId';
+import { ACCENT_PRESETS, getAccentColor, getBlobsEnabled, saveThemeToServer } from '../../utils/theme';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -78,6 +79,10 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
   const [totpSecret, setTotpSecret] = useState('');
   const [totpCode, setTotpCode] = useState('');
   const [totpLoading, setTotpLoading] = useState(false);
+
+  // Appearance
+  const [accentColor, setAccentColor] = useState(getAccentColor);
+  const [blobsOn, setBlobsOn] = useState(getBlobsEnabled);
 
   const user = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
@@ -280,6 +285,58 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
                   >
                     {tgIdLoading ? 'Saving...' : 'Save'}
                   </button>
+                </div>
+              </div>
+
+              <div className="glass-divider" />
+
+              {/* Appearance */}
+              <div>
+                <label className="block text-xs font-semibold mb-3 uppercase tracking-wider" style={{ color: 'var(--text-muted)', fontSize: '11px', letterSpacing: '0.1em' }}>
+                  Appearance
+                </label>
+                <div className="space-y-3">
+                  {/* Blob toggle */}
+                  <div
+                    className="flex items-center justify-between px-3 py-2.5 rounded-xl cursor-pointer"
+                    style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.04)' }}
+                    onClick={() => { const next = !blobsOn; setBlobsOn(next); saveThemeToServer(accentColor, next); }}
+                  >
+                    <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>Background blobs</span>
+                    <div
+                      className="w-9 h-5 rounded-full relative transition-colors duration-200"
+                      style={{ background: blobsOn ? 'var(--accent)' : 'rgba(255,255,255,0.1)' }}
+                    >
+                      <div
+                        className="absolute top-0.5 w-4 h-4 rounded-full transition-transform duration-200"
+                        style={{
+                          background: 'white',
+                          transform: blobsOn ? 'translateX(18px)' : 'translateX(2px)',
+                        }}
+                      />
+                    </div>
+                  </div>
+                  {/* Accent color */}
+                  <div>
+                    <span className="block text-xs mb-2" style={{ color: 'var(--text-secondary)' }}>Accent color</span>
+                    <div className="flex flex-wrap gap-2">
+                      {ACCENT_PRESETS.map((p) => (
+                        <button
+                          key={p.hex}
+                          type="button"
+                          onClick={() => { setAccentColor(p.hex); saveThemeToServer(p.hex, blobsOn); }}
+                          title={p.name}
+                          className="w-7 h-7 rounded-full transition-all duration-200 flex-shrink-0"
+                          style={{
+                            background: p.hex,
+                            border: accentColor === p.hex ? '2px solid white' : '2px solid transparent',
+                            boxShadow: accentColor === p.hex ? `0 0 10px ${p.hex}` : 'none',
+                            transform: accentColor === p.hex ? 'scale(1.15)' : 'scale(1)',
+                          }}
+                        />
+                      ))}
+                    </div>
+                  </div>
                 </div>
               </div>
 
