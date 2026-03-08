@@ -25,6 +25,25 @@ function findScrollParent(el: HTMLElement | null): HTMLElement | null {
 
 let cancelCurrentSensor: (() => void) | null = null;
 
+// ---- DEBUG (temporary) ----
+let debugEl: HTMLElement | null = null;
+function dbg(msg: string) {
+  if (!debugEl) {
+    debugEl = document.createElement('div');
+    debugEl.style.cssText =
+      'position:fixed;bottom:0;left:0;right:0;z-index:999999;' +
+      'background:rgba(0,0,0,0.95);color:#0f0;font:11px monospace;' +
+      'padding:4px 8px;max-height:25vh;overflow-y:auto;pointer-events:none;';
+    document.body.appendChild(debugEl);
+  }
+  const l = document.createElement('div');
+  l.textContent = `[${Date.now() % 100000}] ${msg}`;
+  debugEl.appendChild(l);
+  if (debugEl.childNodes.length > 30) debugEl.removeChild(debugEl.firstChild!);
+  debugEl.scrollTop = debugEl.scrollHeight;
+}
+// ---- END DEBUG ----
+
 const CONTEXT_MENU_MS = 1200; // must match useLongPress LONG_PRESS_MS
 
 function createProgressRing(x: number, y: number, delayMs: number): {
@@ -138,9 +157,12 @@ export class ScrollAwareTouchSensor {
     const tolerance = sensorOpts.tolerance ?? 10;
     const toleranceSq = tolerance * tolerance;
 
+    dbg(`CTOR id=${String(active).slice(-20)} d=${delay}`);
+
     const touchEvent = event as TouchEvent;
     const touch = touchEvent.touches?.[0];
     if (!touch) {
+      dbg('no touch');
       onAbort?.(active);
       onCancel();
       return;
@@ -151,6 +173,7 @@ export class ScrollAwareTouchSensor {
 
     const target = touchEvent.target as HTMLElement;
     const scrollParent = findScrollParent(target);
+    dbg(`scrollParent=${scrollParent?.tagName ?? 'NONE'}`);
     const initialScrollTop = scrollParent?.scrollTop ?? 0;
     const initialScrollLeft = scrollParent?.scrollLeft ?? 0;
 
@@ -178,15 +201,16 @@ export class ScrollAwareTouchSensor {
       scrollParent?.removeEventListener('scroll', onScroll);
     };
 
-    const cancel = () => {
+    const cancel = (reason: string) => {
       if (done) return;
+      dbg(`CANCEL: ${reason}`);
       cleanup();
       onAbort?.(active);
       onCancel();
     };
 
     cancelCurrentSensor = () => {
-      if (!activated) cancel();
+      if (!activated) cancel('external');
     };
 
     const hasScrolled = () => {
@@ -197,7 +221,7 @@ export class ScrollAwareTouchSensor {
 
     const onScroll = () => {
       // Only cancel on scroll DURING delay. After ready=true, movement = drag.
-      if (!activated && !ready && hasScrolled()) cancel();
+      if (!activated && !ready && hasScrolled()) cancel('scroll');
     };
 
     const onTouchMove = (e: TouchEvent) => {
@@ -208,24 +232,29 @@ export class ScrollAwareTouchSensor {
         if (e.cancelable) e.preventDefault();
         onMove({ x: t.clientX, y: t.clientY });
       } else if (ready) {
-        // Ready state: ring filled → activate drag
+        dbg(`ACTIVATE cancelable=${e.cancelable}`);
         activated = true;
         cancelCurrentSensor = null;
         removeIndicator();
         if (e.cancelable) e.preventDefault();
-        onStart({ x: initialX, y: initialY });
+        try {
+          onStart({ x: initialX, y: initialY });
+          dbg('onStart OK');
+        } catch (err) {
+          dbg(`onStart ERR: ${err}`);
+        }
         onMove({ x: t.clientX, y: t.clientY });
       } else {
-        // Delay period — if finger moved too much, it's a scroll
         const dx = t.clientX - initialX;
         const dy = t.clientY - initialY;
         if (dx * dx + dy * dy > toleranceSq) {
-          cancel();
+          cancel(`tol ${Math.sqrt(dx*dx+dy*dy).toFixed(0)}px`);
         }
       }
     };
 
     const onTouchEnd = () => {
+      dbg(`END done=${done} act=${activated}`);
       if (done) return;
       cleanup();
       if (activated) {
@@ -237,16 +266,17 @@ export class ScrollAwareTouchSensor {
     };
 
     const onTouchCancel = () => {
-      cancel();
+      cancel('touchcancel');
     };
 
     const timer = setTimeout(() => {
       if (done) return;
       if (hasScrolled()) {
-        cancel();
+        cancel('scroll-timer');
         return;
       }
       ready = true;
+      dbg('READY ✓');
       ring?.startPhase2();
     }, delay);
 
