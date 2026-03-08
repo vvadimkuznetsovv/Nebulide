@@ -20,6 +20,24 @@ function findScrollParent(el: HTMLElement | null): HTMLElement | null {
 
 let cancelCurrentSensor: (() => void) | null = null;
 
+// ---- TEMPORARY DEBUG ----
+let debugEl: HTMLElement | null = null;
+function dbg(msg: string) {
+  if (!debugEl) {
+    debugEl = document.createElement('div');
+    debugEl.style.cssText =
+      'position:fixed;bottom:0;left:0;right:0;z-index:999999;' +
+      'background:rgba(0,0,0,0.9);color:#0f0;font:12px monospace;' +
+      'padding:6px 10px;max-height:30vh;overflow-y:auto;pointer-events:none;';
+    document.body.appendChild(debugEl);
+  }
+  const line = document.createElement('div');
+  line.textContent = `[${new Date().toISOString().slice(11, 23)}] ${msg}`;
+  debugEl.appendChild(line);
+  debugEl.scrollTop = debugEl.scrollHeight;
+}
+// ---- END DEBUG ----
+
 const CONTEXT_MENU_MS = 1200;
 
 function createProgressRing(x: number, y: number, delayMs: number): {
@@ -143,9 +161,12 @@ export class ScrollAwareTouchSensor {
     const tolerance = sensorOpts.tolerance ?? 10;
     const toleranceSq = tolerance * tolerance;
 
+    dbg(`CTOR active=${active} delay=${delay} tol=${tolerance}`);
+
     const touchEvent = event as TouchEvent;
     const touch = touchEvent.touches?.[0];
     if (!touch) {
+      dbg('NO TOUCH → abort');
       onAbort?.(active);
       onCancel();
       return;
@@ -183,15 +204,16 @@ export class ScrollAwareTouchSensor {
       scrollParent?.removeEventListener('scroll', onScroll);
     };
 
-    const cancel = () => {
+    const cancel = (reason: string) => {
       if (done) return;
+      dbg(`CANCEL: ${reason}`);
       cleanup();
       onAbort?.(active);
       onCancel();
     };
 
     cancelCurrentSensor = () => {
-      if (!activated) cancel();
+      if (!activated) cancel('externalCancel');
     };
 
     const hasScrolled = () => {
@@ -201,7 +223,7 @@ export class ScrollAwareTouchSensor {
     };
 
     const onScroll = () => {
-      if (!activated && hasScrolled()) cancel();
+      if (!activated && hasScrolled()) cancel('scroll');
     };
 
     const onTouchMove = (e: TouchEvent) => {
@@ -209,28 +231,33 @@ export class ScrollAwareTouchSensor {
       if (!t) return;
 
       if (activated) {
-        // Active drag — report coordinates
         if (e.cancelable) e.preventDefault();
         onMove({ x: t.clientX, y: t.clientY });
       } else if (ready) {
-        // Ready state: ring filled → activate drag
+        dbg(`MOVE in READY → ACTIVATE! cancelable=${e.cancelable}`);
         activated = true;
         cancelCurrentSensor = null;
         removeIndicator();
         if (e.cancelable) e.preventDefault();
-        onStart({ x: initialX, y: initialY });
+        try {
+          onStart({ x: initialX, y: initialY });
+          dbg('onStart OK');
+        } catch (err) {
+          dbg(`onStart ERROR: ${err}`);
+        }
         onMove({ x: t.clientX, y: t.clientY });
       } else {
-        // Delay period — if finger moved too much, it's a scroll
         const dx = t.clientX - initialX;
         const dy = t.clientY - initialY;
-        if (dx * dx + dy * dy > toleranceSq) {
-          cancel();
+        const distSq = dx * dx + dy * dy;
+        if (distSq > toleranceSq) {
+          cancel(`tolerance dist=${Math.sqrt(distSq).toFixed(1)}`);
         }
       }
     };
 
     const onTouchEnd = () => {
+      dbg(`TOUCHEND done=${done} activated=${activated}`);
       if (done) return;
       cleanup();
       if (activated) {
@@ -242,16 +269,19 @@ export class ScrollAwareTouchSensor {
     };
 
     const onTouchCancel = () => {
-      cancel();
+      dbg('TOUCHCANCEL');
+      cancel('touchcancel');
     };
 
     const timer = setTimeout(() => {
+      dbg(`TIMER done=${done} scrolled=${hasScrolled()}`);
       if (done) return;
       if (hasScrolled()) {
-        cancel();
+        cancel('scroll-in-timer');
         return;
       }
       ready = true;
+      dbg('READY=true ✓');
       ring?.startPhase2();
     }, delay);
 
