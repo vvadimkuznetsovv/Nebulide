@@ -1,6 +1,6 @@
 #!/bin/bash
 # SSH failed login attempt watcher — monitors auth.log in real-time
-# Sends Telegram alerts for: failed passwords, invalid users, connection closed (preauth)
+# Sends Telegram alerts for: failed passwords, invalid users, brute force
 # Install as systemd service: ssh-watcher.service
 #
 # Debounce: aggregates multiple failures from same IP within 30s window
@@ -56,11 +56,20 @@ tail -n 0 -F "$LOG" 2>/dev/null | while read -r line; do
 
     if should_notify "$IP"; then
       TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S %Z')
-      send_tg "🚨 <b>SSH Failed Login</b>
-<b>User:</b> <code>${USER:-unknown}</code>
-<b>IP:</b> <code>${IP:-unknown}</code>
-<b>Port:</b> ${PORT:-?}
-<b>Time:</b> ${TIMESTAMP}"
+      send_tg "🟡🟡🟡🟡🟡🟡🟡🟡🟡🟡
+
+🔮 <b>NEBULIDE SECURITY</b> 🔮
+
+❌ <b>Failed Login Attempt</b>
+
+┌─────────────────────
+│ 👤  <b>User:</b>  <code>${USER:-unknown}</code>
+│ 🌐  <b>IP:</b>    <code>${IP:-unknown}</code>
+│ 🔌  <b>Port:</b>  ${PORT:-?}
+│ 🕐  <b>Time:</b>  ${TIMESTAMP}
+└─────────────────────
+
+🟡🟡🟡🟡🟡🟡🟡🟡🟡🟡"
     fi
   fi
 
@@ -71,10 +80,19 @@ tail -n 0 -F "$LOG" 2>/dev/null | while read -r line; do
 
     if should_notify "$IP"; then
       TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S %Z')
-      send_tg "⚠️ <b>SSH Invalid User</b>
-<b>User:</b> <code>${USER:-unknown}</code>
-<b>IP:</b> <code>${IP:-unknown}</code>
-<b>Time:</b> ${TIMESTAMP}"
+      send_tg "🟠🟠🟠🟠🟠🟠🟠🟠🟠🟠
+
+🔮 <b>NEBULIDE SECURITY</b> 🔮
+
+⚠️ <b>Invalid User Attempt</b>
+
+┌─────────────────────
+│ 👻  <b>User:</b>  <code>${USER:-unknown}</code>
+│ 🌐  <b>IP:</b>    <code>${IP:-unknown}</code>
+│ 🕐  <b>Time:</b>  ${TIMESTAMP}
+└─────────────────────
+
+🟠🟠🟠🟠🟠🟠🟠🟠🟠🟠"
     fi
   fi
 
@@ -85,11 +103,20 @@ tail -n 0 -F "$LOG" 2>/dev/null | while read -r line; do
 
     if should_notify "brute_${IP}"; then
       TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S %Z')
-      send_tg "🔴 <b>SSH Brute Force Detected</b>
-<b>User:</b> <code>${USER:-unknown}</code>
-<b>IP:</b> <code>${IP:-unknown}</code>
-<b>Time:</b> ${TIMESTAMP}
-Max auth attempts exceeded!"
+      send_tg "🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴
+
+🔮 <b>NEBULIDE SECURITY</b> 🔮
+
+🚨 <b>BRUTE FORCE DETECTED</b> 🚨
+
+┌─────────────────────
+│ 👤  <b>User:</b>  <code>${USER:-unknown}</code>
+│ 🌐  <b>IP:</b>    <code>${IP:-unknown}</code>
+│ 🕐  <b>Time:</b>  ${TIMESTAMP}
+│ ⛔  Max auth attempts exceeded!
+└─────────────────────
+
+🔴🔴🔴🔴🔴🔴🔴🔴🔴🔴"
     fi
   fi
 

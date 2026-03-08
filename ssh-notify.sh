@@ -20,12 +20,21 @@ if [ "$IP" != "local" ] && [ -n "$IP" ]; then
 fi
 
 MSG=$(cat <<EOF
-🔐 <b>SSH Login Successful</b>
-<b>User:</b> <code>${PAM_USER}</code>
-<b>Host:</b> <code>${HOST}</code>
-<b>IP:</b> <code>${IP}</code>${GEO:+
-<b>Location:</b> ${GEO}}
-<b>Time:</b> ${TIMESTAMP}
+🟣🟣🟣🟣🟣🟣🟣🟣🟣🟣
+
+🔮 <b>NEBULIDE SECURITY</b> 🔮
+
+✅ <b>SSH Login Successful</b>
+
+┌─────────────────────
+│ 👤  <b>User:</b>  <code>${PAM_USER}</code>
+│ 🖥  <b>Host:</b>  <code>${HOST}</code>
+│ 🌐  <b>IP:</b>    <code>${IP}</code>${GEO:+
+│ 📍  <b>Geo:</b>   ${GEO}}
+│ 🕐  <b>Time:</b>  ${TIMESTAMP}
+└─────────────────────
+
+🟣🟣🟣🟣🟣🟣🟣🟣🟣🟣
 EOF
 )
 
