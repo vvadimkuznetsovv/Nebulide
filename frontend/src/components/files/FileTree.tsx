@@ -626,6 +626,7 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree({ r
     <div
       className="h-full flex flex-col"
       style={{ background: 'transparent' }}
+      data-filetree-dnd=""
     >
       {/* Path breadcrumb */}
       <div

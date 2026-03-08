@@ -11,6 +11,25 @@ import {
   type DragEndEvent,
   type Modifier,
 } from '@dnd-kit/core';
+
+/**
+ * Custom MouseSensor that ignores pointer events from inside FileTree's DndContext.
+ * Without this, both nested DndContexts process the same events simultaneously,
+ * causing dual state updates → infinite re-render loop (React #185).
+ */
+class PanelMouseSensor extends MouseSensor {
+  static activators = [
+    {
+      eventName: 'onPointerDown' as const,
+      handler: ({ nativeEvent }: React.PointerEvent) => {
+        if ((nativeEvent.target as Element).closest('[data-filetree-dnd]')) {
+          return false;
+        }
+        return true;
+      },
+    },
+  ];
+}
 import { useAuth } from '../hooks/useAuth';
 import { useLayoutStore, type PanelId } from '../store/layoutStore';
 import { findPanelNode, isDetachedEditor } from '../store/layoutUtils';
@@ -129,10 +148,8 @@ export default function Workspace() {
 
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
 
-  // DnD sensors — mouse only for outer context (panel/tab drag).
-  // Touch drag on panels is handled by panel headers which have their own touch handling.
-  // NO TouchSensor here — it interfered with FileTree's nested DndContext causing React #185.
-  const mouseSensor = useSensor(MouseSensor, { activationConstraint: { distance: 8 } });
+  // DnD sensors — PanelMouseSensor skips events from FileTree (data-filetree-dnd).
+  const mouseSensor = useSensor(PanelMouseSensor, { activationConstraint: { distance: 8 } });
   const sensors = useSensors(mouseSensor);
 
   // DnD handlers
