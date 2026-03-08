@@ -1845,8 +1845,8 @@ body { --sb-color: rgba(var(--accent-rgb), 0.5); animation: scrollbarShimmer 8s 
 @media (max-width: 640px) {
   .terminal-search-bar input { width: 120px; }
 
-  /* Allow native scroll on tab bar — dnd-kit uses delay-based activation */
-  .panel-tab { touch-action: manipulation; }
+  /* Allow native scroll — dnd-kit uses delay-based activation */
+  .panel-tab, .file-tree-item { touch-action: manipulation; }
 }
 
 .prose a { color: var(--accent) !important; }
