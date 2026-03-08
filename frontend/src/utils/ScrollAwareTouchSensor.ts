@@ -5,6 +5,11 @@
  *   - Touch + move immediately → SCROLL (tolerance exceeded or container scrolls)
  *   - Touch + hold 700ms + move → DRAG (ready state, activate on any movement)
  *   - Touch + hold 1200ms → CONTEXT MENU (cancelPendingDrag cancels sensor)
+ *
+ * Key design:
+ *   - During delay: monitors scroll container. If it scrolls > 3px → cancel (it's a scroll)
+ *   - After delay (ready=true): scroll events IGNORED. Movement = drag intent.
+ *   - Exports cancelPendingDrag() so long-press context menu can cancel the sensor.
  */
 
 function findScrollParent(el: HTMLElement | null): HTMLElement | null {
@@ -20,25 +25,7 @@ function findScrollParent(el: HTMLElement | null): HTMLElement | null {
 
 let cancelCurrentSensor: (() => void) | null = null;
 
-// ---- TEMPORARY DEBUG ----
-let debugEl: HTMLElement | null = null;
-function dbg(msg: string) {
-  if (!debugEl) {
-    debugEl = document.createElement('div');
-    debugEl.style.cssText =
-      'position:fixed;bottom:0;left:0;right:0;z-index:999999;' +
-      'background:rgba(0,0,0,0.9);color:#0f0;font:12px monospace;' +
-      'padding:6px 10px;max-height:30vh;overflow-y:auto;pointer-events:none;';
-    document.body.appendChild(debugEl);
-  }
-  const line = document.createElement('div');
-  line.textContent = `[${new Date().toISOString().slice(11, 23)}] ${msg}`;
-  debugEl.appendChild(line);
-  debugEl.scrollTop = debugEl.scrollHeight;
-}
-// ---- END DEBUG ----
-
-const CONTEXT_MENU_MS = 1200;
+const CONTEXT_MENU_MS = 1200; // must match useLongPress LONG_PRESS_MS
 
 function createProgressRing(x: number, y: number, delayMs: number): {
   el: HTMLElement;
@@ -50,6 +37,7 @@ function createProgressRing(x: number, y: number, delayMs: number): {
   const circ = 2 * Math.PI * r;
   const phase2Ms = CONTEXT_MENU_MS - delayMs;
   const rot = 'transform:rotate(-90deg);transform-origin:center';
+  const uid = Math.random().toString(36).slice(2, 8);
   const el = document.createElement('div');
   el.style.cssText = `
     position:fixed;z-index:99999;pointer-events:none;
@@ -57,8 +45,6 @@ function createProgressRing(x: number, y: number, delayMs: number): {
     width:${size}px;height:${size}px;
     transition:opacity 0.15s;
   `;
-  // Unique filter IDs to avoid SVG conflicts
-  const uid = Math.random().toString(36).slice(2, 8);
   el.innerHTML = `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
     <defs>
       <filter id="g1${uid}"><feGaussianBlur stdDeviation="3" result="b"/>
@@ -146,27 +132,15 @@ export class ScrollAwareTouchSensor {
   ];
 
   constructor(props: SensorProps) {
-    const {
-      active,
-      event,
-      onStart,
-      onCancel,
-      onMove,
-      onEnd,
-      onAbort,
-      options,
-    } = props;
+    const { active, event, onStart, onCancel, onMove, onEnd, onAbort, options } = props;
     const sensorOpts = (options ?? {}) as SensorOptions;
     const delay = sensorOpts.delay ?? 700;
     const tolerance = sensorOpts.tolerance ?? 10;
     const toleranceSq = tolerance * tolerance;
 
-    dbg(`CTOR active=${active} delay=${delay} tol=${tolerance}`);
-
     const touchEvent = event as TouchEvent;
     const touch = touchEvent.touches?.[0];
     if (!touch) {
-      dbg('NO TOUCH → abort');
       onAbort?.(active);
       onCancel();
       return;
@@ -204,16 +178,15 @@ export class ScrollAwareTouchSensor {
       scrollParent?.removeEventListener('scroll', onScroll);
     };
 
-    const cancel = (reason: string) => {
+    const cancel = () => {
       if (done) return;
-      dbg(`CANCEL: ${reason}`);
       cleanup();
       onAbort?.(active);
       onCancel();
     };
 
     cancelCurrentSensor = () => {
-      if (!activated) cancel('externalCancel');
+      if (!activated) cancel();
     };
 
     const hasScrolled = () => {
@@ -224,7 +197,7 @@ export class ScrollAwareTouchSensor {
 
     const onScroll = () => {
       // Only cancel on scroll DURING delay. After ready=true, movement = drag.
-      if (!activated && !ready && hasScrolled()) cancel('scroll');
+      if (!activated && !ready && hasScrolled()) cancel();
     };
 
     const onTouchMove = (e: TouchEvent) => {
@@ -235,30 +208,24 @@ export class ScrollAwareTouchSensor {
         if (e.cancelable) e.preventDefault();
         onMove({ x: t.clientX, y: t.clientY });
       } else if (ready) {
-        dbg(`MOVE in READY → ACTIVATE! cancelable=${e.cancelable}`);
+        // Ready state: ring filled → activate drag
         activated = true;
         cancelCurrentSensor = null;
         removeIndicator();
         if (e.cancelable) e.preventDefault();
-        try {
-          onStart({ x: initialX, y: initialY });
-          dbg('onStart OK');
-        } catch (err) {
-          dbg(`onStart ERROR: ${err}`);
-        }
+        onStart({ x: initialX, y: initialY });
         onMove({ x: t.clientX, y: t.clientY });
       } else {
+        // Delay period — if finger moved too much, it's a scroll
         const dx = t.clientX - initialX;
         const dy = t.clientY - initialY;
-        const distSq = dx * dx + dy * dy;
-        if (distSq > toleranceSq) {
-          cancel(`tolerance dist=${Math.sqrt(distSq).toFixed(1)}`);
+        if (dx * dx + dy * dy > toleranceSq) {
+          cancel();
         }
       }
     };
 
     const onTouchEnd = () => {
-      dbg(`TOUCHEND done=${done} activated=${activated}`);
       if (done) return;
       cleanup();
       if (activated) {
@@ -270,19 +237,16 @@ export class ScrollAwareTouchSensor {
     };
 
     const onTouchCancel = () => {
-      dbg('TOUCHCANCEL');
-      cancel('touchcancel');
+      cancel();
     };
 
     const timer = setTimeout(() => {
-      dbg(`TIMER done=${done} scrolled=${hasScrolled()}`);
       if (done) return;
       if (hasScrolled()) {
-        cancel('scroll-in-timer');
+        cancel();
         return;
       }
       ready = true;
-      dbg('READY=true ✓');
       ring?.startPhase2();
     }, delay);
 
