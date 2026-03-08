@@ -13,6 +13,7 @@ import { sendSyncMessage } from '../utils/syncBridge';
 import { useWorkspaceStore, type WorkspaceSnapshot } from './workspaceStore';
 import { useLayoutStore, type LayoutSnapshot } from './layoutStore';
 import { destroyAllTerminalSessions, disconnectAllTerminalSessions } from '../components/terminal/Terminal';
+import { syncThemeFromServer } from '../utils/theme';
 import toast from 'react-hot-toast';
 
 const ACTIVE_WS_KEY = 'nebulide-active-workspace';
@@ -101,6 +102,7 @@ export const useWorkspaceSessionStore = create<WorkspaceSessionState>((set, get)
           } catch {
             console.warn('[WorkspaceSession] Failed to restore snapshot');
           }
+          syncThemeFromServer();
           set({ loading: false });
           return;
         }
@@ -245,6 +247,9 @@ export const useWorkspaceSessionStore = create<WorkspaceSessionState>((set, get)
 
       set({ activeSessionId: id });
       localStorage.setItem(ACTIVE_WS_KEY, id);
+
+      // Sync theme/blobs from server (cross-device sync)
+      syncThemeFromServer();
     } catch {
       toast.error('Failed to switch workspace');
     }
@@ -323,6 +328,7 @@ export const useWorkspaceSessionStore = create<WorkspaceSessionState>((set, get)
           useLayoutStore.getState().restoreLayoutFromSnapshot(snap.layout, panelIdMapping);
         }
       }
+      syncThemeFromServer();
       set({ sessions: data || [] });
     } catch {
       console.warn('[WorkspaceSession] Failed to reload active session');

@@ -20,6 +20,7 @@ import { findPanelNode, isDetachedEditor } from '../store/layoutUtils';
 import { useWorkspaceStore } from '../store/workspaceStore';
 import { useWorkspaceSessionStore } from '../store/workspaceSessionStore';
 import { useSyncWS } from '../hooks/useSyncWS';
+import { syncThemeFromServer } from '../utils/theme';
 import LavaLamp from '../components/LavaLamp';
 import Sidebar from '../components/layout/Sidebar';
 import LayoutRenderer from '../components/layout/LayoutRenderer';
@@ -116,6 +117,15 @@ export default function Workspace() {
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
   }, [saveCurrentSession]);
+
+  // Sync theme/blobs from server when tab becomes visible (cross-device sync)
+  useEffect(() => {
+    const handler = () => {
+      if (document.visibilityState === 'visible') syncThemeFromServer();
+    };
+    document.addEventListener('visibilitychange', handler);
+    return () => document.removeEventListener('visibilitychange', handler);
+  }, []);
 
   // Global Ctrl+Shift+C copy (capture phase, respects Developer Mode)
   useEffect(() => {

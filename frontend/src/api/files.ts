@@ -68,6 +68,16 @@ export const sendToTelegram = (filePath: string) =>
 export const copyFile = (source: string, destination: string) =>
   api.post('/files/copy', { source, destination });
 
+// Upload binary file (multipart/form-data)
+export const uploadFile = (file: Blob, dir?: string, filename?: string) => {
+  const form = new FormData();
+  form.append('file', file, filename || 'upload');
+  return api.post<{ path: string }>('/files/upload', form, {
+    params: dir ? { dir } : undefined,
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+};
+
 // Build download URL (triggers browser download, auto-zips folders)
 export function getDownloadUrl(path: string): string {
   const token = localStorage.getItem('access_token');

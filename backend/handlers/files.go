@@ -187,6 +187,70 @@ func (h *FilesHandler) Write(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "File saved", "path": req.Path})
 }
 
+func (h *FilesHandler) Upload(c *gin.Context) {
+	c.Request.ParseMultipartForm(1 << 30) // 1GB limit
+
+	file, header, err := c.Request.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "No file provided"})
+		return
+	}
+	defer file.Close()
+
+	// Destination directory (default: user workspace /uploads)
+	destDir := c.Query("dir")
+	userDir := h.getUserDir(c)
+	if destDir == "" {
+		destDir = filepath.Join(userDir, "uploads")
+	}
+
+	fullDir, err := h.safePathForUser(destDir, c)
+	if err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	if err := os.MkdirAll(fullDir, 0755); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create directory"})
+		return
+	}
+
+	// Use provided filename or original
+	fileName := header.Filename
+	fullPath := filepath.Join(fullDir, fileName)
+
+	// Prevent overwrite — add suffix if exists
+	if _, err := os.Stat(fullPath); err == nil {
+		ext := filepath.Ext(fileName)
+		base := strings.TrimSuffix(fileName, ext)
+		for i := 1; ; i++ {
+			fullPath = filepath.Join(fullDir, fmt.Sprintf("%s_%d%s", base, i, ext))
+			if _, err := os.Stat(fullPath); os.IsNotExist(err) {
+				break
+			}
+		}
+	}
+
+	out, err := os.Create(fullPath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create file"})
+		return
+	}
+	defer out.Close()
+
+	if _, err := io.Copy(out, file); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to write file"})
+		return
+	}
+
+	// Return the logical path (relative to user dir or shared dir)
+	logicalPath := fullPath
+	if rel, err := filepath.Rel(userDir, fullPath); err == nil && !strings.HasPrefix(rel, "..") {
+		logicalPath = filepath.Join(userDir, rel)
+	}
+	c.JSON(http.StatusOK, gin.H{"path": filepath.ToSlash(logicalPath)})
+}
+
 func (h *FilesHandler) Delete(c *gin.Context) {
 	requestedPath := c.Query("path")
 	if requestedPath == "" {

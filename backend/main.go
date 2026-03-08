@@ -152,6 +152,7 @@ func main() {
 		protected.POST("/files/mkdir", filesHandler.Mkdir)
 		protected.POST("/files/rename", filesHandler.Rename)
 		protected.POST("/files/copy", filesHandler.Copy)
+		protected.POST("/files/upload", filesHandler.Upload)
 		protected.GET("/files/download", filesHandler.Download)
 		protected.GET("/files/search", filesHandler.SearchFiles)
 		protected.POST("/files/extract", filesHandler.Extract)

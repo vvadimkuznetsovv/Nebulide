@@ -65,6 +65,17 @@ export default function EditorPanel() {
     disabled: !rootPath,
   });
 
+  // Uploads/Shared toolbar buttons = droppable targets for file DnD
+  const uploadsPath = rootPath ? rootPath + '/uploads' : null;
+  const { setNodeRef: setUploadsDropRef, isOver: isOverUploads } = useDroppable({
+    id: uploadsPath ? `folder:${uploadsPath}` : 'folder:__uploads__',
+    disabled: !uploadsPath,
+  });
+  const { setNodeRef: setSharedDropRef, isOver: isOverShared } = useDroppable({
+    id: sharedDir ? `folder:${sharedDir}` : 'folder:__shared__',
+    disabled: !sharedDir,
+  });
+
   // Capture workspace root from FileTree after first load
   useEffect(() => {
     const interval = setInterval(() => {
@@ -224,8 +235,9 @@ export default function EditorPanel() {
                 </button>
                 {/* Separator */}
                 <div style={{ width: 1, height: 14, background: 'var(--glass-border)', margin: '0 2px' }} />
-                {/* Uploads (Telegram) */}
+                {/* Uploads (Telegram) — also droppable for file DnD */}
                 <button
+                  ref={setUploadsDropRef}
                   type="button"
                   className={`editor-toggle-files${fileMode === 'tree' && activeFolder === 'uploads' ? ' active' : ''}`}
                   onClick={() => {
@@ -233,7 +245,10 @@ export default function EditorPanel() {
                     if (root) { setFileMode('tree'); fileTreeRef.current?.navigateTo(root + '/uploads'); }
                   }}
                   title="Uploads (Telegram)"
-                  style={{ padding: '3px 6px' }}
+                  style={{
+                    padding: '3px 6px',
+                    ...(isOverUploads ? { background: 'rgba(var(--accent-rgb), 0.3)', borderRadius: '4px', boxShadow: '0 0 8px rgba(var(--accent-rgb), 0.5)' } : {}),
+                  }}
                 >
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
@@ -244,11 +259,15 @@ export default function EditorPanel() {
                 {/* Shared */}
                 {sharedDir && (
                   <button
+                    ref={setSharedDropRef}
                     type="button"
                     className={`editor-toggle-files${fileMode === 'tree' && activeFolder === 'shared' ? ' active' : ''}`}
                     onClick={() => { setFileMode('tree'); fileTreeRef.current?.navigateTo(sharedDir); }}
                     title="Shared folder"
-                    style={{ padding: '3px 6px' }}
+                    style={{
+                      padding: '3px 6px',
+                      ...(isOverShared ? { background: 'rgba(var(--accent-rgb), 0.3)', borderRadius: '4px', boxShadow: '0 0 8px rgba(var(--accent-rgb), 0.5)' } : {}),
+                    }}
                   >
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                       <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />

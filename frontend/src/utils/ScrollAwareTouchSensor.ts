@@ -40,6 +40,13 @@ function createProgressRing(x: number, y: number, delayMs: number): {
   const phase2Ms = CONTEXT_MENU_MS - delayMs;
   const rot = 'transform:rotate(-90deg);transform-origin:center';
   const uid = Math.random().toString(36).slice(2, 8);
+
+  // Read current accent color from CSS variables (adaptive to theme)
+  const accent = getComputedStyle(document.documentElement).getPropertyValue('--accent').trim() || '#7F00FF';
+  const ar = parseInt(accent.slice(1, 3), 16);
+  const ag = parseInt(accent.slice(3, 5), 16);
+  const ab = parseInt(accent.slice(5, 7), 16);
+
   const el = document.createElement('div');
   el.style.cssText = `
     position:fixed;z-index:99999;pointer-events:none;
@@ -57,9 +64,9 @@ function createProgressRing(x: number, y: number, delayMs: number): {
       </filter>
     </defs>
     <circle cx="${size / 2}" cy="${size / 2}" r="${r}"
-      fill="none" stroke="rgba(200,120,255,0.18)" stroke-width="${sw}"/>
+      fill="none" stroke="rgba(${ar},${ag},${ab},0.18)" stroke-width="${sw}"/>
     <circle id="p1" cx="${size / 2}" cy="${size / 2}" r="${r}"
-      fill="none" stroke="rgb(200,120,255)" stroke-width="${sw}"
+      fill="none" stroke="rgb(${ar},${ag},${ab})" stroke-width="${sw}"
       stroke-linecap="round" filter="url(#g1${uid})"
       stroke-dasharray="${circ}" stroke-dashoffset="${circ}"
       style="transition:stroke-dashoffset ${delayMs}ms linear;${rot}"/>

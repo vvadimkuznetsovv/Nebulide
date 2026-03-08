@@ -888,7 +888,7 @@
   .resize-handle-line {
     position: absolute;
     border-radius: 2px;
-    background: rgba(200, 140, 255, 0.5);
+    background: rgba(var(--accent-rgb), 0.5);
     box-shadow: 0 0 6px rgba(var(--accent-rgb), 0.4), 0 0 14px rgba(var(--accent-rgb), 0.2);
     transition: all 0.15s ease;
   }
@@ -947,7 +947,7 @@
       width: 4px;
       height: 60px;
       max-height: 80%;
-      background: rgba(200, 140, 255, 0.9);
+      background: rgba(var(--accent-rgb), 0.9);
       box-shadow:
         0 0 6px rgba(255, 255, 255, 0.6),
         0 0 14px rgba(var(--accent-rgb), 0.8),
@@ -1178,8 +1178,8 @@
 }
 
 @keyframes scrollbarShimmer {
-  0%, 100% { --sb-color: rgba(var(--accent-rgb), 0.5); }
-  50% { --sb-color: rgba(var(--accent-light-rgb), 0.75); }
+  0%, 100% { --sb-color: rgba(var(--accent-rgb), 0.4); }
+  50% { --sb-color: rgba(var(--accent-rgb), 0.6); }
 }
 body { --sb-color: rgba(var(--accent-rgb), 0.5); animation: scrollbarShimmer 8s ease-in-out infinite; }
 ::-webkit-scrollbar { width: 6px; height: 6px; }
