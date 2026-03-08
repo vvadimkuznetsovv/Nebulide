@@ -3,15 +3,14 @@
  *
  * Interaction model:
  *   - Touch + move immediately → SCROLL (tolerance exceeded or container scrolls)
- *   - Touch + hold 300ms + move → DRAG (ready state, activate on movement)
- *   - Touch + hold 700ms → CONTEXT MENU (cancelPendingDrag cancels sensor)
+ *   - Touch + hold 700ms + move → DRAG (ready state, activate on any movement)
+ *   - Touch + hold 1200ms → CONTEXT MENU (cancelPendingDrag cancels sensor)
  *
  * Key differences from built-in TouchSensor:
- *   1. Monitors scrollable container — if it scrolls during delay OR ready, cancel
+ *   1. Monitors scrollable container — if it scrolls during delay, cancel
  *   2. After delay, enters "ready" state — does NOT call onStart yet
- *   3. Skips first touchmove in ready state to let scroll detection catch up
- *   4. Second touchmove + no scroll detected → activates drag
- *   5. Exports cancelPendingDrag() so long-press can cancel the sensor
+ *   3. Any touchmove in ready state → immediately activates drag (preventDefault)
+ *   4. Exports cancelPendingDrag() so long-press can cancel the sensor
  */
 
 function findScrollParent(el: HTMLElement | null): HTMLElement | null {
@@ -27,17 +26,18 @@ function findScrollParent(el: HTMLElement | null): HTMLElement | null {
 
 let cancelCurrentSensor: (() => void) | null = null;
 
-const CONTEXT_MENU_MS = 700; // must match useLongPress LONG_PRESS_MS
+const CONTEXT_MENU_MS = 1200; // must match useLongPress LONG_PRESS_MS
 
 /** Creates a two-phase progress ring: purple (DnD) then white (context menu) */
 function createProgressRing(x: number, y: number, delayMs: number): {
   el: HTMLElement;
   startPhase2: () => void;
 } {
-  const size = 44;
-  const r = 17;
+  const size = 80;
+  const r = 30;
+  const sw = 4;
   const circ = 2 * Math.PI * r;
-  const phase2Ms = CONTEXT_MENU_MS - delayMs; // time from DnD-ready to context menu
+  const phase2Ms = CONTEXT_MENU_MS - delayMs;
   const rot = 'transform:rotate(-90deg);transform-origin:center';
   const el = document.createElement('div');
   el.style.cssText = `
@@ -48,14 +48,14 @@ function createProgressRing(x: number, y: number, delayMs: number): {
   `;
   el.innerHTML = `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
     <circle cx="${size / 2}" cy="${size / 2}" r="${r}"
-      fill="none" stroke="rgba(127,0,255,0.12)" stroke-width="2.5"/>
+      fill="none" stroke="rgba(127,0,255,0.12)" stroke-width="${sw}"/>
     <circle id="phase1" cx="${size / 2}" cy="${size / 2}" r="${r}"
-      fill="none" stroke="rgba(127,0,255,0.85)" stroke-width="2.5"
+      fill="none" stroke="rgba(127,0,255,0.85)" stroke-width="${sw}"
       stroke-linecap="round"
       stroke-dasharray="${circ}" stroke-dashoffset="${circ}"
       style="transition:stroke-dashoffset ${delayMs}ms linear;${rot}"/>
     <circle id="phase2" cx="${size / 2}" cy="${size / 2}" r="${r}"
-      fill="none" stroke="rgba(255,255,255,0.9)" stroke-width="2.5"
+      fill="none" stroke="rgba(255,255,255,0.9)" stroke-width="${sw}"
       stroke-linecap="round"
       stroke-dasharray="${circ}" stroke-dashoffset="${circ}"
       style="${rot}"/>
@@ -159,7 +159,6 @@ export class ScrollAwareTouchSensor {
     let ready = false;
     let activated = false;
     let done = false;
-    let firstMoveAfterReady = true;
     let indicator: { el: HTMLElement; startPhase2: () => void } | null = null;
 
     // Show progress ring immediately
@@ -212,18 +211,7 @@ export class ScrollAwareTouchSensor {
         if (e.cancelable) e.preventDefault();
         onMove({ x: t.clientX, y: t.clientY });
       } else if (ready) {
-        if (firstMoveAfterReady) {
-          // Skip first touchmove — give scroll event time to fire
-          // DON'T preventDefault here — let browser scroll if it wants
-          firstMoveAfterReady = false;
-          return;
-        }
-        // Second+ move in ready state — check scroll one more time
-        if (hasScrolled()) {
-          abort();
-          return;
-        }
-        // No scroll detected → this is an intentional drag
+        // Ready state: purple ring filled. Any movement = drag.
         activated = true;
         cancelCurrentSensor = null;
         removeIndicator();
