@@ -120,7 +120,7 @@ export default function Workspace() {
   // Global Ctrl+Shift+C copy (capture phase, respects Developer Mode)
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (!e.ctrlKey || !e.shiftKey || e.key !== 'C') return;
+      if (!e.ctrlKey || !e.shiftKey || e.code !== 'KeyC') return;
       if (useWorkspaceStore.getState().devMode) return; // Let DevTools open
 
       e.preventDefault();

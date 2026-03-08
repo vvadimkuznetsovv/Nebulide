@@ -21,50 +21,65 @@ function findScrollParent(el: HTMLElement | null): HTMLElement | null {
   return null;
 }
 
-interface SensorOptions {
+interface ScrollAwareTouchSensorOptions {
   delay?: number;
   tolerance?: number;
 }
 
-// Minimal types matching @dnd-kit's sensor interface (v6.3.x)
+// Matches @dnd-kit v6.3.x SensorProps shape
 interface SensorProps {
   event: Event;
+  active: string | number;
   onStart(coordinates: { x: number; y: number }): void;
   onCancel(): void;
   onMove(coordinates: { x: number; y: number }): void;
   onEnd(): void;
-  options: SensorOptions;
-  // other fields exist but we don't use them
+  onAbort(id: string | number): void;
+  options: ScrollAwareTouchSensorOptions;
   [key: string]: unknown;
 }
 
 export class ScrollAwareTouchSensor {
   autoScrollEnabled = true;
 
+  // Required for iOS Safari: a non-passive touchmove listener on window
+  // ensures that dynamically added touchmove handlers can call preventDefault()
+  static setup() {
+    window.addEventListener('touchmove', noop, { capture: false, passive: false });
+    return function teardown() {
+      window.removeEventListener('touchmove', noop);
+    };
+    function noop() {}
+  }
+
   static activators = [
     {
       eventName: 'onTouchStart' as const,
       handler: (
         event: React.TouchEvent,
-        { onActivation }: { onActivation(opts: { event: Event }): void },
+        _options: ScrollAwareTouchSensorOptions,
       ) => {
         const { nativeEvent } = event;
         if (nativeEvent.touches.length > 1) return false;
-        onActivation({ event: nativeEvent });
-        return false; // Don't preventDefault — let browser handle scroll
+        // Return true = tell @dnd-kit to instantiate this sensor
+        return true;
       },
     },
   ];
 
   constructor(props: SensorProps) {
-    const { event, onStart, onCancel, onMove, onEnd, options } = props;
+    const { event, active, onStart, onCancel, onMove, onEnd, onAbort, options } = props;
     const delay = options.delay ?? 500;
     const tolerance = options.tolerance ?? 10;
     const toleranceSq = tolerance * tolerance;
 
     const touchEvent = event as TouchEvent;
-    const touch = touchEvent.touches[0];
-    if (!touch) { onCancel(); return; }
+    const touch = touchEvent.touches?.[0];
+    if (!touch) {
+      onAbort(active);
+      onCancel();
+      return;
+    }
 
     const initialX = touch.clientX;
     const initialY = touch.clientY;
@@ -90,12 +105,16 @@ export class ScrollAwareTouchSensor {
     const abort = () => {
       if (done) return;
       cleanup();
+      onAbort(active);
       onCancel();
     };
 
-    // If scrollable parent scrolls during delay → not a drag, it's a scroll
+    // If scrollable parent scrolls significantly during delay → not a drag, it's a scroll
     const handleScroll = () => {
-      if (!activated) abort();
+      if (activated || !scrollParent) return;
+      const dY = Math.abs(scrollParent.scrollTop - initialScrollTop);
+      const dX = Math.abs(scrollParent.scrollLeft - initialScrollLeft);
+      if (dY > 3 || dX > 3) abort();
     };
 
     const handleMove = (e: TouchEvent) => {
@@ -104,7 +123,7 @@ export class ScrollAwareTouchSensor {
 
       if (activated) {
         // We own the gesture — prevent browser scroll, report move
-        e.preventDefault();
+        if (e.cancelable) e.preventDefault();
         onMove({ x: t.clientX, y: t.clientY });
       } else {
         // Still in delay period — check if finger moved beyond tolerance
@@ -122,6 +141,7 @@ export class ScrollAwareTouchSensor {
       if (activated) {
         onEnd();
       } else {
+        onAbort(active);
         onCancel();
       }
     };

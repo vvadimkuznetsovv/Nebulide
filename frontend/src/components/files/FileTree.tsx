@@ -796,18 +796,18 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree({ r
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
     if (e.ctrlKey || e.metaKey) {
-      if (e.key === 'c') {
+      if (e.code === 'KeyC') {
         if (selectedPaths.size > 0) {
           e.preventDefault();
           setClipboardFiles([...selectedPaths]);
           toast.success(`${selectedPaths.size} item(s) copied`);
         }
-      } else if (e.key === 'v') {
+      } else if (e.code === 'KeyV') {
         if (clipboardFiles.length > 0) {
           e.preventDefault();
           pasteFiles(clipboardFiles, currentPath);
         }
-      } else if (e.key === 'a') {
+      } else if (e.code === 'KeyA') {
         e.preventDefault();
         const all = getAllVisibleItems();
         setSelectedPaths(new Set(all.map(f => f.path)));
@@ -838,7 +838,7 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree({ r
 
   return (
     <div
-      className="h-full flex flex-col"
+      className="flex-1 min-h-0 flex flex-col"
       style={{ background: 'transparent' }}
       tabIndex={0}
       onKeyDown={handleKeyDown}
