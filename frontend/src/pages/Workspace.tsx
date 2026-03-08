@@ -4,7 +4,6 @@ import {
   DndContext,
   DragOverlay,
   MouseSensor,
-  TouchSensor,
   useSensor,
   useSensors,
   pointerWithin,
@@ -13,6 +12,7 @@ import {
   type Modifier,
   type CollisionDetection,
 } from '@dnd-kit/core';
+import { ScrollAwareTouchSensor } from '../utils/ScrollAwareTouchSensor';
 import { useAuth } from '../hooks/useAuth';
 import { renameFile } from '../api/files';
 import { useLayoutStore, type PanelId } from '../store/layoutStore';
@@ -182,7 +182,8 @@ export default function Workspace() {
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
 
   const mouseSensor = useSensor(MouseSensor, { activationConstraint: { distance: 8 } });
-  const touchSensor = useSensor(TouchSensor, { activationConstraint: { delay: 500, tolerance: 3 } });
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const touchSensor = useSensor(ScrollAwareTouchSensor as any, { delay: 500, tolerance: 10 });
   const sensors = useSensors(mouseSensor, touchSensor);
 
   // DnD handlers
