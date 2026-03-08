@@ -178,7 +178,7 @@ export class ScrollAwareTouchSensor {
       scrollParent?.removeEventListener('scroll', onScroll);
     };
 
-    const cancel = (reason: string) => {
+    const cancel = (_reason: string) => {
       if (done) return;
       cleanup();
       onAbort?.(active);
