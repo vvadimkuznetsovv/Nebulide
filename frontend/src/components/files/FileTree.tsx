@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useImperativeHandle, forwardRef, type ReactNode } from 'react';
+import { useDroppable } from '@dnd-kit/core';
 import { listFiles, readFile, deleteFile, writeFile, mkdirFile, renameFile, sendToTelegram, extractArchive, copyFile, getDownloadUrl, type FileEntry } from '../../api/files';
 import FileTreeItem from './FileTreeItem';
 import ContextMenu, { type ContextMenuItem } from './ContextMenu';
@@ -371,6 +372,11 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree({ r
   // Long-press for mobile on empty space
   const { handlers: emptyLongPressHandlers } = useLongPress({
     onLongPress: (x, y) => setContextMenu({ x, y, target: null }),
+  });
+
+  // Root folder droppable — drop onto empty space moves to current directory
+  const { setNodeRef: setRootDropRef, isOver: isRootOver } = useDroppable({
+    id: `folder:${currentPath}`,
   });
 
   const handleMenuAction = (action: string) => {
@@ -837,10 +843,14 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree({ r
       tabIndex={0}
       onKeyDown={handleKeyDown}
     >
-      {/* File list */}
+      {/* File list — also root folder droppable */}
       <div
+        ref={setRootDropRef}
         className="flex-1 overflow-y-auto py-1 select-none"
-        style={{ WebkitTouchCallout: 'none' }}
+        style={{
+          WebkitTouchCallout: 'none',
+          ...(isRootOver ? { background: 'rgba(var(--accent-rgb), 0.08)', outline: '1px dashed rgba(var(--accent-rgb), 0.4)' } : {}),
+        }}
         onContextMenu={handleEmptyContextMenu}
         {...emptyLongPressHandlers}
       >

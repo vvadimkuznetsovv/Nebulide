@@ -207,6 +207,10 @@ export default function Workspace() {
     setDragging(null);
 
     const { over } = event;
+    // Debug: log file tree drops to diagnose missing drop targets
+    if (dragId.startsWith('file:')) {
+      console.debug('[DnD drop]', { dragId, over: over ? String(over.id) : null });
+    }
     if (!over) return;
     const targetId = String(over.id);
 
