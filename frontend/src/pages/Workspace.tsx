@@ -138,6 +138,10 @@ export default function Workspace() {
   // DnD handlers
   const handleDragStart = useCallback((event: DragStartEvent) => {
     const dragId = String(event.active.id);
+
+    // Ignore drags from nested DndContext (FileTree file/folder DnD)
+    if (dragId.startsWith('file:') || dragId.startsWith('folder:')) return;
+
     setActiveDragId(dragId);
 
     // Editor tab drag from File Manager
@@ -149,13 +153,16 @@ export default function Workspace() {
   }, [setDragging, setDraggingEditorTab]);
 
   const handleDragEnd = useCallback((event: DragEndEvent) => {
+    const dragId = String(event.active.id);
+
+    // Ignore drags from nested DndContext (FileTree file/folder DnD)
+    if (dragId.startsWith('file:') || dragId.startsWith('folder:')) return;
+
     setActiveDragId(null);
     setDragging(null);
 
     const { active, over } = event;
     if (!over) return;
-
-    const dragId = String(active.id);
     const targetId = String(over.id);
 
     // === Editor tab dragged from File Manager ===
