@@ -183,7 +183,7 @@ export default function Workspace() {
 
   const mouseSensor = useSensor(MouseSensor, { activationConstraint: { distance: 8 } });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const touchSensor = useSensor(ScrollAwareTouchSensor as any, { delay: 700, tolerance: 10 });
+  const touchSensor = useSensor(ScrollAwareTouchSensor as any, { delay: 600, tolerance: 10 });
   const sensors = useSensors(mouseSensor, touchSensor);
 
   // DnD handlers

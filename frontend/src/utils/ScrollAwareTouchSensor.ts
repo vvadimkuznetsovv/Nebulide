@@ -2,13 +2,15 @@
  * Custom touch sensor for @dnd-kit that properly handles scroll vs drag on mobile.
  *
  * Interaction model:
- *   - Touch + move immediately → SCROLL (tolerance exceeded or container scrolls)
- *   - Touch + hold 700ms + move → DRAG (ready state, activate on any movement)
- *   - Touch + hold 1500ms → CONTEXT MENU (cancelPendingDrag cancels sensor)
+ *   - Touch + move immediately → SCROLL (manual JS scroll for touch-action:none elements)
+ *   - Touch + hold 600ms + move → DRAG (ready state, activate on any movement)
+ *   - Touch + hold 1200ms → CONTEXT MENU (cancelPendingDrag cancels sensor)
  *
  * Key design:
- *   - During delay: monitors scroll container. If it scrolls > 3px → cancel (it's a scroll)
- *   - After delay (ready=true): scroll events IGNORED. Movement = drag intent.
+ *   - Elements with touch-action:none: sensor manually scrolls their container.
+ *     Tolerance check detects scroll intent (no scroll listener — avoids self-cancel).
+ *   - Elements without touch-action:none (tabs): browser handles scroll natively.
+ *     findScrollParent returns null → no manual scroll, no scroll listener.
  *   - Exports cancelPendingDrag() so long-press context menu can cancel the sensor.
  */
 
@@ -25,7 +27,7 @@ function findScrollParent(el: HTMLElement | null): HTMLElement | null {
 
 let cancelCurrentSensor: (() => void) | null = null;
 
-const CONTEXT_MENU_MS = 1500; // must match useLongPress LONG_PRESS_MS
+const CONTEXT_MENU_MS = 1200; // must match useLongPress LONG_PRESS_MS
 
 function createProgressRing(x: number, y: number, delayMs: number): {
   el: HTMLElement;
@@ -92,6 +94,31 @@ function removeRing(el: HTMLElement | null) {
   setTimeout(() => el.remove(), 150);
 }
 
+/**
+ * Continue manual scrolling after sensor cancels (tolerance exceeded).
+ */
+function startContinuationScroll(lastY: number, scrollParent: HTMLElement | null) {
+  if (!scrollParent) return;
+  let prevY = lastY;
+
+  const onMove = (e: TouchEvent) => {
+    const t = e.touches[0];
+    if (!t) return;
+    scrollParent.scrollTop -= (t.clientY - prevY);
+    prevY = t.clientY;
+  };
+
+  const onEnd = () => {
+    document.removeEventListener('touchmove', onMove);
+    document.removeEventListener('touchend', onEnd);
+    document.removeEventListener('touchcancel', onEnd);
+  };
+
+  document.addEventListener('touchmove', onMove, { passive: true });
+  document.addEventListener('touchend', onEnd);
+  document.addEventListener('touchcancel', onEnd);
+}
+
 /** Cancel any pending (not yet activated) drag. */
 export function cancelPendingDrag() {
   cancelCurrentSensor?.();
@@ -134,7 +161,7 @@ export class ScrollAwareTouchSensor {
   constructor(props: SensorProps) {
     const { active, event, onStart, onCancel, onMove, onEnd, onAbort, options } = props;
     const sensorOpts = (options ?? {}) as SensorOptions;
-    const delay = sensorOpts.delay ?? 700;
+    const delay = sensorOpts.delay ?? 600;
     const tolerance = sensorOpts.tolerance ?? 10;
     const toleranceSq = tolerance * tolerance;
 
@@ -148,11 +175,15 @@ export class ScrollAwareTouchSensor {
 
     const initialX = touch.clientX;
     const initialY = touch.clientY;
+    let lastTouchY = initialY;
 
     const target = touchEvent.target as HTMLElement;
-    const scrollParent = findScrollParent(target);
-    const initialScrollTop = scrollParent?.scrollTop ?? 0;
-    const initialScrollLeft = scrollParent?.scrollLeft ?? 0;
+
+    // Check if the element has touch-action:none — if so, browser won't scroll
+    // natively and we need to manually scroll the container.
+    const touchAction = getComputedStyle(target).touchAction;
+    const needsManualScroll = touchAction === 'none';
+    const scrollParent = needsManualScroll ? findScrollParent(target) : null;
 
     let ready = false;
     let activated = false;
@@ -175,7 +206,6 @@ export class ScrollAwareTouchSensor {
       document.removeEventListener('touchmove', onTouchMove);
       document.removeEventListener('touchend', onTouchEnd);
       document.removeEventListener('touchcancel', onTouchCancel);
-      scrollParent?.removeEventListener('scroll', onScroll);
     };
 
     const cancel = () => {
@@ -189,26 +219,16 @@ export class ScrollAwareTouchSensor {
       if (!activated) cancel();
     };
 
-    const hasScrolled = () => {
-      if (!scrollParent) return false;
-      return Math.abs(scrollParent.scrollTop - initialScrollTop) > 3 ||
-             Math.abs(scrollParent.scrollLeft - initialScrollLeft) > 3;
-    };
-
-    const onScroll = () => {
-      // Only cancel on scroll DURING delay. After ready=true, movement = drag.
-      if (!activated && !ready && hasScrolled()) cancel();
-    };
-
     const onTouchMove = (e: TouchEvent) => {
       const t = e.touches[0];
       if (!t) return;
 
       if (activated) {
+        // Active drag — forward to @dnd-kit
         if (e.cancelable) e.preventDefault();
         onMove({ x: t.clientX, y: t.clientY });
       } else if (ready) {
-        // Ready state: ring filled → activate drag
+        // Ready state — activate DnD
         activated = true;
         cancelCurrentSensor = null;
         removeIndicator();
@@ -216,11 +236,20 @@ export class ScrollAwareTouchSensor {
         onStart({ x: initialX, y: initialY });
         onMove({ x: t.clientX, y: t.clientY });
       } else {
-        // Delay period — if finger moved too much, it's a scroll
-        const dx = t.clientX - initialX;
-        const dy = t.clientY - initialY;
-        if (dx * dx + dy * dy > toleranceSq) {
+        // Delay period — manual scroll if needed, check tolerance
+        if (needsManualScroll && scrollParent) {
+          const dy = t.clientY - lastTouchY;
+          lastTouchY = t.clientY;
+          scrollParent.scrollTop -= dy;
+        }
+
+        const totalDx = t.clientX - initialX;
+        const totalDy = t.clientY - initialY;
+        if (totalDx * totalDx + totalDy * totalDy > toleranceSq) {
           cancel();
+          if (needsManualScroll) {
+            startContinuationScroll(t.clientY, scrollParent);
+          }
         }
       }
     };
@@ -242,10 +271,6 @@ export class ScrollAwareTouchSensor {
 
     const timer = setTimeout(() => {
       if (done) return;
-      if (hasScrolled()) {
-        cancel();
-        return;
-      }
       ready = true;
       ring?.startPhase2();
     }, delay);
@@ -253,6 +278,7 @@ export class ScrollAwareTouchSensor {
     document.addEventListener('touchmove', onTouchMove, { passive: false });
     document.addEventListener('touchend', onTouchEnd);
     document.addEventListener('touchcancel', onTouchCancel);
-    scrollParent?.addEventListener('scroll', onScroll, { passive: true });
+    // No scroll listener for touch-action:none elements — manual scroll handles it.
+    // No scroll listener for tabs — findScrollParent returns null (no vertical overflow).
   }
 }
