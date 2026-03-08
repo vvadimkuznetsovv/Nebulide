@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback, useImperativeHandle, forwardRef, type ReactNode } from 'react';
-import { listFiles, readFile, deleteFile, writeFile, mkdirFile, renameFile, type FileEntry } from '../../api/files';
+import { listFiles, readFile, deleteFile, writeFile, mkdirFile, renameFile, sendToTelegram, type FileEntry } from '../../api/files';
 import FileTreeItem from './FileTreeItem';
 import ContextMenu, { type ContextMenuItem } from './ContextMenu';
 import { useLongPress } from '../../hooks/useLongPress';
 import toast from 'react-hot-toast';
+import { useAuthStore } from '../../store/authStore';
 
 interface FileTreeProps {
   rootPath?: string;
@@ -32,9 +33,10 @@ const ICONS = {
   edit: iconMulti('M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z'),
   move: iconMulti('M4 4v7a4 4 0 0 0 4 4h12', 'M15 10l5 5-5 5'),
   trash: iconMulti('M3 6h18', 'M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2'),
+  send: iconMulti('M22 2L11 13', 'M22 2l-7 20-4-9-9-4 20-7'),
 };
 
-function getMenuItems(target: FileEntry | null): ContextMenuItem[] {
+function getMenuItems(target: FileEntry | null, hasTelegram: boolean): ContextMenuItem[] {
   if (!target) {
     return [
       { label: 'New File', action: 'new-file', icon: ICONS.filePlus },
@@ -57,16 +59,21 @@ function getMenuItems(target: FileEntry | null): ContextMenuItem[] {
       { label: 'Delete', action: 'delete', danger: true, icon: ICONS.trash },
     ];
   }
-  return [
+  const items: ContextMenuItem[] = [
     { label: 'New File', action: 'new-file', icon: ICONS.filePlus },
     { label: 'New Folder', action: 'new-folder', icon: ICONS.folderPlus },
     { type: 'separator' },
     { label: 'Rename', action: 'rename', icon: ICONS.edit },
     { label: 'Move to...', action: 'move-to', icon: ICONS.move },
     { label: 'Open in New Tab', action: 'open-new-tab', icon: ICONS.externalLink },
-    { type: 'separator' },
-    { label: 'Delete', action: 'delete', danger: true, icon: ICONS.trash },
   ];
+  if (hasTelegram) {
+    items.push({ type: 'separator' });
+    items.push({ label: 'Send to Telegram', action: 'send-telegram', icon: ICONS.send });
+  }
+  items.push({ type: 'separator' });
+  items.push({ label: 'Delete', action: 'delete', danger: true, icon: ICONS.trash });
+  return items;
 }
 
 const EXPANDED_KEY = 'nebulide-expanded-folders';
@@ -96,6 +103,8 @@ function loadCurrentPath(): string | null {
 }
 
 const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree({ rootPath, onFileSelect, onFileDoubleClick, onFileOpenNewTab }, ref) {
+  const telegramId = useAuthStore(s => s.user?.telegram_id);
+  const hasTelegram = !!telegramId;
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [currentPath, setCurrentPath] = useState(rootPath || '');
   const [loading, setLoading] = useState(false);
@@ -297,6 +306,18 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree({ r
           listFiles(currentPath).then(({ data }) => {
             setMoveFolders((data.files || []).filter(f => f.is_dir && f.path !== target.path));
           });
+        }
+        break;
+      case 'send-telegram':
+        if (target && !target.is_dir) {
+          toast.promise(
+            sendToTelegram(target.path),
+            {
+              loading: 'Sending...',
+              success: 'Sent to Telegram',
+              error: (err) => err?.response?.data?.error || 'Failed to send',
+            }
+          );
         }
         break;
       case 'delete':
@@ -613,7 +634,7 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree({ r
         <ContextMenu
           x={contextMenu.x}
           y={contextMenu.y}
-          items={getMenuItems(contextMenu.target)}
+          items={getMenuItems(contextMenu.target, hasTelegram)}
           onAction={handleMenuAction}
           onClose={() => setContextMenu(null)}
         />
