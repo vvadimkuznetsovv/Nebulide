@@ -171,12 +171,7 @@ export default function EditorPanel() {
             onResize={handleFileTreeResize}
             className="editor-file-sidebar"
           >
-            {/* Stop native touchmove from reaching Monaco's document-level touch tracker
-               (prevents "UNKNOWN touch" console spam when scrolling file tree on mobile) */}
-            <div
-              className="h-full flex flex-col"
-              onTouchMoveCapture={(e) => e.nativeEvent.stopImmediatePropagation()}
-            >
+            <div className="h-full flex flex-col">
               {/* Toolbar: mode toggle + nav buttons */}
               <div
                 className="flex items-center gap-1 px-2 py-1 shrink-0 flex-wrap"
