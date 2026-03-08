@@ -44,6 +44,7 @@ export default function EditorPanel() {
   const activeTab = openTabs.find((t) => t.id === activeTabId) || null;
   const [fileMode, setFileMode] = useState<'tree' | 'search'>('tree');
   const [rootPath, setRootPath] = useState('');
+  const [activeFolder, setActiveFolder] = useState<'root' | 'uploads' | 'shared'>('root');
 
   // Folder icon = droppable target for "move to workspace root"
   const { setNodeRef: setRootDropRef, isOver: isOverRoot } = useDroppable({
@@ -164,8 +165,9 @@ export default function EditorPanel() {
                 <button
                   ref={setRootDropRef}
                   type="button"
-                  className={`editor-toggle-files${fileMode === 'tree' ? ' active' : ''}`}
+                  className={`editor-toggle-files${fileMode === 'tree' && activeFolder === 'root' ? ' active' : ''}`}
                   onClick={() => {
+                    setActiveFolder('root');
                     if (fileMode === 'tree') {
                       const root = fileTreeRef.current?.workspaceRoot;
                       if (root) fileTreeRef.current?.navigateTo(root);
@@ -195,7 +197,7 @@ export default function EditorPanel() {
                 <button
                   type="button"
                   className={`editor-toggle-files${fileMode === 'search' ? ' active' : ''}`}
-                  onClick={() => setFileMode('search')}
+                  onClick={() => { setFileMode('search'); }}
                   title="Search files"
                   style={{ padding: '3px 6px' }}
                 >
@@ -209,8 +211,9 @@ export default function EditorPanel() {
                 {/* Uploads (Telegram) */}
                 <button
                   type="button"
-                  className="editor-toggle-files"
+                  className={`editor-toggle-files${fileMode === 'tree' && activeFolder === 'uploads' ? ' active' : ''}`}
                   onClick={() => {
+                    setActiveFolder('uploads');
                     const root = fileTreeRef.current?.workspaceRoot;
                     if (root) { setFileMode('tree'); fileTreeRef.current?.navigateTo(root + '/uploads'); }
                   }}
@@ -227,8 +230,8 @@ export default function EditorPanel() {
                 {sharedDir && (
                   <button
                     type="button"
-                    className="editor-toggle-files"
-                    onClick={() => { setFileMode('tree'); fileTreeRef.current?.navigateTo(sharedDir); }}
+                    className={`editor-toggle-files${fileMode === 'tree' && activeFolder === 'shared' ? ' active' : ''}`}
+                    onClick={() => { setActiveFolder('shared'); setFileMode('tree'); fileTreeRef.current?.navigateTo(sharedDir); }}
                     title="Shared folder"
                     style={{ padding: '3px 6px' }}
                   >
