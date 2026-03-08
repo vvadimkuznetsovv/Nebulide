@@ -484,18 +484,6 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree({ r
       .catch(() => toast.error('Failed to rename'));
   };
 
-  const goUp = () => {
-    const root = rootPath || '';
-    if (!currentPath || currentPath === root) return;
-    const parent = currentPath.split('/').slice(0, -1).join('/');
-    if (parent.length >= root.length) {
-      setExpandedFolders(new Set());
-      setChildrenCache(new Map());
-      setCreatingInFolder(null);
-      loadFiles(parent);
-    }
-  };
-
   const handleRefresh = () => {
     // Keep expanded folders — only re-fetch data
     setChildrenCache(new Map());
@@ -536,8 +524,6 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree({ r
     refresh: handleRefresh,
     workspaceRoot,
   }));
-
-  const canGoUp = currentPath && currentPath !== (rootPath || '');
 
   // Guard: prevent blur from re-submitting after Enter/Escape in creation input
   const createSubmittedRef = useRef(false);
