@@ -2,7 +2,7 @@
  * Custom touch sensor for @dnd-kit that properly handles scroll vs drag on mobile.
  *
  * Interaction model:
- *   - Touch + move immediately → SCROLL (native, sensor cancels)
+ *   - Touch + move immediately → SCROLL (tolerance exceeded or container scrolls)
  *   - Touch + hold 700ms + move → DRAG (ready state, activate on any movement)
  *   - Touch + hold 1200ms → CONTEXT MENU (cancelPendingDrag cancels sensor)
  *
@@ -178,7 +178,7 @@ export class ScrollAwareTouchSensor {
       scrollParent?.removeEventListener('scroll', onScroll);
     };
 
-    const cancel = (_reason: string) => {
+    const cancel = () => {
       if (done) return;
       cleanup();
       onAbort?.(active);
@@ -186,7 +186,7 @@ export class ScrollAwareTouchSensor {
     };
 
     cancelCurrentSensor = () => {
-      if (!activated) cancel('external');
+      if (!activated) cancel();
     };
 
     const hasScrolled = () => {
@@ -197,7 +197,7 @@ export class ScrollAwareTouchSensor {
 
     const onScroll = () => {
       // Only cancel on scroll DURING delay. After ready=true, movement = drag.
-      if (!activated && !ready && hasScrolled()) cancel('scroll');
+      if (!activated && !ready && hasScrolled()) cancel();
     };
 
     const onTouchMove = (e: TouchEvent) => {
@@ -208,21 +208,19 @@ export class ScrollAwareTouchSensor {
         if (e.cancelable) e.preventDefault();
         onMove({ x: t.clientX, y: t.clientY });
       } else if (ready) {
+        // Ready state: ring filled → activate drag
         activated = true;
         cancelCurrentSensor = null;
         removeIndicator();
         if (e.cancelable) e.preventDefault();
-        try {
-          onStart({ x: initialX, y: initialY });
-        } catch {
-          // ignore
-        }
+        onStart({ x: initialX, y: initialY });
         onMove({ x: t.clientX, y: t.clientY });
       } else {
+        // Delay period — if finger moved too much, it's a scroll
         const dx = t.clientX - initialX;
         const dy = t.clientY - initialY;
         if (dx * dx + dy * dy > toleranceSq) {
-          cancel('tol');
+          cancel();
         }
       }
     };
@@ -239,13 +237,13 @@ export class ScrollAwareTouchSensor {
     };
 
     const onTouchCancel = () => {
-      cancel('touchcancel');
+      cancel();
     };
 
     const timer = setTimeout(() => {
       if (done) return;
       if (hasScrolled()) {
-        cancel('scroll-timer');
+        cancel();
         return;
       }
       ready = true;
