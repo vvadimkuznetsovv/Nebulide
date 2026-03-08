@@ -43,12 +43,14 @@ jobs:
             echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S chmod +x /etc/letsencrypt/renewal-hooks/deploy/reload-docker-nginx.sh
 
             # SSH login Telegram notifications (PAM — successful logins)
-            echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S install -m 700 -o root -g root /opt/nebulide/ssh-notify.sh /opt/nebulide/ssh-notify.sh
+            echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S chmod 700 /opt/nebulide/ssh-notify.sh
+            echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S chown root:root /opt/nebulide/ssh-notify.sh
             echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S bash -c 'grep -q ssh-notify /etc/pam.d/sshd || echo "session optional pam_exec.so /opt/nebulide/ssh-notify.sh" >> /etc/pam.d/sshd'
 
             # SSH failed login watcher (systemd service — monitors auth.log)
-            echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S install -m 700 -o root -g root /opt/nebulide/ssh-watcher.sh /opt/nebulide/ssh-watcher.sh
-            echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S install -m 644 -o root -g root /opt/nebulide/ssh-watcher.service /etc/systemd/system/ssh-watcher.service
+            echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S chmod 700 /opt/nebulide/ssh-watcher.sh
+            echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S chown root:root /opt/nebulide/ssh-watcher.sh
+            echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S cp /opt/nebulide/ssh-watcher.service /etc/systemd/system/ssh-watcher.service
             echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S systemctl daemon-reload
             echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S systemctl enable ssh-watcher.service
             echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S systemctl restart ssh-watcher.service
