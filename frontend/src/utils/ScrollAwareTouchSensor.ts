@@ -223,7 +223,8 @@ export class ScrollAwareTouchSensor {
     };
 
     const onScroll = () => {
-      if (!activated && hasScrolled()) cancel('scroll');
+      // Only cancel on scroll DURING delay. After ready=true, movement = drag.
+      if (!activated && !ready && hasScrolled()) cancel('scroll');
     };
 
     const onTouchMove = (e: TouchEvent) => {
