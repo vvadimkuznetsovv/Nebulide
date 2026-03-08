@@ -104,16 +104,11 @@ export default function FileTreeItem({
     stopPropagation: true,
   });
 
-  // Disable file tree DnD on touch-primary devices — scroll and drag conflict
-  // in a scrollable container. Mobile users use "Move to..." context menu instead.
-  const isTouchPrimary = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches;
-
-  // DnD: every item is draggable (desktop only, disabled on touch)
+  // DnD: every item is draggable (registers with outer Workspace DndContext)
   // NOTE: DON'T spread attributes — they apply CSS transform which clips inside overflow:auto
   const { listeners: dragListeners, setNodeRef: setDragRef, isDragging } = useDraggable({
     id: `file:${file.path}`,
     data: { file },
-    disabled: isTouchPrimary,
   });
 
   // DnD: all items are droppable — folders accept into themselves,

@@ -182,7 +182,7 @@ export default function Workspace() {
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
 
   const mouseSensor = useSensor(MouseSensor, { activationConstraint: { distance: 8 } });
-  const touchSensor = useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } });
+  const touchSensor = useSensor(TouchSensor, { activationConstraint: { delay: 500, tolerance: 3 } });
   const sensors = useSensors(mouseSensor, touchSensor);
 
   // DnD handlers
