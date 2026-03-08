@@ -183,6 +183,7 @@ export default function FileTreeItem({
         paddingRight: '8px',
         color: 'var(--text-primary)',
         WebkitTouchCallout: 'none',
+        touchAction: 'none',
         opacity: isDragging ? 0.3 : 1,
       }}
     >
