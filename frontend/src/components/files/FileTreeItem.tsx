@@ -2,6 +2,7 @@ import { useRef, useCallback } from 'react';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import type { FileEntry } from '../../api/files';
 import { useLongPress, mergeEventHandlers } from '../../hooks/useLongPress';
+import { cancelPendingDrag } from '../../utils/ScrollAwareTouchSensor';
 
 interface FileTreeItemProps {
   file: FileEntry;
@@ -99,16 +100,23 @@ export default function FileTreeItem({
   file, depth, isExpanded, isLoading, isSelected, isContextTarget,
   onClick, onDoubleClick, onContextMenu, isRenaming, onRenameSubmit, onRenameCancel,
 }: FileTreeItemProps) {
-  const { handlers: longPressHandlers, longPressedRef } = useLongPress({
-    onLongPress: (x, y) => onContextMenu(x, y, file),
-    stopPropagation: true,
-  });
-
   // DnD: every item is draggable (registers with outer Workspace DndContext)
   // NOTE: DON'T spread attributes — they apply CSS transform which clips inside overflow:auto
   const { listeners: dragListeners, setNodeRef: setDragRef, isDragging } = useDraggable({
     id: `file:${file.path}`,
     data: { file },
+  });
+
+  const isDraggingRef = useRef(false);
+  isDraggingRef.current = isDragging;
+
+  const { handlers: longPressHandlers, longPressedRef } = useLongPress({
+    onLongPress: (x, y) => {
+      cancelPendingDrag(); // Cancel "ready" drag sensor before opening menu
+      if (isDraggingRef.current) return; // Drag already active, skip menu
+      onContextMenu(x, y, file);
+    },
+    stopPropagation: true,
   });
 
   // DnD: all items are droppable — folders accept into themselves,

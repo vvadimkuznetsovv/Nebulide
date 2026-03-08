@@ -1,13 +1,16 @@
 /**
- * Custom touch sensor for @dnd-kit that detects scroll and cancels drag activation.
+ * Custom touch sensor for @dnd-kit that properly handles scroll vs drag on mobile.
  *
- * Problem: @dnd-kit's built-in TouchSensor only checks finger movement (clientX/Y).
- * When the user scrolls a list, the finger may pause briefly between swipes — the
- * sensor sees "finger didn't move" and activates drag after the delay, hijacking scroll.
+ * Interaction model:
+ *   - Touch and immediately move → SCROLL (finger moved during delay → cancel)
+ *   - Touch, hold 500ms, then move → DRAG (delay passed, movement = drag intent)
+ *   - Touch, hold 700ms without moving → CONTEXT MENU (long press fires, cancels sensor)
  *
- * Solution: also monitor the nearest scrollable ancestor's scrollTop/scrollLeft.
- * If the container scrolls during the delay period → cancel drag activation.
- * Only after the delay passes with NO scroll and NO finger movement → activate drag.
+ * Key difference from built-in TouchSensor:
+ *   1. Monitors scrollable container — if it scrolls during delay, cancel
+ *   2. After delay, enters "ready" state but does NOT call onStart yet
+ *   3. Only activates drag on MOVEMENT after the delay (prevents instant grab)
+ *   4. Exports cancelPendingDrag() so long-press context menu can cancel the sensor
  */
 
 function findScrollParent(el: HTMLElement | null): HTMLElement | null {
@@ -19,6 +22,15 @@ function findScrollParent(el: HTMLElement | null): HTMLElement | null {
     el = el.parentElement;
   }
   return null;
+}
+
+// Module-level: allows external code (e.g. long-press hook) to cancel a pending drag
+let cancelCurrentSensor: (() => void) | null = null;
+
+/** Cancel any pending (not yet activated) drag. Called from long-press context menu. */
+export function cancelPendingDrag() {
+  cancelCurrentSensor?.();
+  cancelCurrentSensor = null;
 }
 
 interface ScrollAwareTouchSensorOptions {
@@ -61,7 +73,6 @@ export class ScrollAwareTouchSensor {
       ) => {
         const { nativeEvent } = event;
         if (nativeEvent.touches.length > 1) return false;
-        // Return true = tell @dnd-kit to instantiate this sensor
         return true;
       },
     },
@@ -89,12 +100,14 @@ export class ScrollAwareTouchSensor {
     const initialScrollTop = scrollParent?.scrollTop ?? 0;
     const initialScrollLeft = scrollParent?.scrollLeft ?? 0;
 
-    let activated = false;
+    let ready = false;     // delay passed, waiting for movement
+    let activated = false; // drag actually started (onStart called)
     let done = false;
 
     const cleanup = () => {
       if (done) return;
       done = true;
+      cancelCurrentSensor = null;
       clearTimeout(timer);
       document.removeEventListener('touchmove', handleMove);
       document.removeEventListener('touchend', handleEnd);
@@ -109,7 +122,12 @@ export class ScrollAwareTouchSensor {
       onCancel();
     };
 
-    // If scrollable parent scrolls significantly during delay → not a drag, it's a scroll
+    // External cancel: only cancels if not yet activated (drag not started)
+    cancelCurrentSensor = () => {
+      if (!activated) abort();
+    };
+
+    // If scrollable parent scrolls significantly during delay → not a drag
     const handleScroll = () => {
       if (activated || !scrollParent) return;
       const dY = Math.abs(scrollParent.scrollTop - initialScrollTop);
@@ -122,8 +140,15 @@ export class ScrollAwareTouchSensor {
       if (!t) return;
 
       if (activated) {
-        // We own the gesture — prevent browser scroll, report move
+        // Drag is active — prevent scroll, report coordinates
         if (e.cancelable) e.preventDefault();
+        onMove({ x: t.clientX, y: t.clientY });
+      } else if (ready) {
+        // Delay passed, user moved → NOW activate drag
+        activated = true;
+        cancelCurrentSensor = null; // no longer cancellable externally
+        if (e.cancelable) e.preventDefault();
+        onStart({ x: initialX, y: initialY });
         onMove({ x: t.clientX, y: t.clientY });
       } else {
         // Still in delay period — check if finger moved beyond tolerance
@@ -163,8 +188,8 @@ export class ScrollAwareTouchSensor {
         }
       }
 
-      activated = true;
-      onStart({ x: initialX, y: initialY });
+      // Enter "ready" state — don't activate until user moves
+      ready = true;
     }, delay);
 
     // passive: false so we CAN preventDefault after activation
