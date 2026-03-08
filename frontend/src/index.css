@@ -1089,9 +1089,7 @@
     .sidebar-new-chat, .global-panel-bar, .drag-overlay-panel,
     .btn-accent, .btn-glass, .sidebar-footer-btn { -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); }
 
-    /* ---- Kill continuous animations on buttons/scrollbar — neon purple static only ---- */
-    /* scrollbarShimmer on body */
-    body { animation: none; }
+    /* ---- Kill continuous animations on buttons — neon purple static only ---- */
     /* glassShimmer on close buttons — bright white on mobile */
     .panel-tab-close {
       animation: none;
@@ -1124,9 +1122,6 @@
       border-color: rgba(var(--accent-rgb), 0.4);
       box-shadow: 0 0 6px rgba(var(--accent-rgb), 0.3);
     }
-    /* Scrollbar — static purple */
-    ::-webkit-scrollbar-thumb { background: rgba(var(--accent-rgb), 0.6); }
-
     /* Login card mobile */
     .login-card {
       padding: 36px 24px !important;
@@ -1177,15 +1172,10 @@
   font-weight: 400;
 }
 
-@keyframes scrollbarShimmer {
-  0%, 100% { --sb-color: rgba(var(--accent-rgb), 0.4); }
-  50% { --sb-color: rgba(var(--accent-rgb), 0.6); }
-}
-body { --sb-color: rgba(var(--accent-rgb), 0.5); animation: scrollbarShimmer 8s ease-in-out infinite; }
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--sb-color); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(var(--accent-light-rgb), 0.9); }
+::-webkit-scrollbar-thumb { background: rgba(var(--accent-rgb), 0.45); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(var(--accent-rgb), 0.7); }
 
   /* ==========================================
      PANEL MERGE TAB BAR — merged panels with tabs
