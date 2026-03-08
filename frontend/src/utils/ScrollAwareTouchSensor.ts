@@ -2,15 +2,16 @@
  * Custom touch sensor for @dnd-kit that properly handles scroll vs drag on mobile.
  *
  * Interaction model:
- *   - Touch and immediately move → SCROLL (finger moved during delay → cancel)
- *   - Touch, hold 500ms, then move → DRAG (delay passed, movement = drag intent)
- *   - Touch, hold 700ms without moving → CONTEXT MENU (long press fires, cancels sensor)
+ *   - Touch + move immediately → SCROLL (tolerance exceeded or container scrolls)
+ *   - Touch + hold 300ms + move → DRAG (ready state, activate on movement)
+ *   - Touch + hold 700ms → CONTEXT MENU (cancelPendingDrag cancels sensor)
  *
- * Key difference from built-in TouchSensor:
- *   1. Monitors scrollable container — if it scrolls during delay, cancel
- *   2. After delay, enters "ready" state but does NOT call onStart yet
- *   3. Only activates drag on MOVEMENT after the delay (prevents instant grab)
- *   4. Exports cancelPendingDrag() so long-press context menu can cancel the sensor
+ * Key differences from built-in TouchSensor:
+ *   1. Monitors scrollable container — if it scrolls during delay OR ready, cancel
+ *   2. After delay, enters "ready" state — does NOT call onStart yet
+ *   3. Skips first touchmove in ready state to let scroll detection catch up
+ *   4. Second touchmove + no scroll detected → activates drag
+ *   5. Exports cancelPendingDrag() so long-press can cancel the sensor
  */
 
 function findScrollParent(el: HTMLElement | null): HTMLElement | null {
@@ -24,10 +25,68 @@ function findScrollParent(el: HTMLElement | null): HTMLElement | null {
   return null;
 }
 
-// Module-level: allows external code (e.g. long-press hook) to cancel a pending drag
 let cancelCurrentSensor: (() => void) | null = null;
 
-/** Cancel any pending (not yet activated) drag. Called from long-press context menu. */
+const CONTEXT_MENU_MS = 700; // must match useLongPress LONG_PRESS_MS
+
+/** Creates a two-phase progress ring: purple (DnD) then white (context menu) */
+function createProgressRing(x: number, y: number, delayMs: number): {
+  el: HTMLElement;
+  startPhase2: () => void;
+} {
+  const size = 44;
+  const r = 17;
+  const circ = 2 * Math.PI * r;
+  const phase2Ms = CONTEXT_MENU_MS - delayMs; // time from DnD-ready to context menu
+  const rot = 'transform:rotate(-90deg);transform-origin:center';
+  const el = document.createElement('div');
+  el.style.cssText = `
+    position:fixed;z-index:99999;pointer-events:none;
+    left:${x - size / 2}px;top:${y - size / 2}px;
+    width:${size}px;height:${size}px;
+    transition:opacity 0.15s;
+  `;
+  el.innerHTML = `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+    <circle cx="${size / 2}" cy="${size / 2}" r="${r}"
+      fill="none" stroke="rgba(127,0,255,0.12)" stroke-width="2.5"/>
+    <circle id="phase1" cx="${size / 2}" cy="${size / 2}" r="${r}"
+      fill="none" stroke="rgba(127,0,255,0.85)" stroke-width="2.5"
+      stroke-linecap="round"
+      stroke-dasharray="${circ}" stroke-dashoffset="${circ}"
+      style="transition:stroke-dashoffset ${delayMs}ms linear;${rot}"/>
+    <circle id="phase2" cx="${size / 2}" cy="${size / 2}" r="${r}"
+      fill="none" stroke="rgba(255,255,255,0.9)" stroke-width="2.5"
+      stroke-linecap="round"
+      stroke-dasharray="${circ}" stroke-dashoffset="${circ}"
+      style="${rot}"/>
+  </svg>`;
+  document.body.appendChild(el);
+
+  // Start phase 1 animation (purple fills over delayMs)
+  requestAnimationFrame(() => {
+    const p1 = el.querySelector('#phase1') as SVGCircleElement | null;
+    if (p1) p1.style.strokeDashoffset = '0';
+  });
+
+  return {
+    el,
+    startPhase2() {
+      const p2 = el.querySelector('#phase2') as SVGCircleElement | null;
+      if (p2) {
+        p2.style.transition = `stroke-dashoffset ${phase2Ms}ms linear`;
+        requestAnimationFrame(() => { p2.style.strokeDashoffset = '0'; });
+      }
+    },
+  };
+}
+
+function removeIndicatorSmooth(el: HTMLElement | null) {
+  if (!el) return;
+  el.style.opacity = '0';
+  setTimeout(() => el.remove(), 150);
+}
+
+/** Cancel any pending (not yet activated) drag. */
 export function cancelPendingDrag() {
   cancelCurrentSensor?.();
   cancelCurrentSensor = null;
@@ -38,7 +97,6 @@ interface ScrollAwareTouchSensorOptions {
   tolerance?: number;
 }
 
-// Matches @dnd-kit v6.3.x SensorProps shape
 interface SensorProps {
   event: Event;
   active: string | number;
@@ -54,8 +112,6 @@ interface SensorProps {
 export class ScrollAwareTouchSensor {
   autoScrollEnabled = true;
 
-  // Required for iOS Safari: a non-passive touchmove listener on window
-  // ensures that dynamically added touchmove handlers can call preventDefault()
   static setup() {
     window.addEventListener('touchmove', noop, { capture: false, passive: false });
     return function teardown() {
@@ -80,7 +136,7 @@ export class ScrollAwareTouchSensor {
 
   constructor(props: SensorProps) {
     const { event, active, onStart, onCancel, onMove, onEnd, onAbort, options } = props;
-    const delay = options.delay ?? 500;
+    const delay = options.delay ?? 300;
     const tolerance = options.tolerance ?? 10;
     const toleranceSq = tolerance * tolerance;
 
@@ -100,14 +156,25 @@ export class ScrollAwareTouchSensor {
     const initialScrollTop = scrollParent?.scrollTop ?? 0;
     const initialScrollLeft = scrollParent?.scrollLeft ?? 0;
 
-    let ready = false;     // delay passed, waiting for movement
-    let activated = false; // drag actually started (onStart called)
+    let ready = false;
+    let activated = false;
     let done = false;
+    let firstMoveAfterReady = true;
+    let indicator: { el: HTMLElement; startPhase2: () => void } | null = null;
+
+    // Show progress ring immediately
+    indicator = createProgressRing(initialX, initialY, delay);
+
+    const removeIndicator = () => {
+      removeIndicatorSmooth(indicator?.el ?? null);
+      indicator = null;
+    };
 
     const cleanup = () => {
       if (done) return;
       done = true;
       cancelCurrentSensor = null;
+      removeIndicator();
       clearTimeout(timer);
       document.removeEventListener('touchmove', handleMove);
       document.removeEventListener('touchend', handleEnd);
@@ -122,17 +189,19 @@ export class ScrollAwareTouchSensor {
       onCancel();
     };
 
-    // External cancel: only cancels if not yet activated (drag not started)
     cancelCurrentSensor = () => {
       if (!activated) abort();
     };
 
-    // If scrollable parent scrolls significantly during delay → not a drag
-    const handleScroll = () => {
-      if (activated || !scrollParent) return;
+    const hasScrolled = () => {
+      if (!scrollParent) return false;
       const dY = Math.abs(scrollParent.scrollTop - initialScrollTop);
       const dX = Math.abs(scrollParent.scrollLeft - initialScrollLeft);
-      if (dY > 3 || dX > 3) abort();
+      return dY > 3 || dX > 3;
+    };
+
+    const handleScroll = () => {
+      if (!activated && hasScrolled()) abort();
     };
 
     const handleMove = (e: TouchEvent) => {
@@ -140,13 +209,24 @@ export class ScrollAwareTouchSensor {
       if (!t) return;
 
       if (activated) {
-        // Drag is active — prevent scroll, report coordinates
         if (e.cancelable) e.preventDefault();
         onMove({ x: t.clientX, y: t.clientY });
       } else if (ready) {
-        // Delay passed, user moved → NOW activate drag
+        if (firstMoveAfterReady) {
+          // Skip first touchmove — give scroll event time to fire
+          // DON'T preventDefault here — let browser scroll if it wants
+          firstMoveAfterReady = false;
+          return;
+        }
+        // Second+ move in ready state — check scroll one more time
+        if (hasScrolled()) {
+          abort();
+          return;
+        }
+        // No scroll detected → this is an intentional drag
         activated = true;
-        cancelCurrentSensor = null; // no longer cancellable externally
+        cancelCurrentSensor = null;
+        removeIndicator();
         if (e.cancelable) e.preventDefault();
         onStart({ x: initialX, y: initialY });
         onMove({ x: t.clientX, y: t.clientY });
@@ -177,22 +257,14 @@ export class ScrollAwareTouchSensor {
 
     const timer = setTimeout(() => {
       if (done) return;
-
-      // Double-check: did the container scroll during the delay?
-      if (scrollParent) {
-        const dY = Math.abs(scrollParent.scrollTop - initialScrollTop);
-        const dX = Math.abs(scrollParent.scrollLeft - initialScrollLeft);
-        if (dY > 2 || dX > 2) {
-          abort();
-          return;
-        }
+      if (hasScrolled()) {
+        abort();
+        return;
       }
-
-      // Enter "ready" state — don't activate until user moves
       ready = true;
+      indicator?.startPhase2();
     }, delay);
 
-    // passive: false so we CAN preventDefault after activation
     document.addEventListener('touchmove', handleMove, { passive: false });
     document.addEventListener('touchend', handleEnd);
     document.addEventListener('touchcancel', handleAbort);

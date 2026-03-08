@@ -112,8 +112,8 @@ export default function FileTreeItem({
 
   const { handlers: longPressHandlers, longPressedRef } = useLongPress({
     onLongPress: (x, y) => {
-      cancelPendingDrag(); // Cancel "ready" drag sensor before opening menu
-      if (isDraggingRef.current) return; // Drag already active, skip menu
+      if (isDraggingRef.current) return; // Drag active → skip context menu
+      cancelPendingDrag(); // Cancel ready-state sensor before opening menu
       onContextMenu(x, y, file);
     },
     stopPropagation: true,
