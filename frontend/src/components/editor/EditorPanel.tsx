@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { useDraggable } from '@dnd-kit/core';
 import { Panel, Group, Separator, usePanelRef, useGroupRef } from 'react-resizable-panels';
 import { useWorkspaceStore, isPreviewableFile, type EditorTab } from '../../store/workspaceStore';
 import { useLayoutStore } from '../../store/layoutStore';
-import FileTree from '../files/FileTree';
+import { useAuthStore } from '../../store/authStore';
+import FileTree, { type FileTreeHandle } from '../files/FileTree';
 import FileSearch from '../files/FileSearch';
 import CodeEditor from './CodeEditor';
 import ContextMenu from '../files/ContextMenu';
@@ -34,10 +35,12 @@ export default function EditorPanel() {
   } = useWorkspaceStore();
   const { showPanel } = useLayoutStore();
 
+  const sharedDir = useAuthStore((s) => s.user?.shared_dir);
   const isMobile = useSyncExternalStore(subscribeToMedia, getIsMobile);
   const fileTreePanelRef = usePanelRef();
   const editorCodePanelRef = usePanelRef();
   const groupRef = useGroupRef();
+  const fileTreeRef = useRef<FileTreeHandle>(null);
   const activeTab = openTabs.find((t) => t.id === activeTabId) || null;
   const [fileMode, setFileMode] = useState<'tree' | 'search'>('tree');
 
@@ -124,11 +127,12 @@ export default function EditorPanel() {
               className="h-full flex flex-col"
               onTouchMoveCapture={(e) => e.nativeEvent.stopImmediatePropagation()}
             >
-              {/* Mode toolbar: tree / search */}
+              {/* Toolbar: mode toggle + nav buttons */}
               <div
-                className="flex items-center gap-1 px-2 py-1 shrink-0"
+                className="flex items-center gap-1 px-2 py-1 shrink-0 flex-wrap"
                 style={{ borderBottom: '1px solid var(--glass-border)' }}
               >
+                {/* Mode: tree / search */}
                 <button
                   type="button"
                   className={`editor-toggle-files${fileMode === 'tree' ? ' active' : ''}`}
@@ -152,11 +156,79 @@ export default function EditorPanel() {
                     <line x1="21" y1="21" x2="16.65" y2="16.65" />
                   </svg>
                 </button>
+                {/* Separator */}
+                <div style={{ width: 1, height: 14, background: 'var(--glass-border)', margin: '0 2px' }} />
+                {/* Home */}
+                <button
+                  type="button"
+                  className="editor-toggle-files"
+                  onClick={() => {
+                    const root = fileTreeRef.current?.workspaceRoot;
+                    if (root) { setFileMode('tree'); fileTreeRef.current?.navigateTo(root); }
+                  }}
+                  title="Home (workspace root)"
+                  style={{ padding: '3px 6px' }}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                    <polyline points="9 22 9 12 15 12 15 22" />
+                  </svg>
+                </button>
+                {/* Uploads (Telegram) */}
+                <button
+                  type="button"
+                  className="editor-toggle-files"
+                  onClick={() => {
+                    const root = fileTreeRef.current?.workspaceRoot;
+                    if (root) { setFileMode('tree'); fileTreeRef.current?.navigateTo(root + '/uploads'); }
+                  }}
+                  title="Uploads (Telegram)"
+                  style={{ padding: '3px 6px' }}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                    <polyline points="17 8 12 3 7 8" />
+                    <line x1="12" y1="3" x2="12" y2="15" />
+                  </svg>
+                </button>
+                {/* Shared */}
+                {sharedDir && (
+                  <button
+                    type="button"
+                    className="editor-toggle-files"
+                    onClick={() => { setFileMode('tree'); fileTreeRef.current?.navigateTo(sharedDir); }}
+                    title="Shared folder"
+                    style={{ padding: '3px 6px' }}
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                      <circle cx="9" cy="7" r="4" />
+                      <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                      <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+                    </svg>
+                  </button>
+                )}
+                <div className="flex-1" />
+                {/* Refresh */}
+                <button
+                  type="button"
+                  className="editor-toggle-files"
+                  onClick={() => fileTreeRef.current?.refresh()}
+                  title="Refresh"
+                  style={{ padding: '3px 6px' }}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <polyline points="23 4 23 10 17 10" />
+                    <polyline points="1 20 1 14 7 14" />
+                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+                  </svg>
+                </button>
               </div>
 
               {/* Content: FileTree or FileSearch */}
               {fileMode === 'tree' ? (
                 <FileTree
+                  ref={fileTreeRef}
                   rootPath={activeSession?.working_directory}
                   onFileSelect={(path) => {
                     if (isPreviewableFile(path)) {

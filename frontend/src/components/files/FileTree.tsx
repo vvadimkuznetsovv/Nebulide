@@ -1,10 +1,9 @@
-import React, { useState, useEffect, useRef, type ReactNode } from 'react';
+import React, { useState, useEffect, useRef, useImperativeHandle, forwardRef, type ReactNode } from 'react';
 import { DndContext, DragOverlay, MouseSensor, useSensor, useSensors, useDroppable, type DragEndEvent, type DragStartEvent } from '@dnd-kit/core';
 import { listFiles, readFile, deleteFile, writeFile, mkdirFile, renameFile, type FileEntry } from '../../api/files';
 import FileTreeItem, { getFileIcon, getFileColor } from './FileTreeItem';
 import ContextMenu, { type ContextMenuItem } from './ContextMenu';
 import { useLongPress } from '../../hooks/useLongPress';
-import { useAuthStore } from '../../store/authStore';
 import toast from 'react-hot-toast';
 
 interface FileTreeProps {
@@ -12,6 +11,12 @@ interface FileTreeProps {
   onFileSelect: (path: string) => void;
   onFileDoubleClick?: (path: string) => void;
   onFileOpenNewTab?: (path: string) => void;
+}
+
+export interface FileTreeHandle {
+  navigateTo: (path: string) => void;
+  refresh: () => void;
+  workspaceRoot: string;
 }
 
 // Feather-style SVG icons (14×14)
@@ -88,8 +93,7 @@ function loadCurrentPath(): string | null {
   try { return localStorage.getItem(CURRENT_PATH_KEY); } catch { return null; }
 }
 
-export default function FileTree({ rootPath, onFileSelect, onFileDoubleClick, onFileOpenNewTab }: FileTreeProps) {
-  const sharedDir = useAuthStore((s) => s.user?.shared_dir);
+const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree({ rootPath, onFileSelect, onFileDoubleClick, onFileOpenNewTab }, ref) {
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [currentPath, setCurrentPath] = useState(rootPath || '');
   const [loading, setLoading] = useState(false);
@@ -521,6 +525,18 @@ export default function FileTree({ rootPath, onFileSelect, onFileDoubleClick, on
       .finally(() => setLoading(false));
   };
 
+  // Expose imperative handle for EditorPanel toolbar buttons
+  useImperativeHandle(ref, () => ({
+    navigateTo: (path: string) => {
+      setExpandedFolders(new Set());
+      setChildrenCache(new Map());
+      setCreatingInFolder(null);
+      loadFiles(path);
+    },
+    refresh: handleRefresh,
+    workspaceRoot,
+  }));
+
   const canGoUp = currentPath && currentPath !== (rootPath || '');
 
   // Guard: prevent blur from re-submitting after Enter/Escape in creation input
@@ -611,121 +627,29 @@ export default function FileTree({ rootPath, onFileSelect, onFileDoubleClick, on
       className="h-full flex flex-col"
       style={{ background: 'transparent' }}
     >
-      {/* Header */}
+      {/* Path breadcrumb */}
       <div
-        className="flex flex-col"
-        style={{ borderBottom: '1px solid var(--glass-border)' }}
+        className="flex items-center gap-1 px-3 py-1.5 text-xs shrink-0"
+        style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--glass-border)' }}
       >
-        {/* Path breadcrumb */}
-        <div
-          className="flex items-center gap-1 px-3 py-1.5 text-xs"
-          style={{ color: 'var(--text-secondary)' }}
+        {canGoUp && (
+          <button
+            type="button"
+            onClick={goUp}
+            className="hover:opacity-70 transition-opacity px-1 shrink-0"
+            title="Go up"
+          >
+            ..
+          </button>
+        )}
+        <span
+          className="flex-1 font-mono whitespace-nowrap"
+          ref={(el) => { if (el) requestAnimationFrame(() => { el.scrollLeft = el.scrollWidth; }); }}
+          style={{ overflowX: 'auto', scrollbarWidth: 'none' }}
+          title={currentPath}
         >
-          {canGoUp && (
-            <button
-              type="button"
-              onClick={goUp}
-              className="hover:opacity-70 transition-opacity px-1 shrink-0"
-              title="Go up"
-            >
-              ..
-            </button>
-          )}
-          <span
-            className="flex-1 font-mono whitespace-nowrap"
-            ref={(el) => { if (el) requestAnimationFrame(() => { el.scrollLeft = el.scrollWidth; }); }}
-            style={{ overflowX: 'auto', scrollbarWidth: 'none' }}
-            title={currentPath}
-          >
-            {currentPath.replace(/\\/g, '/')}
-          </span>
-        </div>
-        {/* Quick nav buttons */}
-        <div
-          className="flex items-center gap-1 px-2 pb-1.5 text-xs"
-          style={{ color: 'var(--text-secondary)' }}
-        >
-          {/* Home (workspace root) */}
-          <button
-            type="button"
-            onClick={() => {
-              if (workspaceRoot && currentPath !== workspaceRoot) {
-                setExpandedFolders(new Set());
-                setChildrenCache(new Map());
-                setCreatingInFolder(null);
-                loadFiles(workspaceRoot);
-              }
-            }}
-            className="hover:opacity-70 transition-opacity p-1 rounded"
-            title="Home (workspace root)"
-            style={{ color: (!workspaceRoot || currentPath === workspaceRoot) ? 'var(--accent-bright)' : undefined }}
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
-              stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-              <polyline points="9 22 9 12 15 12 15 22" />
-            </svg>
-          </button>
-          {/* Uploads (Telegram bot files) */}
-          <button
-            type="button"
-            onClick={() => {
-              const uploadsPath = (workspaceRoot || currentPath) + '/uploads';
-              setExpandedFolders(new Set());
-              setChildrenCache(new Map());
-              setCreatingInFolder(null);
-              loadFiles(uploadsPath);
-            }}
-            className="hover:opacity-70 transition-opacity p-1 rounded"
-            title="Uploads (Telegram bot files)"
-            style={{ color: currentPath.endsWith('/uploads') ? 'var(--accent-bright)' : undefined }}
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
-              stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-              <polyline points="17 8 12 3 7 8" />
-              <line x1="12" y1="3" x2="12" y2="15" />
-            </svg>
-          </button>
-          {/* Shared folder */}
-          {sharedDir && (
-            <button
-              type="button"
-              onClick={() => {
-                setExpandedFolders(new Set());
-                setChildrenCache(new Map());
-                setCreatingInFolder(null);
-                loadFiles(sharedDir);
-              }}
-              className="hover:opacity-70 transition-opacity p-1 rounded"
-              title="Shared folder"
-              style={{ color: currentPath === sharedDir ? 'var(--accent-bright)' : undefined }}
-            >
-              <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
-                stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-                <circle cx="9" cy="7" r="4" />
-                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-              </svg>
-            </button>
-          )}
-          <div className="flex-1" />
-          {/* Refresh */}
-          <button
-            type="button"
-            onClick={handleRefresh}
-            className="hover:opacity-70 transition-opacity p-1 rounded"
-            title="Refresh"
-          >
-            <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
-              stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="23 4 23 10 17 10" />
-              <polyline points="1 20 1 14 7 14" />
-              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-            </svg>
-          </button>
-        </div>
+          {currentPath.replace(/\\/g, '/')}
+        </span>
       </div>
 
       {/* File list with DnD */}
@@ -799,7 +723,9 @@ export default function FileTree({ rootPath, onFileSelect, onFileDoubleClick, on
       )}
     </div>
   );
-}
+});
+
+export default FileTree;
 
 /** Root-level drop zone — accepts file drops into current directory */
 function RootDropZone({
