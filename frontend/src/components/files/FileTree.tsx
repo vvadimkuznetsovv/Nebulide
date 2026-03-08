@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, type ReactNode } from 'react';
-import { DndContext, DragOverlay, MouseSensor, TouchSensor, useSensor, useSensors, useDroppable, type DragEndEvent, type DragStartEvent } from '@dnd-kit/core';
+import { DndContext, DragOverlay, MouseSensor, useSensor, useSensors, useDroppable, type DragEndEvent, type DragStartEvent } from '@dnd-kit/core';
 import { listFiles, readFile, deleteFile, writeFile, mkdirFile, renameFile, type FileEntry } from '../../api/files';
 import FileTreeItem, { getFileIcon, getFileColor } from './FileTreeItem';
 import ContextMenu, { type ContextMenuItem } from './ContextMenu';
@@ -104,11 +104,10 @@ export default function FileTree({ rootPath, onFileSelect, onFileDoubleClick, on
   const [loadingFolders, setLoadingFolders] = useState<Set<string>>(new Set());
   const [creatingInFolder, setCreatingInFolder] = useState<string | null>(null);
 
-  // DnD state
+  // DnD state — mouse only (touch DnD disabled, use context menu to move files on mobile)
   const [draggedFile, setDraggedFile] = useState<FileEntry | null>(null);
   const mouseSensor = useSensor(MouseSensor, { activationConstraint: { distance: 8 } });
-  const touchSensor = useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 3 } });
-  const sensors = useSensors(mouseSensor, touchSensor);
+  const sensors = useSensors(mouseSensor);
 
   const loadFiles = async (path?: string) => {
     setLoading(true);
@@ -682,7 +681,6 @@ export default function FileTree({ rootPath, onFileSelect, onFileDoubleClick, on
         <RootDropZone
           onContextMenu={handleEmptyContextMenu}
           longPressHandlers={emptyLongPressHandlers}
-          isDragging={!!draggedFile}
         >
           {loading ? (
             <div className="p-4 text-center text-sm" style={{ color: 'var(--text-secondary)' }}>
@@ -751,52 +749,15 @@ function RootDropZone({
   children,
   onContextMenu,
   longPressHandlers,
-  isDragging,
 }: {
   children: React.ReactNode;
   onContextMenu: (e: React.MouseEvent) => void;
   longPressHandlers: Record<string, unknown>;
-  isDragging: boolean;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: 'root-drop' });
-  const scrollRef = useRef<HTMLDivElement | null>(null);
-  const isDraggingRef = useRef(false);
-  isDraggingRef.current = isDragging;
-
-  // JS-based touch scroll: since file-tree-items have touch-action:none,
-  // the browser can't scroll natively. We handle scroll manually here.
-  // When drag is active, scrolling is suppressed so drag works cleanly.
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    let startX = 0, startY = 0;
-    let scrollStartX = 0, scrollStartY = 0;
-
-    const onTouchStart = (e: TouchEvent) => {
-      if (isDraggingRef.current) return;
-      startX = e.touches[0].clientX;
-      startY = e.touches[0].clientY;
-      scrollStartX = el.scrollLeft;
-      scrollStartY = el.scrollTop;
-    };
-    const onTouchMove = (e: TouchEvent) => {
-      if (isDraggingRef.current) return;
-      const dx = startX - e.touches[0].clientX;
-      const dy = startY - e.touches[0].clientY;
-      el.scrollTop = scrollStartY + dy;
-      el.scrollLeft = scrollStartX + dx;
-    };
-    el.addEventListener('touchstart', onTouchStart, { passive: true });
-    el.addEventListener('touchmove', onTouchMove, { passive: true });
-    return () => {
-      el.removeEventListener('touchstart', onTouchStart);
-      el.removeEventListener('touchmove', onTouchMove);
-    };
-  }, []);
-
   return (
     <div
-      ref={(el) => { setNodeRef(el); scrollRef.current = el; }}
+      ref={setNodeRef}
       className="flex-1 overflow-y-auto overflow-x-auto py-1 select-none"
       style={{
         WebkitTouchCallout: 'none',
