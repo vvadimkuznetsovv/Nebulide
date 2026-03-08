@@ -628,31 +628,6 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree({ r
       style={{ background: 'transparent' }}
       data-filetree-dnd=""
     >
-      {/* Path breadcrumb */}
-      <div
-        className="flex items-center gap-1 px-3 py-1.5 text-xs shrink-0"
-        style={{ color: 'var(--text-secondary)', borderBottom: '1px solid var(--glass-border)' }}
-      >
-        {canGoUp && (
-          <button
-            type="button"
-            onClick={goUp}
-            className="hover:opacity-70 transition-opacity px-1 shrink-0"
-            title="Go up"
-          >
-            ..
-          </button>
-        )}
-        <span
-          className="flex-1 font-mono whitespace-nowrap"
-          ref={(el) => { if (el) requestAnimationFrame(() => { el.scrollLeft = el.scrollWidth; }); }}
-          style={{ overflowX: 'auto', scrollbarWidth: 'none' }}
-          title={currentPath}
-        >
-          {currentPath.replace(/\\/g, '/')}
-        </span>
-      </div>
-
       {/* File list with DnD */}
       <DndContext
         sensors={sensors}

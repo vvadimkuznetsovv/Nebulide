@@ -136,8 +136,16 @@ export default function EditorPanel() {
                 <button
                   type="button"
                   className={`editor-toggle-files${fileMode === 'tree' ? ' active' : ''}`}
-                  onClick={() => setFileMode('tree')}
-                  title="File tree"
+                  onClick={() => {
+                    if (fileMode === 'tree') {
+                      // Already in tree mode → navigate to workspace root
+                      const root = fileTreeRef.current?.workspaceRoot;
+                      if (root) fileTreeRef.current?.navigateTo(root);
+                    } else {
+                      setFileMode('tree');
+                    }
+                  }}
+                  title={fileMode === 'tree' ? 'Go to workspace root' : 'File tree'}
                   style={{ padding: '3px 6px' }}
                 >
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -158,22 +166,6 @@ export default function EditorPanel() {
                 </button>
                 {/* Separator */}
                 <div style={{ width: 1, height: 14, background: 'var(--glass-border)', margin: '0 2px' }} />
-                {/* Home */}
-                <button
-                  type="button"
-                  className="editor-toggle-files"
-                  onClick={() => {
-                    const root = fileTreeRef.current?.workspaceRoot;
-                    if (root) { setFileMode('tree'); fileTreeRef.current?.navigateTo(root); }
-                  }}
-                  title="Home (workspace root)"
-                  style={{ padding: '3px 6px' }}
-                >
-                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
-                    <polyline points="9 22 9 12 15 12 15 22" />
-                  </svg>
-                </button>
                 {/* Uploads (Telegram) */}
                 <button
                   type="button"

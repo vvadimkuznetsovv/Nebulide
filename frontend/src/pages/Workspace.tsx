@@ -20,8 +20,8 @@ import {
 class PanelMouseSensor extends MouseSensor {
   static activators = [
     {
-      eventName: 'onPointerDown' as const,
-      handler: ({ nativeEvent }: React.PointerEvent) => {
+      eventName: 'onMouseDown' as const,
+      handler: ({ nativeEvent }: React.MouseEvent) => {
         if ((nativeEvent.target as Element).closest('[data-filetree-dnd]')) {
           return false;
         }
