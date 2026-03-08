@@ -109,6 +109,8 @@ func main() {
 		protected.PUT("/auth/telegram-id", authHandler.UpdateTelegramID)
 		protected.GET("/auth/theme", authHandler.GetTheme)
 		protected.PUT("/auth/theme", authHandler.UpdateTheme)
+		protected.GET("/auth/preferences", authHandler.GetPreferences)
+		protected.PUT("/auth/preferences", authHandler.UpdatePreferences)
 
 		// Sessions
 		protected.GET("/sessions", sessionsHandler.List)
@@ -149,6 +151,8 @@ func main() {
 		protected.DELETE("/files", filesHandler.Delete)
 		protected.POST("/files/mkdir", filesHandler.Mkdir)
 		protected.POST("/files/rename", filesHandler.Rename)
+		protected.POST("/files/copy", filesHandler.Copy)
+		protected.GET("/files/download", filesHandler.Download)
 		protected.GET("/files/search", filesHandler.SearchFiles)
 		protected.POST("/files/extract", filesHandler.Extract)
 	}

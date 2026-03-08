@@ -58,6 +58,17 @@ interface TermSession {
 
 const sessions = new Map<string, TermSession>();
 
+/** Check all active terminal instances for selected text */
+export function getAnyTerminalSelection(): string | null {
+  for (const sess of sessions.values()) {
+    if (sess.xterm) {
+      const sel = sess.xterm.getSelection();
+      if (sel) return sel;
+    }
+  }
+  return null;
+}
+
 const MAX_RECONNECT = 5;
 const RECONNECT_DELAY = 800;
 const RECONNECT_DELAY_BACKEND_DOWN = 3000; // longer delay when backend is unreachable

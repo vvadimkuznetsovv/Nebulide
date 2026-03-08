@@ -11,6 +11,7 @@ import {
   type DragStartEvent,
   type DragEndEvent,
   type Modifier,
+  type CollisionDetection,
 } from '@dnd-kit/core';
 import { useAuth } from '../hooks/useAuth';
 import { renameFile } from '../api/files';
@@ -19,10 +20,30 @@ import { findPanelNode, isDetachedEditor } from '../store/layoutUtils';
 import { useWorkspaceStore } from '../store/workspaceStore';
 import { useWorkspaceSessionStore } from '../store/workspaceSessionStore';
 import { useSyncWS } from '../hooks/useSyncWS';
+import LavaLamp from '../components/LavaLamp';
 import Sidebar from '../components/layout/Sidebar';
 import LayoutRenderer from '../components/layout/LayoutRenderer';
 import EdgeDropZone from '../components/layout/EdgeDropZone';
 import { panelIcons, getPanelIcon, getPanelTitle } from '../components/layout/PanelContent';
+
+// Custom collision detection: when dragging file tree items, prioritize
+// file tree drop targets (folder:/filezone:) over large panel zones (merge-/split-).
+// pointerWithin sorts by intersection ratio ascending — large panel zones have
+// smaller ratios and win over small file tree items. We override this for file drags.
+const fileTreeAwareCollision: CollisionDetection = (args) => {
+  const collisions = pointerWithin(args);
+  const dragId = args.active?.id ? String(args.active.id) : '';
+  if (dragId.startsWith('file:')) {
+    const ftCollisions = collisions.filter(
+      (c) => {
+        const id = String(c.id);
+        return id.startsWith('folder:') || id.startsWith('filezone:');
+      },
+    );
+    if (ftCollisions.length > 0) return ftCollisions;
+  }
+  return collisions;
+};
 
 // On touch, snap overlay center to finger — prevents offset jump
 const touchSnapCenter: Modifier = ({ activatorEvent, draggingNodeRect, overlayNodeRect, transform }) => {
@@ -95,6 +116,35 @@ export default function Workspace() {
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
   }, [saveCurrentSession]);
+
+  // Global Ctrl+Shift+C copy (capture phase, respects Developer Mode)
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (!e.ctrlKey || !e.shiftKey || e.key !== 'C') return;
+      if (useWorkspaceStore.getState().devMode) return; // Let DevTools open
+
+      e.preventDefault();
+      // Check text selection (works for Monaco, preview, etc.)
+      const textSel = document.getSelection()?.toString();
+      if (textSel) {
+        navigator.clipboard.writeText(textSel).then(() => {
+          import('react-hot-toast').then(m => m.default.success('Copied'));
+        });
+        return;
+      }
+      // Check terminal selection
+      import('../components/terminal/Terminal').then(m => {
+        const termSel = m.getAnyTerminalSelection?.();
+        if (termSel) {
+          navigator.clipboard.writeText(termSel).then(() => {
+            import('react-hot-toast').then(t => t.default.success('Copied'));
+          });
+        }
+      });
+    };
+    window.addEventListener('keydown', handler, true);
+    return () => window.removeEventListener('keydown', handler, true);
+  }, []);
 
   const {
     layout,
@@ -314,19 +364,10 @@ export default function Workspace() {
 
   return (
     <div className="h-full relative overflow-hidden">
-      {/* === Lava lamp background (6 blobs for desktop perf, mobile hides 5-6 too) === */}
-      <div className="lava-lamp">
-        <div className="lava-blob lava-blob-1" />
-        <div className="lava-blob lava-blob-2" />
-        <div className="lava-blob lava-blob-3" />
-        <div className="lava-blob lava-blob-4" />
-        <div className="lava-blob lava-blob-5" />
-        <div className="lava-blob lava-blob-6" />
-        <div className="lava-glow" />
-      </div>
+      <LavaLamp />
 
       {/* === UNIFIED LAYOUT — same on mobile and desktop === */}
-      <DndContext sensors={sensors} collisionDetection={pointerWithin} onDragStart={handleDragStart} onDragEnd={handleDragEnd} onDragCancel={handleDragCancel}>
+      <DndContext sensors={sensors} collisionDetection={fileTreeAwareCollision} onDragStart={handleDragStart} onDragEnd={handleDragEnd} onDragCancel={handleDragCancel}>
         <div className="flex flex-col h-full relative z-10 p-2 lg:p-4">
           {/* Edge drop zone — top */}
           <EdgeDropZone edge="top" />

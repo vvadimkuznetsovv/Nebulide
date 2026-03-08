@@ -37,3 +37,9 @@ export const getTheme = () =>
 
 export const updateTheme = (accentColor: string, blobsEnabled: boolean) =>
   api.put('/auth/theme', { accent_color: accentColor, blobs_enabled: blobsEnabled });
+
+export const getPreferences = () =>
+  api.get<Record<string, unknown>>('/auth/preferences');
+
+export const updatePreferences = (prefs: Record<string, unknown>) =>
+  api.put('/auth/preferences', prefs);

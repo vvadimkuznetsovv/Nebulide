@@ -10,7 +10,7 @@ export interface EditorTab {
 export interface PreviewTab {
   id: string;
   filePath: string;
-  type: 'pdf' | 'docx';
+  type: 'pdf' | 'docx' | 'image';
 }
 
 let tabCounter = 0;
@@ -18,17 +18,19 @@ function generateTabId(): string {
   return `tab-${++tabCounter}`;
 }
 
-const PREVIEW_EXTENSIONS = new Set(['.pdf', '.docx']);
+const IMAGE_EXTENSIONS = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp', '.ico']);
+const PREVIEW_EXTENSIONS = new Set(['.pdf', '.docx', ...IMAGE_EXTENSIONS]);
 
 export function isPreviewableFile(filePath: string): boolean {
   const ext = '.' + filePath.split('.').pop()?.toLowerCase();
   return PREVIEW_EXTENSIONS.has(ext);
 }
 
-function getDocumentType(filePath: string): 'pdf' | 'docx' | null {
-  const ext = filePath.split('.').pop()?.toLowerCase();
-  if (ext === 'pdf') return 'pdf';
-  if (ext === 'docx') return 'docx';
+function getDocumentType(filePath: string): 'pdf' | 'docx' | 'image' | null {
+  const ext = '.' + filePath.split('.').pop()?.toLowerCase();
+  if (ext === '.pdf') return 'pdf';
+  if (ext === '.docx') return 'docx';
+  if (IMAGE_EXTENSIONS.has(ext)) return 'image';
   return null;
 }
 
@@ -59,6 +61,15 @@ interface WorkspaceState {
   // Preview tab system (for documents)
   previewTabs: PreviewTab[];
   activePreviewTabId: string | null;
+
+  // File clipboard
+  clipboardFiles: string[];
+  setClipboardFiles: (files: string[]) => void;
+  clearClipboard: () => void;
+
+  // Developer mode
+  devMode: boolean;
+  setDevMode: (enabled: boolean) => void;
 
   // UI state
   sidebarOpen: boolean;
@@ -123,6 +134,14 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   previewFilePath: null,
   previewTabs: [],
   activePreviewTabId: null,
+  clipboardFiles: [],
+  setClipboardFiles: (files) => set({ clipboardFiles: files }),
+  clearClipboard: () => set({ clipboardFiles: [] }),
+  devMode: localStorage.getItem('nebulide-dev-mode') === 'true',
+  setDevMode: (enabled) => {
+    localStorage.setItem('nebulide-dev-mode', enabled ? 'true' : 'false');
+    set({ devMode: enabled });
+  },
   sidebarOpen: false,
   toolbarOpen: false,
 

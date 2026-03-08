@@ -2,6 +2,7 @@ import { useState, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { register } from '../api/auth';
 import toast from 'react-hot-toast';
+import LavaLamp from '../components/LavaLamp';
 
 function PillInput({ type = 'text', value, onChange, placeholder, autoFocus, ...rest }: React.InputHTMLAttributes<HTMLInputElement>) {
   const wrapRef = useRef<HTMLDivElement>(null);
@@ -9,8 +10,8 @@ function PillInput({ type = 'text', value, onChange, placeholder, autoFocus, ...
     const el = wrapRef.current;
     if (!el) return;
     if (on) {
-      el.style.borderColor = 'rgba(127,0,255,0.6)';
-      el.style.boxShadow = '0 0 0 4px rgba(127,0,255,0.12), 0 0 25px rgba(127,0,255,0.08), inset 0 2px 6px rgba(0,0,0,0.4)';
+      el.style.borderColor = 'rgba(var(--accent-rgb),0.6)';
+      el.style.boxShadow = '0 0 0 4px rgba(var(--accent-rgb),0.12), 0 0 25px rgba(var(--accent-rgb),0.08), inset 0 2px 6px rgba(0,0,0,0.4)';
       el.style.background = 'rgba(0,0,0,0.8)';
     } else {
       el.style.borderColor = 'rgba(255,255,255,0.25)';
@@ -91,15 +92,7 @@ export default function Register() {
   return (
     <div style={{ minHeight: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', position: 'relative', overflow: 'hidden' }}>
 
-      <div className="lava-lamp">
-        <div className="lava-blob lava-blob-1" />
-        <div className="lava-blob lava-blob-2" />
-        <div className="lava-blob lava-blob-3" />
-        <div className="lava-blob lava-blob-4" />
-        <div className="lava-blob lava-blob-5" />
-        <div className="lava-blob lava-blob-6" />
-        <div className="lava-glow" />
-      </div>
+      <LavaLamp />
 
       <div className="login-card glass-card" style={{
         position: 'relative', zIndex: 10, width: '100%', maxWidth: '460px',

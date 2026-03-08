@@ -59,7 +59,7 @@ function SidebarToggleBtn() {
       title={sidebarOpen ? 'Hide sidebar' : 'Show sidebar'}
       style={{
         color: sidebarOpen ? 'var(--accent-bright)' : undefined,
-        background: sidebarOpen ? 'rgba(127, 0, 255, 0.15)' : undefined,
+        background: sidebarOpen ? 'rgba(var(--accent-rgb), 0.15)' : undefined,
         flexShrink: 0,
       }}
     >

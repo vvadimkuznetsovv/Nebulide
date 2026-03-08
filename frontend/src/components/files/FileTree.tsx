@@ -1,22 +1,26 @@
 import React, { useState, useEffect, useRef, useCallback, useImperativeHandle, forwardRef, type ReactNode } from 'react';
-import { listFiles, readFile, deleteFile, writeFile, mkdirFile, renameFile, sendToTelegram, extractArchive, type FileEntry } from '../../api/files';
+import { listFiles, readFile, deleteFile, writeFile, mkdirFile, renameFile, sendToTelegram, extractArchive, copyFile, getDownloadUrl, type FileEntry } from '../../api/files';
 import FileTreeItem from './FileTreeItem';
 import ContextMenu, { type ContextMenuItem } from './ContextMenu';
 import { useLongPress } from '../../hooks/useLongPress';
 import toast from 'react-hot-toast';
 import { useAuthStore } from '../../store/authStore';
+import { useWorkspaceStore } from '../../store/workspaceStore';
 
 interface FileTreeProps {
   rootPath?: string;
   onFileSelect: (path: string) => void;
   onFileDoubleClick?: (path: string) => void;
   onFileOpenNewTab?: (path: string) => void;
+  onPathChange?: (path: string) => void;
 }
 
 export interface FileTreeHandle {
   navigateTo: (path: string) => void;
   refresh: () => void;
   workspaceRoot: string;
+  currentPath: string;
+  selectedPaths: Set<string>;
 }
 
 // Feather-style SVG icons (14×14)
@@ -35,17 +39,39 @@ const ICONS = {
   trash: iconMulti('M3 6h18', 'M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2'),
   send: iconMulti('M22 2L11 13', 'M22 2l-7 20-4-9-9-4 20-7'),
   extract: iconMulti('M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4', 'M7 10l5 5 5-5', 'M12 15V3'),
+  copy: iconMulti('M20 9h-9a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2z', 'M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1'),
+  paste: iconMulti('M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2', 'M15 2H9a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1z'),
+  download: iconMulti('M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4', 'M7 10l5 5 5-5', 'M12 15V3'),
 };
 
-function getMenuItems(target: FileEntry | null, hasTelegram: boolean): ContextMenuItem[] {
+function getMenuItems(target: FileEntry | null, hasTelegram: boolean, multiCount: number, hasClipboard: boolean): ContextMenuItem[] {
   if (!target) {
-    return [
+    const items: ContextMenuItem[] = [
       { label: 'New File', action: 'new-file', icon: ICONS.filePlus },
       { label: 'New Folder', action: 'new-folder', icon: ICONS.folderPlus },
     ];
+    if (hasClipboard) {
+      items.push({ type: 'separator' });
+      items.push({ label: 'Paste', action: 'paste', icon: ICONS.paste });
+    }
+    return items;
   }
+
+  // Multi-select context menu
+  if (multiCount > 1) {
+    const items: ContextMenuItem[] = [
+      { label: `Copy ${multiCount} items`, action: 'copy', icon: ICONS.copy },
+    ];
+    if (hasClipboard) {
+      items.push({ label: 'Paste', action: 'paste', icon: ICONS.paste });
+    }
+    items.push({ type: 'separator' });
+    items.push({ label: `Delete ${multiCount} items`, action: 'delete-multi', danger: true, icon: ICONS.trash });
+    return items;
+  }
+
   if (target.is_dir) {
-    return [
+    const items: ContextMenuItem[] = [
       { label: 'Open as Workspace', action: 'open-workspace', icon: ICONS.externalLink },
       { type: 'separator' },
       { label: 'New File Inside', action: 'new-file', icon: ICONS.filePlus },
@@ -54,27 +80,44 @@ function getMenuItems(target: FileEntry | null, hasTelegram: boolean): ContextMe
       { label: 'New File', action: 'new-file-parent', icon: ICONS.filePlus },
       { label: 'New Folder', action: 'new-folder-parent', icon: ICONS.folderPlus },
       { type: 'separator' },
-      { label: 'Rename', action: 'rename', icon: ICONS.edit },
-      { label: 'Move to...', action: 'move-to', icon: ICONS.move },
-      { type: 'separator' },
-      { label: 'Delete', action: 'delete', danger: true, icon: ICONS.trash },
+      { label: 'Copy', action: 'copy', icon: ICONS.copy },
     ];
+    if (hasClipboard) {
+      items.push({ label: 'Paste', action: 'paste', icon: ICONS.paste });
+    }
+    items.push({ type: 'separator' });
+    items.push({ label: 'Rename', action: 'rename', icon: ICONS.edit });
+    items.push({ label: 'Move to...', action: 'move-to', icon: ICONS.move });
+    items.push({ type: 'separator' });
+    items.push({ label: 'Download as ZIP', action: 'download', icon: ICONS.download });
+    if (hasTelegram) {
+      items.push({ label: 'Send to Telegram', action: 'send-telegram', icon: ICONS.send });
+    }
+    items.push({ type: 'separator' });
+    items.push({ label: 'Delete', action: 'delete', danger: true, icon: ICONS.trash });
+    return items;
   }
   const isArchive = /\.(zip|rar)$/i.test(target.name);
   const items: ContextMenuItem[] = [
     { label: 'New File', action: 'new-file', icon: ICONS.filePlus },
     { label: 'New Folder', action: 'new-folder', icon: ICONS.folderPlus },
     { type: 'separator' },
-    { label: 'Rename', action: 'rename', icon: ICONS.edit },
-    { label: 'Move to...', action: 'move-to', icon: ICONS.move },
-    { label: 'Open in New Tab', action: 'open-new-tab', icon: ICONS.externalLink },
+    { label: 'Copy', action: 'copy', icon: ICONS.copy },
   ];
+  if (hasClipboard) {
+    items.push({ label: 'Paste', action: 'paste', icon: ICONS.paste });
+  }
+  items.push({ type: 'separator' });
+  items.push({ label: 'Rename', action: 'rename', icon: ICONS.edit });
+  items.push({ label: 'Move to...', action: 'move-to', icon: ICONS.move });
+  items.push({ label: 'Open in New Tab', action: 'open-new-tab', icon: ICONS.externalLink });
   if (isArchive) {
     items.push({ type: 'separator' });
     items.push({ label: 'Extract Here', action: 'extract', icon: ICONS.extract });
   }
+  items.push({ type: 'separator' });
+  items.push({ label: 'Download', action: 'download', icon: ICONS.download });
   if (hasTelegram) {
-    items.push({ type: 'separator' });
     items.push({ label: 'Send to Telegram', action: 'send-telegram', icon: ICONS.send });
   }
   items.push({ type: 'separator' });
@@ -108,14 +151,16 @@ function loadCurrentPath(): string | null {
   try { return localStorage.getItem(CURRENT_PATH_KEY); } catch { return null; }
 }
 
-const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree({ rootPath, onFileSelect, onFileDoubleClick, onFileOpenNewTab }, ref) {
+const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree({ rootPath, onFileSelect, onFileDoubleClick, onFileOpenNewTab, onPathChange }, ref) {
   const telegramId = useAuthStore(s => s.user?.telegram_id);
   const hasTelegram = !!telegramId;
+  const { clipboardFiles, setClipboardFiles } = useWorkspaceStore();
   const [files, setFiles] = useState<FileEntry[]>([]);
   const [currentPath, setCurrentPath] = useState(rootPath || '');
   const [loading, setLoading] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; target: FileEntry | null } | null>(null);
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
+  const lastClickedPathRef = useRef<string | null>(null);
   const [creatingType, setCreatingType] = useState<'file' | 'folder' | null>(null);
   const [renamingFile, setRenamingFile] = useState<FileEntry | null>(null);
 
@@ -136,6 +181,7 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree({ r
       setFiles(data.files || []);
       setCurrentPath(data.path);
       saveCurrentPath(data.path);
+      onPathChange?.(data.path);
     } catch (err) {
       console.error('Failed to list files:', err);
     } finally {
@@ -214,8 +260,10 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree({ r
         setFiles(data.files || []);
         setCurrentPath(data.path);
         saveCurrentPath(data.path);
-        // Capture workspace root on first load (no explicit rootPath = workspace dir)
-        if (!workspaceRoot) setWorkspaceRoot(data.path);
+        onPathChange?.(data.path);
+        // Capture workspace root: if rootPath prop is set, it's the real workspace root
+        if (rootPath) setWorkspaceRoot(data.path);
+        else if (!workspaceRoot) setWorkspaceRoot(data.path);
         // Fetch children for each expanded folder in parallel
         if (saved.size > 0) {
           const fetches = [...saved].map((fp) =>
@@ -245,16 +293,73 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree({ r
       .finally(() => setLoading(false));
   }, [rootPath]);
 
-  const handleClick = (file: FileEntry) => {
-    setSelectedPath(file.path);
+  // Flatten visible tree for Shift+click range selection
+  const getAllVisibleItems = useCallback((): FileEntry[] => {
+    const result: FileEntry[] = [];
+    const collect = (items: FileEntry[]) => {
+      const sorted = [...items].sort((a, b) => {
+        if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1;
+        return a.name.localeCompare(b.name);
+      });
+      for (const f of sorted) {
+        result.push(f);
+        if (f.is_dir && expandedFolders.has(f.path) && childrenCache.has(f.path)) {
+          collect(childrenCache.get(f.path)!);
+        }
+      }
+    };
+    collect(files);
+    return result;
+  }, [files, expandedFolders, childrenCache]);
+
+  const handleClick = (file: FileEntry, e?: React.MouseEvent) => {
     if (file.is_dir) {
       toggleFolder(file.path);
+      // Ctrl+click: toggle folder in selection
+      if (e && (e.ctrlKey || e.metaKey)) {
+        setSelectedPaths(prev => {
+          const next = new Set(prev);
+          next.has(file.path) ? next.delete(file.path) : next.add(file.path);
+          return next;
+        });
+      } else if (!e?.shiftKey) {
+        setSelectedPaths(new Set([file.path]));
+      }
+      lastClickedPathRef.current = file.path;
+      return;
+    }
+
+    if (e && (e.ctrlKey || e.metaKey)) {
+      // Toggle individual selection
+      setSelectedPaths(prev => {
+        const next = new Set(prev);
+        next.has(file.path) ? next.delete(file.path) : next.add(file.path);
+        return next;
+      });
+      lastClickedPathRef.current = file.path;
+    } else if (e?.shiftKey && lastClickedPathRef.current) {
+      // Range selection
+      const all = getAllVisibleItems();
+      const lastIdx = all.findIndex(f => f.path === lastClickedPathRef.current);
+      const curIdx = all.findIndex(f => f.path === file.path);
+      if (lastIdx !== -1 && curIdx !== -1) {
+        const [start, end] = lastIdx < curIdx ? [lastIdx, curIdx] : [curIdx, lastIdx];
+        const range = new Set(all.slice(start, end + 1).map(f => f.path));
+        setSelectedPaths(range);
+      }
     } else {
+      // Regular click: single selection + open file
+      setSelectedPaths(new Set([file.path]));
+      lastClickedPathRef.current = file.path;
       onFileSelect(file.path);
     }
   };
 
   const handleItemContextMenu = (x: number, y: number, file: FileEntry) => {
+    // If right-clicking on an item NOT in current selection, select only that item
+    if (!selectedPaths.has(file.path)) {
+      setSelectedPaths(new Set([file.path]));
+    }
     setContextMenu({ x, y, target: file });
   };
 
@@ -328,15 +433,25 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree({ r
         }
         break;
       case 'send-telegram':
-        if (target && !target.is_dir) {
+        if (target) {
           toast.promise(
             sendToTelegram(target.path),
             {
-              loading: 'Sending...',
+              loading: target.is_dir ? 'Archiving & sending...' : 'Sending...',
               success: 'Sent to Telegram',
-              error: (err) => err?.response?.data?.error || 'Failed to send',
+              error: (err: { response?: { data?: { error?: string } } }) => err?.response?.data?.error || 'Failed to send',
             }
           );
+        }
+        break;
+      case 'download':
+        if (target) {
+          const a = document.createElement('a');
+          a.href = getDownloadUrl(target.path);
+          a.download = '';
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
         }
         break;
       case 'delete':
@@ -414,6 +529,61 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree({ r
           }
         }
         break;
+      case 'copy':
+        if (target) {
+          const paths = selectedPaths.has(target.path) && selectedPaths.size > 1
+            ? [...selectedPaths] : [target.path];
+          setClipboardFiles(paths);
+          toast.success(`${paths.length} item(s) copied`);
+        }
+        break;
+      case 'paste':
+        if (clipboardFiles.length > 0) {
+          const destFolder = target?.is_dir ? target.path : currentPath;
+          pasteFiles(clipboardFiles, destFolder);
+        }
+        break;
+      case 'delete-multi':
+        if (selectedPaths.size > 1) {
+          if (!window.confirm(`Delete ${selectedPaths.size} items?\nThis cannot be undone.`)) break;
+          Promise.all([...selectedPaths].map(p => deleteFile(p)))
+            .then(() => {
+              toast.success(`${selectedPaths.size} items deleted`);
+              setSelectedPaths(new Set());
+              refreshFolder(currentPath);
+            })
+            .catch(() => toast.error('Failed to delete some items'));
+        }
+        break;
+    }
+  };
+
+  const pasteFiles = async (sources: string[], destFolder: string) => {
+    let count = 0;
+    for (const src of sources) {
+      const fileName = src.split(/[/\\]/).pop() || '';
+      const baseName = fileName.replace(/\.[^.]+$/, '');
+      const ext = fileName.includes('.') ? '.' + fileName.split('.').pop() : '';
+      const destPath = destFolder + '/' + fileName;
+      try {
+        await copyFile(src, destPath);
+        count++;
+      } catch (err: unknown) {
+        const axErr = err as { response?: { status?: number } };
+        if (axErr.response?.status === 409) {
+          // Name conflict — retry with suffix
+          try {
+            await copyFile(src, destFolder + '/' + baseName + ' (copy)' + ext);
+            count++;
+          } catch { toast.error(`Failed to paste ${fileName}`); }
+        } else {
+          toast.error(`Failed to paste ${fileName}`);
+        }
+      }
+    }
+    if (count > 0) {
+      toast.success(`Pasted ${count} item(s)`);
+      refreshFolder(destFolder);
     }
   };
 
@@ -522,6 +692,8 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree({ r
     },
     refresh: handleRefresh,
     workspaceRoot,
+    currentPath,
+    selectedPaths,
   }));
 
   // Listen for external refresh events (e.g. after DnD file move in Workspace)
@@ -595,9 +767,9 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree({ r
           depth={depth}
           isExpanded={expandedFolders.has(file.path)}
           isLoading={loadingFolders.has(file.path)}
-          isSelected={selectedPath === file.path}
+          isSelected={selectedPaths.has(file.path)}
           isContextTarget={contextMenu?.target?.path === file.path}
-          onClick={() => handleClick(file)}
+          onClick={(e) => handleClick(file, e)}
           onDoubleClick={!file.is_dir && onFileDoubleClick ? () => onFileDoubleClick(file.path) : undefined}
           onContextMenu={handleItemContextMenu}
           isRenaming={renamingFile?.path === file.path}
@@ -616,10 +788,54 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree({ r
     ));
   };
 
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.ctrlKey || e.metaKey) {
+      if (e.key === 'c') {
+        if (selectedPaths.size > 0) {
+          e.preventDefault();
+          setClipboardFiles([...selectedPaths]);
+          toast.success(`${selectedPaths.size} item(s) copied`);
+        }
+      } else if (e.key === 'v') {
+        if (clipboardFiles.length > 0) {
+          e.preventDefault();
+          pasteFiles(clipboardFiles, currentPath);
+        }
+      } else if (e.key === 'a') {
+        e.preventDefault();
+        const all = getAllVisibleItems();
+        setSelectedPaths(new Set(all.map(f => f.path)));
+      }
+    }
+    if (e.key === 'Delete' && selectedPaths.size > 0) {
+      e.preventDefault();
+      if (selectedPaths.size === 1) {
+        const path = [...selectedPaths][0];
+        const target = getAllVisibleItems().find(f => f.path === path);
+        if (target) {
+          handleMenuAction('delete');
+          // Re-open context with this target for the delete handler
+        }
+      } else {
+        if (!window.confirm(`Delete ${selectedPaths.size} items?\nThis cannot be undone.`)) return;
+        Promise.all([...selectedPaths].map(p => deleteFile(p)))
+          .then(() => {
+            toast.success(`${selectedPaths.size} items deleted`);
+            setSelectedPaths(new Set());
+            refreshFolder(currentPath);
+          })
+          .catch(() => toast.error('Failed to delete some items'));
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedPaths, clipboardFiles, currentPath]);
+
   return (
     <div
       className="h-full flex flex-col"
       style={{ background: 'transparent' }}
+      tabIndex={0}
+      onKeyDown={handleKeyDown}
     >
       {/* File list */}
       <div
@@ -653,7 +869,12 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree({ r
         <ContextMenu
           x={contextMenu.x}
           y={contextMenu.y}
-          items={getMenuItems(contextMenu.target, hasTelegram)}
+          items={getMenuItems(
+            contextMenu.target,
+            hasTelegram,
+            contextMenu.target && selectedPaths.has(contextMenu.target.path) ? selectedPaths.size : 0,
+            clipboardFiles.length > 0,
+          )}
           onAction={handleMenuAction}
           onClose={() => setContextMenu(null)}
         />
@@ -686,7 +907,7 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree({ r
             style={{
               color: 'var(--accent-bright)',
               borderBottom: '1px solid var(--glass-border)',
-              background: 'rgba(127,0,255,0.08)',
+              background: 'rgba(var(--accent-rgb),0.08)',
             }}
             onClick={() => {
               const fileName = movingFile.name;

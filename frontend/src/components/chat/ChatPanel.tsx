@@ -159,7 +159,7 @@ export default function ChatPanel(_props: ChatPanelProps) {
             padding: '8px 20px',
             borderRadius: 8,
             border: '1px solid var(--glass-border)',
-            background: 'rgba(127,0,255,0.1)',
+            background: 'rgba(var(--accent-rgb),0.1)',
             color: 'var(--text-secondary)',
             fontSize: 13,
             cursor: 'pointer',

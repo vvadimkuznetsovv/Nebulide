@@ -64,6 +64,18 @@ export const extractArchive = (path: string) =>
 export const sendToTelegram = (filePath: string) =>
   api.post('/telegram/send', { file_path: filePath });
 
+// Copy file or directory
+export const copyFile = (source: string, destination: string) =>
+  api.post('/files/copy', { source, destination });
+
+// Build download URL (triggers browser download, auto-zips folders)
+export function getDownloadUrl(path: string): string {
+  const token = localStorage.getItem('access_token');
+  const params = new URLSearchParams({ path });
+  if (token) params.set('token', token);
+  return `/api/files/download?${params.toString()}`;
+}
+
 // Build URL for raw binary file serving (PDF iframe, etc.)
 export function getRawFileUrl(path: string): string {
   const token = localStorage.getItem('access_token');

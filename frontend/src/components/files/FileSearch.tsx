@@ -103,7 +103,7 @@ export default function FileSearch({ onFileSelect }: FileSearchProps) {
             type="button"
             className="shrink-0 text-[10px] font-mono px-1.5 py-1 rounded"
             style={{
-              background: 'rgba(127, 0, 255, 0.15)',
+              background: 'rgba(var(--accent-rgb), 0.15)',
               border: '1px solid var(--glass-border)',
               color: 'var(--text-secondary)',
             }}
@@ -117,7 +117,7 @@ export default function FileSearch({ onFileSelect }: FileSearchProps) {
             type="button"
             className="shrink-0 text-[10px] font-mono px-1.5 py-1 rounded"
             style={{
-              background: showFilters ? 'rgba(127, 0, 255, 0.25)' : 'rgba(127, 0, 255, 0.1)',
+              background: showFilters ? 'rgba(var(--accent-rgb), 0.25)' : 'rgba(var(--accent-rgb), 0.1)',
               border: '1px solid var(--glass-border)',
               color: 'var(--text-secondary)',
             }}

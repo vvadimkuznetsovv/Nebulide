@@ -1,3 +1,4 @@
+import { useSyncExternalStore } from 'react';
 import { getTheme, updateTheme } from '../api/auth';
 
 const ACCENT_KEY = 'nebulide-accent-color';
@@ -31,20 +32,51 @@ function lighten(hex: string, amount: number): string {
   return `rgb(${Math.round(lr)}, ${Math.round(lg)}, ${Math.round(lb)})`;
 }
 
+function lightenRgb(hex: string, amount: number): [number, number, number] {
+  const [r, g, b] = hexToRgb(hex);
+  return [
+    Math.min(255, Math.round(r + (255 - r) * amount)),
+    Math.min(255, Math.round(g + (255 - g) * amount)),
+    Math.min(255, Math.round(b + (255 - b) * amount)),
+  ];
+}
+
 export function applyAccentColor(hex: string) {
   const [r, g, b] = hexToRgb(hex);
   const root = document.documentElement;
+
   root.style.setProperty('--accent', hex);
+  root.style.setProperty('--accent-rgb', `${r}, ${g}, ${b}`);
   root.style.setProperty('--accent-bright', lighten(hex, 0.3));
+
+  // Derived hues for borders, shadows, glows
+  const [lr, lg, lb] = lightenRgb(hex, 0.4);
+  root.style.setProperty('--accent-light-rgb', `${lr}, ${lg}, ${lb}`);
+
+  const [mr, mg, mb] = lightenRgb(hex, 0.1);
+  root.style.setProperty('--accent-mid-rgb', `${mr}, ${mg}, ${mb}`);
+
+  const [br, bg2, bb] = lightenRgb(hex, 0.25);
+  root.style.setProperty('--accent-bright-rgb', `${br}, ${bg2}, ${bb}`);
+
   root.style.setProperty('--accent-glow', `rgba(${r}, ${g}, ${b}, 0.4)`);
   root.style.setProperty('--accent-soft', `rgba(${r}, ${g}, ${b}, 0.15)`);
   localStorage.setItem(ACCENT_KEY, hex);
 }
 
+// --- Blobs reactive state ---
+const blobListeners = new Set<() => void>();
+
+export function useBlobsEnabled(): boolean {
+  return useSyncExternalStore(
+    (cb) => { blobListeners.add(cb); return () => { blobListeners.delete(cb); }; },
+    () => { const v = localStorage.getItem(BLOBS_KEY); return v === null ? true : v === 'true'; },
+  );
+}
+
 export function applyBlobsEnabled(enabled: boolean) {
-  const el = document.querySelector('.lava-lamp') as HTMLElement | null;
-  if (el) el.style.display = enabled ? '' : 'none';
   localStorage.setItem(BLOBS_KEY, String(enabled));
+  blobListeners.forEach(cb => cb());
 }
 
 export function getAccentColor(): string {
@@ -59,10 +91,7 @@ export function getBlobsEnabled(): boolean {
 /** Call once on app startup — applies cached theme from localStorage */
 export function loadTheme() {
   const accent = getAccentColor();
-  if (accent !== DEFAULT_ACCENT) applyAccentColor(accent);
-  if (!getBlobsEnabled()) {
-    requestAnimationFrame(() => applyBlobsEnabled(false));
-  }
+  applyAccentColor(accent);
 }
 
 /** Fetch theme from server and apply (call after login / auth restore) */

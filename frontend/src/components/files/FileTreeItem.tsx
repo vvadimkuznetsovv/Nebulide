@@ -10,7 +10,7 @@ interface FileTreeItemProps {
   isLoading?: boolean;
   isSelected?: boolean;
   isContextTarget?: boolean;
-  onClick: () => void;
+  onClick: (e?: React.MouseEvent) => void;
   onDoubleClick?: () => void;
   onContextMenu: (x: number, y: number, file: FileEntry) => void;
   isRenaming?: boolean;
@@ -40,6 +40,14 @@ export const FILE_ICONS: Record<string, string> = {
   '.pdf': 'PD',
   '.docx': 'DX',
   '.doc': 'WD',
+  '.jpg': 'IM',
+  '.jpeg': 'IM',
+  '.png': 'IM',
+  '.gif': 'GF',
+  '.webp': 'WP',
+  '.svg': 'SV',
+  '.bmp': 'BM',
+  '.ico': 'IC',
 };
 
 export const FILE_COLORS: Record<string, string> = {
@@ -57,6 +65,14 @@ export const FILE_COLORS: Record<string, string> = {
   '.pdf': '#ef4444',
   '.docx': '#2563eb',
   '.doc': '#2563eb',
+  '.jpg': '#10b981',
+  '.jpeg': '#10b981',
+  '.png': '#10b981',
+  '.gif': '#10b981',
+  '.webp': '#10b981',
+  '.svg': '#f59e0b',
+  '.bmp': '#10b981',
+  '.ico': '#6b7280',
 };
 
 export function getFileIcon(file: FileEntry): string {
@@ -127,7 +143,7 @@ export default function FileTreeItem({
     onContextMenu(e.clientX, e.clientY, file);
   };
 
-  const handleClick = () => {
+  const handleClick = (e?: React.MouseEvent) => {
     if (longPressedRef.current) { longPressedRef.current = false; return; }
 
     // Check for double-tap (mobile) — for files only
@@ -142,14 +158,14 @@ export default function FileTreeItem({
       lastTapRef.current = { path: file.path, time: now };
     }
 
-    onClick();
+    onClick(e);
   };
 
   return (
     <button
       ref={setRef}
       type="button"
-      onClick={isRenaming ? undefined : handleClick}
+      onClick={isRenaming ? undefined : (e) => handleClick(e)}
       onDoubleClick={isRenaming || file.is_dir ? undefined : () => onDoubleClick?.()}
       onContextMenu={handleContextMenu}
       {...mergedHandlers}

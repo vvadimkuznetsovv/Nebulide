@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import { login, totpVerify } from '../api/auth';
 import { useAuthStore } from '../store/authStore';
 import toast from 'react-hot-toast';
+import LavaLamp from '../components/LavaLamp';
 
 function EyeIcon({ open }: { open: boolean }) {
   if (open) {
@@ -27,8 +28,8 @@ function PillInput({ type = 'text', value, onChange, placeholder, autoFocus, end
     const el = wrapRef.current;
     if (!el) return;
     if (on) {
-      el.style.borderColor = 'rgba(127,0,255,0.6)';
-      el.style.boxShadow = '0 0 0 4px rgba(127,0,255,0.12), 0 0 25px rgba(127,0,255,0.08), inset 0 2px 6px rgba(0,0,0,0.4)';
+      el.style.borderColor = 'rgba(var(--accent-rgb),0.6)';
+      el.style.boxShadow = '0 0 0 4px rgba(var(--accent-rgb),0.12), 0 0 25px rgba(var(--accent-rgb),0.08), inset 0 2px 6px rgba(0,0,0,0.4)';
       el.style.background = 'rgba(0,0,0,0.8)';
     } else {
       el.style.borderColor = 'rgba(255,255,255,0.25)';
@@ -110,16 +111,7 @@ export default function Login() {
   return (
     <div style={{ minHeight: '100dvh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', position: 'relative', overflow: 'hidden' }}>
 
-      {/* LAVA LAMP — 6 blobs (perf-optimized) */}
-      <div className="lava-lamp">
-        <div className="lava-blob lava-blob-1" />
-        <div className="lava-blob lava-blob-2" />
-        <div className="lava-blob lava-blob-3" />
-        <div className="lava-blob lava-blob-4" />
-        <div className="lava-blob lava-blob-5" />
-        <div className="lava-blob lava-blob-6" />
-        <div className="lava-glow" />
-      </div>
+      <LavaLamp />
 
       {/* LIQUID GLASS CARD — uses real glass distortion */}
       <div className="login-card glass-card" style={{

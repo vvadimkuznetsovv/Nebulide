@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 	"time"
 
@@ -384,6 +386,39 @@ func (h *AuthHandler) UpdateTheme(c *gin.Context) {
 		return
 	}
 	c.Data(http.StatusOK, "application/json", []byte(themeJSON))
+}
+
+func (h *AuthHandler) GetPreferences(c *gin.Context) {
+	userID, _ := c.Get("user_id")
+	var user models.User
+	if err := database.DB.First(&user, "id = ?", userID).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+		return
+	}
+	prefs := user.PreferencesJSON
+	if prefs == "" || prefs == "{}" {
+		prefs = "{}"
+	}
+	c.Data(http.StatusOK, "application/json", []byte(prefs))
+}
+
+func (h *AuthHandler) UpdatePreferences(c *gin.Context) {
+	raw, err := io.ReadAll(io.LimitReader(c.Request.Body, 50_000))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
+	if !json.Valid(raw) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid JSON"})
+		return
+	}
+	userID, _ := c.Get("user_id")
+	if err := database.DB.Model(&models.User{}).Where("id = ?", userID).
+		Update("preferences_json", string(raw)).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to save preferences"})
+		return
+	}
+	c.Data(http.StatusOK, "application/json", raw)
 }
 
 func (h *AuthHandler) issueFullTokens(c *gin.Context, user models.User) {

@@ -1,8 +1,12 @@
 package handlers
 
 import (
+	"archive/zip"
+	"io"
+	"io/fs"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -92,16 +96,65 @@ func (h *TelegramHandler) Send(c *gin.Context) {
 		}
 	}
 
-	// Check file exists
-	if _, err := os.Stat(fullPath); os.IsNotExist(err) {
-		c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
+	// Check path exists
+	info, err := os.Stat(fullPath)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Not found"})
 		return
 	}
 
-	if err := h.bot.SendFile(user.TelegramID, fullPath); err != nil {
+	sendPath := fullPath
+	var tmpZip string
+
+	// If directory — zip it first, then send the zip
+	if info.IsDir() {
+		tmpFile, err := os.CreateTemp("", "nebulide-tg-*.zip")
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create temp file"})
+			return
+		}
+		tmpZip = tmpFile.Name()
+		defer os.Remove(tmpZip)
+
+		zw := zip.NewWriter(tmpFile)
+		walkErr := filepath.WalkDir(fullPath, func(path string, d fs.DirEntry, wErr error) error {
+			if wErr != nil {
+				return wErr
+			}
+			rel, _ := filepath.Rel(fullPath, path)
+			if rel == "." {
+				return nil
+			}
+			if d.IsDir() {
+				_, err := zw.Create(rel + "/")
+				return err
+			}
+			w, err := zw.Create(rel)
+			if err != nil {
+				return err
+			}
+			f, err := os.Open(path)
+			if err != nil {
+				return err
+			}
+			defer f.Close()
+			_, err = io.Copy(w, f)
+			return err
+		})
+		zw.Close()
+		tmpFile.Close()
+
+		if walkErr != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to archive folder"})
+			return
+		}
+		sendPath = tmpZip
+	}
+
+	if err := h.bot.SendFile(user.TelegramID, sendPath); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to send file: " + err.Error()})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"message": "File sent to Telegram"})
+	c.JSON(http.StatusOK, gin.H{"message": "Sent to Telegram"})
 }

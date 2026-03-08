@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { getMe } from '../api/auth';
 import { syncThemeFromServer } from '../utils/theme';
+import { syncPreferencesFromServer } from '../utils/preferences';
 
 export function useAuth() {
   const { user, isAuthenticated, setAuth, clearAuth, loadFromStorage } = useAuthStore();
@@ -19,6 +20,7 @@ export function useAuth() {
           const refresh = localStorage.getItem('refresh_token')!;
           setAuth(data, token, refresh);
           syncThemeFromServer();
+          syncPreferencesFromServer();
         })
         .catch((err) => {
           console.error('[useAuth] getMe FAILED — navigating to /login', err);

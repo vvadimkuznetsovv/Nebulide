@@ -120,6 +120,8 @@ function saveToStorage(state: LayoutState) {
       mobilePanels: state.mobilePanels,
     }));
   } catch { /* ignore */ }
+  // Debounced sync to server
+  import('../utils/preferences').then(m => m.savePreferencesToServer()).catch(() => {});
 }
 
 const defaultVisibility: PanelVisibility = {

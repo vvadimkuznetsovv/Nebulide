@@ -307,6 +307,14 @@ func (h *FilesHandler) ReadRaw(c *gin.Context) {
 		".pdf":  "application/pdf",
 		".doc":  "application/msword",
 		".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+		".jpg":  "image/jpeg",
+		".jpeg": "image/jpeg",
+		".png":  "image/png",
+		".gif":  "image/gif",
+		".webp": "image/webp",
+		".svg":  "image/svg+xml",
+		".bmp":  "image/bmp",
+		".ico":  "image/x-icon",
 	}
 	contentType, ok := contentTypes[ext]
 	if !ok {
@@ -314,8 +322,13 @@ func (h *FilesHandler) ReadRaw(c *gin.Context) {
 	}
 
 	c.Header("Content-Type", contentType)
-	// Sandbox file preview — block scripts in PDFs/etc from accessing page context (localStorage tokens)
-	c.Header("Content-Security-Policy", "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data: blob:")
+	// Images are safe (rendered via <img> which blocks scripts) — no CSP sandbox needed
+	isImage := ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".gif" ||
+		ext == ".webp" || ext == ".svg" || ext == ".bmp" || ext == ".ico"
+	if !isImage {
+		// Sandbox file preview — block scripts in PDFs/etc from accessing page context (localStorage tokens)
+		c.Header("Content-Security-Policy", "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data: blob:")
+	}
 	filename := filepath.Base(fullPath)
 	sanitized := strings.Map(func(r rune) rune {
 		if r == '"' || r == '\\' || r == '\n' || r == '\r' {
@@ -325,6 +338,162 @@ func (h *FilesHandler) ReadRaw(c *gin.Context) {
 	}, filename)
 	c.Header("Content-Disposition", fmt.Sprintf(`inline; filename="%s"`, sanitized))
 	c.File(fullPath)
+}
+
+// ---------- Copy ----------
+
+type copyRequest struct {
+	Source      string `json:"source" binding:"required"`
+	Destination string `json:"destination" binding:"required"`
+}
+
+func (h *FilesHandler) Copy(c *gin.Context) {
+	var req copyRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
+
+	fullSrc, err := h.safePathForUser(req.Source, c)
+	if err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	fullDest, err := h.safePathForUser(req.Destination, c)
+	if err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	srcInfo, err := os.Stat(fullSrc)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Source not found"})
+		return
+	}
+
+	if _, err := os.Stat(fullDest); err == nil {
+		c.JSON(http.StatusConflict, gin.H{"error": "Destination already exists"})
+		return
+	}
+
+	if srcInfo.IsDir() {
+		err = copyDir(fullSrc, fullDest)
+	} else {
+		err = copyFileOnDisk(fullSrc, fullDest)
+	}
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to copy"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Copied", "path": req.Destination})
+}
+
+func copyFileOnDisk(src, dst string) error {
+	os.MkdirAll(filepath.Dir(dst), 0755)
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	_, err = io.Copy(out, in)
+	return err
+}
+
+func copyDir(src, dst string) error {
+	return filepath.WalkDir(src, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, _ := filepath.Rel(src, path)
+		target := filepath.Join(dst, rel)
+		if d.IsDir() {
+			return os.MkdirAll(target, 0755)
+		}
+		return copyFileOnDisk(path, target)
+	})
+}
+
+// ---------- Download (attachment) ----------
+
+// Download serves a file as attachment (browser download).
+// For directories, creates a zip archive on-the-fly.
+func (h *FilesHandler) Download(c *gin.Context) {
+	requestedPath := c.Query("path")
+	if requestedPath == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Path required"})
+		return
+	}
+
+	fullPath, err := h.safePathForUser(requestedPath, c)
+	if err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	info, err := os.Stat(fullPath)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Not found"})
+		return
+	}
+
+	baseName := filepath.Base(fullPath)
+
+	if !info.IsDir() {
+		// Single file — serve as attachment
+		c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, sanitizeFilename(baseName)))
+		c.File(fullPath)
+		return
+	}
+
+	// Directory — stream as zip
+	c.Header("Content-Type", "application/zip")
+	c.Header("Content-Disposition", fmt.Sprintf(`attachment; filename="%s.zip"`, sanitizeFilename(baseName)))
+	c.Status(http.StatusOK)
+
+	zw := zip.NewWriter(c.Writer)
+	defer zw.Close()
+
+	filepath.WalkDir(fullPath, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		rel, _ := filepath.Rel(fullPath, path)
+		if rel == "." {
+			return nil
+		}
+		if d.IsDir() {
+			_, err := zw.Create(rel + "/")
+			return err
+		}
+		w, err := zw.Create(rel)
+		if err != nil {
+			return err
+		}
+		f, err := os.Open(path)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		_, err = io.Copy(w, f)
+		return err
+	})
+}
+
+func sanitizeFilename(name string) string {
+	return strings.Map(func(r rune) rune {
+		if r == '"' || r == '\\' || r == '\n' || r == '\r' {
+			return '_'
+		}
+		return r
+	}, name)
 }
 
 // safePath ensures the requested path is within the allowed working directory

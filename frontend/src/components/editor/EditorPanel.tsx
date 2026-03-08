@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useDraggable, useDroppable, useDndContext } from '@dnd-kit/core';
 import { Panel, Group, Separator, usePanelRef, useGroupRef } from 'react-resizable-panels';
 import { useWorkspaceStore, isPreviewableFile, type EditorTab } from '../../store/workspaceStore';
@@ -9,6 +9,7 @@ import FileSearch from '../files/FileSearch';
 import CodeEditor from './CodeEditor';
 import ContextMenu from '../files/ContextMenu';
 import { useLongPress, mergeEventHandlers } from '../../hooks/useLongPress';
+import { getEditorSplit, setEditorSplit, savePreferencesToServer } from '../../utils/preferences';
 
 function subscribeToMedia(cb: () => void) {
   const mql = window.matchMedia('(max-width: 640px)');
@@ -44,7 +45,19 @@ export default function EditorPanel() {
   const activeTab = openTabs.find((t) => t.id === activeTabId) || null;
   const [fileMode, setFileMode] = useState<'tree' | 'search'>('tree');
   const [rootPath, setRootPath] = useState('');
-  const [activeFolder, setActiveFolder] = useState<'root' | 'uploads' | 'shared'>('root');
+  const [currentTreePath, setCurrentTreePath] = useState('');
+  const [savedSplit] = useState(getEditorSplit);
+  const saveSplitTimer = useRef<number>(0);
+
+  const activeFolder = useMemo(() => {
+    const norm = (p: string) => p.replace(/\\/g, '/');
+    const cp = norm(currentTreePath);
+    const rp = norm(rootPath);
+    if (!cp || !rp) return 'root' as const;
+    if (sharedDir && cp.startsWith(norm(sharedDir))) return 'shared' as const;
+    if (cp.startsWith(rp + '/uploads')) return 'uploads' as const;
+    return 'root' as const;
+  }, [currentTreePath, rootPath, sharedDir]);
 
   // Folder icon = droppable target for "move to workspace root"
   const { setNodeRef: setRootDropRef, isOver: isOverRoot } = useDroppable({
@@ -89,6 +102,14 @@ export default function EditorPanel() {
       const current = useWorkspaceStore.getState().fileTreeVisible;
       if (isCollapsed && current) setFileTreeVisible(false);
       else if (!isCollapsed && !current) setFileTreeVisible(true);
+      // Debounced save split ratio
+      if (!isCollapsed && size.asPercentage > 0) {
+        clearTimeout(saveSplitTimer.current);
+        saveSplitTimer.current = window.setTimeout(() => {
+          setEditorSplit(`${size.asPercentage}%`);
+          savePreferencesToServer();
+        }, 300);
+      }
     },
     [setFileTreeVisible],
   );
@@ -143,7 +164,7 @@ export default function EditorPanel() {
           <Panel
             id="editor-file-tree"
             panelRef={fileTreePanelRef}
-            defaultSize="20%"
+            defaultSize={savedSplit}
             minSize={isMobile ? '80px' : '120px'}
             collapsible={true}
             collapsedSize="0px"
@@ -167,7 +188,6 @@ export default function EditorPanel() {
                   type="button"
                   className={`editor-toggle-files${fileMode === 'tree' && activeFolder === 'root' ? ' active' : ''}`}
                   onClick={() => {
-                    setActiveFolder('root');
                     if (fileMode === 'tree') {
                       const root = fileTreeRef.current?.workspaceRoot;
                       if (root) fileTreeRef.current?.navigateTo(root);
@@ -180,13 +200,13 @@ export default function EditorPanel() {
                     padding: '3px 6px',
                     transition: 'background 0.2s, box-shadow 0.2s, border-color 0.2s',
                     ...(isDraggingFile && isOverRoot ? {
-                      background: 'rgba(127, 0, 255, 0.35)',
-                      boxShadow: '0 0 12px 3px rgba(127, 0, 255, 0.5)',
-                      borderColor: 'rgba(127, 0, 255, 0.8)',
+                      background: 'rgba(var(--accent-rgb), 0.35)',
+                      boxShadow: '0 0 12px 3px rgba(var(--accent-rgb), 0.5)',
+                      borderColor: 'rgba(var(--accent-rgb), 0.8)',
                     } : isDraggingFile ? {
-                      background: 'rgba(127, 0, 255, 0.12)',
-                      boxShadow: '0 0 6px 1px rgba(127, 0, 255, 0.25)',
-                      borderColor: 'rgba(127, 0, 255, 0.4)',
+                      background: 'rgba(var(--accent-rgb), 0.12)',
+                      boxShadow: '0 0 6px 1px rgba(var(--accent-rgb), 0.25)',
+                      borderColor: 'rgba(var(--accent-rgb), 0.4)',
                     } : {}),
                   }}
                 >
@@ -214,7 +234,6 @@ export default function EditorPanel() {
                   type="button"
                   className={`editor-toggle-files${fileMode === 'tree' && activeFolder === 'uploads' ? ' active' : ''}`}
                   onClick={() => {
-                    setActiveFolder('uploads');
                     const root = fileTreeRef.current?.workspaceRoot;
                     if (root) { setFileMode('tree'); fileTreeRef.current?.navigateTo(root + '/uploads'); }
                   }}
@@ -232,7 +251,7 @@ export default function EditorPanel() {
                   <button
                     type="button"
                     className={`editor-toggle-files${fileMode === 'tree' && activeFolder === 'shared' ? ' active' : ''}`}
-                    onClick={() => { setActiveFolder('shared'); setFileMode('tree'); fileTreeRef.current?.navigateTo(sharedDir); }}
+                    onClick={() => { setFileMode('tree'); fileTreeRef.current?.navigateTo(sharedDir); }}
                     title="Shared folder"
                     style={{ padding: '3px 6px' }}
                   >
@@ -266,11 +285,9 @@ export default function EditorPanel() {
                 <FileTree
                   ref={fileTreeRef}
                   rootPath={activeSession?.working_directory}
+                  onPathChange={setCurrentTreePath}
                   onFileSelect={(path) => {
-                    if (isPreviewableFile(path)) {
-                      openPreviewFile(path);
-                      showPanel('preview');
-                    } else {
+                    if (!isPreviewableFile(path)) {
                       openFile(path, false);
                       ensureEditorVisible();
                     }

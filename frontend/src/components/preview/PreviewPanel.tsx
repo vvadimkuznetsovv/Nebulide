@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 import { getRawFileUrl } from '../../api/files';
 import DocxViewer from './DocxViewer';
+import ImageViewer from './ImageViewer';
 
 export default function PreviewPanel() {
   const {
@@ -74,9 +75,13 @@ export default function PreviewPanel() {
                 title={tab.filePath}
               >
                 <span
-                  className={`text-[9px] font-bold font-mono shrink-0 ${tab.type === 'pdf' ? 'text-red-500' : 'text-blue-500'}`}
+                  className={`text-[9px] font-bold font-mono shrink-0 ${
+                    tab.type === 'pdf' ? 'text-red-500' :
+                    tab.type === 'image' ? 'text-emerald-500' :
+                    'text-blue-500'
+                  }`}
                 >
-                  {tab.type === 'pdf' ? 'PD' : 'DX'}
+                  {tab.type === 'pdf' ? 'PD' : tab.type === 'image' ? 'IM' : 'DX'}
                 </span>
                 <span className="truncate">{fileName}</span>
                 <span
@@ -163,6 +168,10 @@ export default function PreviewPanel() {
 
         {activeTab?.type === 'docx' && (
           <DocxViewer filePath={activeTab.filePath} />
+        )}
+
+        {activeTab?.type === 'image' && (
+          <ImageViewer filePath={activeTab.filePath} />
         )}
       </div>
     </div>

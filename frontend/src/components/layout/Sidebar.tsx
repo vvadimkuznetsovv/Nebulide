@@ -2,6 +2,7 @@ import { useState, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { useAuthStore } from '../../store/authStore';
 import { useLayoutStore } from '../../store/layoutStore';
+import { useWorkspaceStore } from '../../store/workspaceStore';
 import { useWorkspaceSessionStore } from '../../store/workspaceSessionStore';
 import { logout, totpSetup, totpConfirm, changePassword, updateTelegramId } from '../../api/auth';
 import { useNavigate } from 'react-router-dom';
@@ -86,6 +87,8 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
 
   const user = useAuthStore((s) => s.user);
   const setUser = useAuthStore((s) => s.setUser);
+  const devMode = useWorkspaceStore((s) => s.devMode);
+  const setDevMode = useWorkspaceStore((s) => s.setDevMode);
 
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -372,6 +375,36 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
 
               <div className="glass-divider" />
 
+              {/* Developer Mode */}
+              <div>
+                <label className="block text-xs font-semibold mb-3 uppercase tracking-wider" style={{ color: 'var(--text-muted)', fontSize: '11px', letterSpacing: '0.1em' }}>
+                  Developer
+                </label>
+                <div
+                  className="flex items-center justify-between px-3 py-2.5 rounded-xl cursor-pointer"
+                  style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.04)' }}
+                  onClick={() => setDevMode(!devMode)}
+                >
+                  <div>
+                    <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>Developer mode</span>
+                    <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                      Ctrl+Shift+C opens DevTools instead of copy
+                    </p>
+                  </div>
+                  <div
+                    className="w-9 h-5 rounded-full relative transition-colors duration-200"
+                    style={{ background: devMode ? 'var(--accent)' : 'rgba(255,255,255,0.1)' }}
+                  >
+                    <div
+                      className="absolute top-0.5 w-4 h-4 rounded-full transition-transform duration-200"
+                      style={{ background: 'white', transform: devMode ? 'translateX(18px)' : 'translateX(2px)' }}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="glass-divider" />
+
               {/* Quick Reference */}
               <div>
                 <label className="block text-xs font-semibold mb-3 uppercase tracking-wider" style={{ color: 'var(--text-muted)', fontSize: '11px', letterSpacing: '0.1em' }}>
@@ -541,10 +574,10 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                     </filter>
                   </defs>
                   <g filter="url(#sbl-lava)">
-                    <ellipse cx="38" cy="43" rx="19" ry="16" transform="rotate(-20, 38, 43)" fill="#7F00FF"/>
-                    <ellipse cx="58" cy="59" rx="15" ry="13" transform="rotate(-8, 58, 59)" fill="#7F00FF"/>
-                    <ellipse cx="77" cy="28" rx="10" ry="12" transform="rotate(15, 77, 28)" fill="#7F00FF"/>
-                    <ellipse cx="29" cy="78" rx="8" ry="10" transform="rotate(25, 29, 78)" fill="#7F00FF"/>
+                    <ellipse cx="38" cy="43" rx="19" ry="16" transform="rotate(-20, 38, 43)" fill="var(--accent)"/>
+                    <ellipse cx="58" cy="59" rx="15" ry="13" transform="rotate(-8, 58, 59)" fill="var(--accent)"/>
+                    <ellipse cx="77" cy="28" rx="10" ry="12" transform="rotate(15, 77, 28)" fill="var(--accent)"/>
+                    <ellipse cx="29" cy="78" rx="8" ry="10" transform="rotate(25, 29, 78)" fill="var(--accent)"/>
                   </g>
                 </svg>
               </div>
@@ -584,8 +617,8 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                 title={isTerminal ? 'Open new terminal' : `${visibility[panel] ? 'Hide' : 'Show'} ${panelTitles[panel]}`}
                 className="w-8 h-8 rounded-xl flex items-center justify-center transition-all duration-200"
                 style={{
-                  background: anyTerminalVisible ? 'rgba(127, 0, 255, 0.15)' : 'rgba(255, 255, 255, 0.04)',
-                  border: `1px solid ${anyTerminalVisible ? 'rgba(127, 0, 255, 0.3)' : 'rgba(255, 255, 255, 0.06)'}`,
+                  background: anyTerminalVisible ? 'rgba(var(--accent-rgb), 0.15)' : 'rgba(255, 255, 255, 0.04)',
+                  border: `1px solid ${anyTerminalVisible ? 'rgba(var(--accent-rgb), 0.3)' : 'rgba(255, 255, 255, 0.06)'}`,
                   color: anyTerminalVisible ? 'var(--accent-bright)' : 'rgba(255, 255, 255, 0.35)',
                 }}
               >
@@ -659,8 +692,8 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                   key={ws.id}
                   className="group flex items-center gap-2 px-2.5 py-2 rounded-xl cursor-pointer transition-all duration-200"
                   style={{
-                    background: isActive ? 'rgba(127, 0, 255, 0.12)' : 'transparent',
-                    border: `1px solid ${isActive ? 'rgba(127, 0, 255, 0.25)' : 'transparent'}`,
+                    background: isActive ? 'rgba(var(--accent-rgb), 0.12)' : 'transparent',
+                    border: `1px solid ${isActive ? 'rgba(var(--accent-rgb), 0.25)' : 'transparent'}`,
                   }}
                   onClick={() => { if (!isActive) switchSession(ws.id); }}
                   onContextMenu={(e) => {
@@ -680,7 +713,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                           ? 'rgb(251, 191, 36)'
                           : 'rgba(255,255,255,0.15)',
                       boxShadow: isActive
-                        ? '0 0 6px rgba(127,0,255,0.5)'
+                        ? '0 0 6px rgba(var(--accent-rgb),0.5)'
                         : isLockedByOther
                           ? '0 0 6px rgba(251,191,36,0.4)'
                           : 'none',
@@ -746,11 +779,11 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                         display: 'flex',
                         alignItems: 'center',
                         justifyContent: 'center',
-                        background: 'rgba(127, 0, 255, 0.15)',
+                        background: 'rgba(var(--accent-rgb), 0.15)',
                         border: '1px solid rgba(160, 100, 255, 0.4)',
                         color: 'rgba(255,255,255,0.8)',
                         backdropFilter: 'blur(8px)',
-                        boxShadow: '0 0 6px 1px rgba(127,0,255,0.2)',
+                        boxShadow: '0 0 6px 1px rgba(var(--accent-rgb),0.2)',
                       }}
                       onClick={(e) => {
                         e.stopPropagation();
