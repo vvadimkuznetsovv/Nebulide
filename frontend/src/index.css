@@ -1415,6 +1415,7 @@ body { animation: scrollbarShimmer 8s ease-in-out infinite; }
     -webkit-tap-highlight-color: transparent;
     -webkit-user-select: none;
     user-select: none;
+    touch-action: manipulation;
   }
   .file-tree-item:hover {
     background: rgba(127, 0, 255, 0.12);

@@ -187,14 +187,15 @@ async function connectWs(instanceId: string): Promise<void> {
     try {
       session.fitAddon.fit();
       const dims = session.fitAddon.proposeDimensions();
-      if (dims) {
+      if (dims && dims.cols >= 10 && dims.rows >= 2) {
         session.lastCols = dims.cols;
         session.lastRows = dims.rows;
         ws.send(JSON.stringify({ type: 'resize', rows: dims.rows, cols: dims.cols }));
       }
     } catch { /* xterm may not be attached yet */ }
-    // Unlock resize after layout settles
-    setTimeout(() => { session.resizeLocked = false; }, 300);
+    // Unlock resize after layout settles — 600ms accommodates slow
+    // mobile devices where CSS transitions / tab switches take longer.
+    setTimeout(() => { session.resizeLocked = false; }, 600);
   };
 
   ws.onmessage = (event) => {
@@ -433,15 +434,20 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
   const fit = useCallback(() => {
     const s = sessions.get(instanceId);
     if (!s) return;
+    // Skip entirely while locked — connectWs already sent the initial resize.
+    // Calling fitAddon.fit() during lock can resize xterm's internal grid
+    // while the layout is still settling, causing garbled output.
+    if (s.resizeLocked) return;
     try {
       s.fitAddon.fit();
-      // Skip sending resize while locked (connectWs already sent the initial resize)
-      if (s.resizeLocked) return;
       const dims = s.fitAddon.proposeDimensions();
-      if (dims && s.ws?.readyState === WebSocket.OPEN) {
-        if (dims.cols !== s.lastCols || dims.rows !== s.lastRows) {
-          s.lastCols = dims.cols;
-          s.lastRows = dims.rows;
+      // Reject invalid dimensions — FitAddon can propose 0×0 or tiny values
+      // during panel transitions, which causes garbled prompt output.
+      if (!dims || dims.cols < 10 || dims.rows < 2) return;
+      if (dims.cols !== s.lastCols || dims.rows !== s.lastRows) {
+        s.lastCols = dims.cols;
+        s.lastRows = dims.rows;
+        if (s.ws?.readyState === WebSocket.OPEN) {
           s.ws.send(JSON.stringify({ type: 'resize', rows: dims.rows, cols: dims.cols }));
         }
       }
@@ -474,13 +480,15 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
     }
 
     // Delay fit to let DOM settle (especially on mobile tab switches)
-    setTimeout(fit, 100);
+    setTimeout(fit, 200);
 
     let resizeTimer = 0;
     const resizeObserver = new ResizeObserver(() => {
-      // Debounce 150ms — prevents rapid-fire resize during tab switch animations
+      // Debounce 300ms — prevents rapid-fire resize during tab switch animations.
+      // Shorter values (100-150ms) cause resize storms on mobile where CSS
+      // transitions take longer, resulting in garbled/repeated prompts.
       clearTimeout(resizeTimer);
-      resizeTimer = window.setTimeout(() => fit(), 150);
+      resizeTimer = window.setTimeout(() => fit(), 300);
     });
     resizeObserver.observe(el);
 
@@ -519,10 +527,17 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
 
   useEffect(() => {
     if (active) {
-      setTimeout(() => {
-        fit();
+      // Delay must exceed resizeLocked window (600ms) to avoid sending
+      // a redundant resize right after ws.onopen already set dimensions.
+      // Focus separately with a shorter delay for responsiveness.
+      const focusTimer = window.setTimeout(() => {
         sessions.get(instanceId)?.xterm.focus();
       }, 50);
+      const fitTimer = window.setTimeout(fit, 200);
+      return () => {
+        clearTimeout(focusTimer);
+        clearTimeout(fitTimer);
+      };
     }
   }, [active, fit, instanceId]);
 

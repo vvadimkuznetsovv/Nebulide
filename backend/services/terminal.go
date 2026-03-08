@@ -168,6 +168,11 @@ type TerminalSession struct {
 	Done chan struct{}
 
 	mw *multiWriter // broadcasts PTY output to all attached WS connections
+
+	// Last known PTY dimensions — used to deduplicate resize calls.
+	mu       sync.Mutex
+	lastCols uint16
+	lastRows uint16
 }
 
 func NewTerminalService() *TerminalService {
@@ -380,6 +385,13 @@ func (s *TerminalService) Remove(sessionKey string) {
 }
 
 func (s *TerminalService) Resize(sessionKey string, rows, cols uint16) error {
+	// Reject invalid dimensions — FitAddon can propose 0×0 or tiny values
+	// during panel transitions / hide, which causes garbled prompt output.
+	if rows < 2 || cols < 10 {
+		log.Printf("[TerminalService] Resize IGNORED invalid dims rows=%d cols=%d key=%s", rows, cols, sessionKey)
+		return nil
+	}
+
 	s.mu.RLock()
 	session, ok := s.sessions[sessionKey]
 	s.mu.RUnlock()
@@ -387,6 +399,16 @@ func (s *TerminalService) Resize(sessionKey string, rows, cols uint16) error {
 	if !ok {
 		return nil
 	}
+
+	// Deduplicate: skip if dimensions haven't changed (avoids shell re-rendering prompt)
+	session.mu.Lock()
+	if session.lastCols == cols && session.lastRows == rows {
+		session.mu.Unlock()
+		return nil
+	}
+	session.lastCols = cols
+	session.lastRows = rows
+	session.mu.Unlock()
 
 	return session.Pty.Resize(int(cols), int(rows))
 }

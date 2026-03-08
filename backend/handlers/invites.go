@@ -76,6 +76,12 @@ func (h *InviteHandler) CreateInvite(c *gin.Context) {
 	c.JSON(http.StatusCreated, invite)
 }
 
+type inviteResponse struct {
+	models.Invite
+	CreatedByUsername string `json:"created_by_username"`
+	UsedByUsername   string `json:"used_by_username"`
+}
+
 // ListInvites returns all invite codes (admin only).
 func (h *InviteHandler) ListInvites(c *gin.Context) {
 	userID, _ := c.Get("user_id")
@@ -93,7 +99,44 @@ func (h *InviteHandler) ListInvites(c *gin.Context) {
 	var invites []models.Invite
 	database.DB.Order("created_at DESC").Find(&invites)
 
-	c.JSON(http.StatusOK, invites)
+	// Collect unique user IDs to resolve usernames
+	userIDs := make(map[string]bool)
+	for _, inv := range invites {
+		userIDs[inv.CreatedBy.String()] = true
+		if inv.UsedBy != nil {
+			userIDs[inv.UsedBy.String()] = true
+		}
+	}
+
+	idList := make([]string, 0, len(userIDs))
+	for id := range userIDs {
+		idList = append(idList, id)
+	}
+
+	var users []models.User
+	if len(idList) > 0 {
+		database.DB.Select("id, username").Where("id IN ?", idList).Find(&users)
+	}
+
+	usernameMap := make(map[string]string)
+	for _, u := range users {
+		usernameMap[u.ID.String()] = u.Username
+	}
+
+	// Build response with usernames
+	result := make([]inviteResponse, len(invites))
+	for i, inv := range invites {
+		resp := inviteResponse{
+			Invite:           inv,
+			CreatedByUsername: usernameMap[inv.CreatedBy.String()],
+		}
+		if inv.UsedBy != nil {
+			resp.UsedByUsername = usernameMap[inv.UsedBy.String()]
+		}
+		result[i] = resp
+	}
+
+	c.JSON(http.StatusOK, result)
 }
 
 // DeleteInvite revokes an invite code (admin only).

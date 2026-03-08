@@ -10,7 +10,6 @@ interface FileTreeItemProps {
   isLoading?: boolean;
   isSelected?: boolean;
   isContextTarget?: boolean;
-  isDragOver?: boolean;
   onClick: () => void;
   onDoubleClick?: () => void;
   onContextMenu: (x: number, y: number, file: FileEntry) => void;
@@ -81,7 +80,7 @@ function formatSize(bytes: number): string {
 const DOUBLE_TAP_MS = 5000;
 
 export default function FileTreeItem({
-  file, depth, isExpanded, isLoading, isSelected, isContextTarget, isDragOver,
+  file, depth, isExpanded, isLoading, isSelected, isContextTarget,
   onClick, onDoubleClick, onContextMenu, isRenaming, onRenameSubmit, onRenameCancel,
 }: FileTreeItemProps) {
   const { handlers: longPressHandlers, longPressedRef } = useLongPress({
@@ -89,7 +88,7 @@ export default function FileTreeItem({
     stopPropagation: true,
   });
 
-  // DnD: every item is draggable
+  // DnD: every item is draggable (registers with outer Workspace DndContext)
   // NOTE: DON'T spread attributes — they apply CSS transform which clips inside overflow:auto
   const { listeners: dragListeners, setNodeRef: setDragRef, isDragging } = useDraggable({
     id: `file:${file.path}`,
@@ -144,8 +143,6 @@ export default function FileTreeItem({
     onClick();
   };
 
-  const dropHighlight = file.is_dir && (isOver || isDragOver);
-
   return (
     <button
       ref={setRef}
@@ -154,7 +151,7 @@ export default function FileTreeItem({
       onDoubleClick={isRenaming || file.is_dir ? undefined : () => onDoubleClick?.()}
       onContextMenu={handleContextMenu}
       {...mergedHandlers}
-      className={`file-tree-item relative w-full flex items-center gap-1.5 py-1.5 text-sm text-left transition-all duration-150 select-none${isSelected ? ' selected' : ''}${isContextTarget ? ' context-target' : ''}${dropHighlight ? ' drop-target' : ''}`}
+      className={`file-tree-item relative w-full flex items-center gap-1.5 py-1.5 text-sm text-left transition-all duration-150 select-none${isSelected ? ' selected' : ''}${isContextTarget ? ' context-target' : ''}${file.is_dir && isOver ? ' drop-target' : ''}`}
       style={{
         paddingLeft: `${8 + depth * 16}px`,
         paddingRight: '8px',

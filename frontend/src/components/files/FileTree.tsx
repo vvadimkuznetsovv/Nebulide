@@ -1,7 +1,6 @@
-import React, { useState, useEffect, useRef, useImperativeHandle, forwardRef, type ReactNode } from 'react';
-import { DndContext, DragOverlay, MouseSensor, useSensor, useSensors, useDroppable, type DragEndEvent, type DragStartEvent } from '@dnd-kit/core';
+import React, { useState, useEffect, useRef, useCallback, useImperativeHandle, forwardRef, type ReactNode } from 'react';
 import { listFiles, readFile, deleteFile, writeFile, mkdirFile, renameFile, type FileEntry } from '../../api/files';
-import FileTreeItem, { getFileIcon, getFileColor } from './FileTreeItem';
+import FileTreeItem from './FileTreeItem';
 import ContextMenu, { type ContextMenuItem } from './ContextMenu';
 import { useLongPress } from '../../hooks/useLongPress';
 import toast from 'react-hot-toast';
@@ -31,6 +30,7 @@ const ICONS = {
   folderPlus: iconMulti('M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z', 'M12 11v6', 'M9 14h6'),
   externalLink: iconMulti('M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6', 'M15 3h6v6', 'M10 14L21 3'),
   edit: iconMulti('M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z'),
+  move: iconMulti('M4 4v7a4 4 0 0 0 4 4h12', 'M15 10l5 5-5 5'),
   trash: iconMulti('M3 6h18', 'M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2'),
 };
 
@@ -52,6 +52,7 @@ function getMenuItems(target: FileEntry | null): ContextMenuItem[] {
       { label: 'New Folder', action: 'new-folder-parent', icon: ICONS.folderPlus },
       { type: 'separator' },
       { label: 'Rename', action: 'rename', icon: ICONS.edit },
+      { label: 'Move to...', action: 'move-to', icon: ICONS.move },
       { type: 'separator' },
       { label: 'Delete', action: 'delete', danger: true, icon: ICONS.trash },
     ];
@@ -61,6 +62,7 @@ function getMenuItems(target: FileEntry | null): ContextMenuItem[] {
     { label: 'New Folder', action: 'new-folder', icon: ICONS.folderPlus },
     { type: 'separator' },
     { label: 'Rename', action: 'rename', icon: ICONS.edit },
+    { label: 'Move to...', action: 'move-to', icon: ICONS.move },
     { label: 'Open in New Tab', action: 'open-new-tab', icon: ICONS.externalLink },
     { type: 'separator' },
     { label: 'Delete', action: 'delete', danger: true, icon: ICONS.trash },
@@ -108,11 +110,9 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree({ r
   const [loadingFolders, setLoadingFolders] = useState<Set<string>>(new Set());
   const [creatingInFolder, setCreatingInFolder] = useState<string | null>(null);
   const [workspaceRoot, setWorkspaceRoot] = useState<string>('');
-
-  // DnD state — mouse only (touch DnD disabled, use context menu to move files on mobile)
-  const [draggedFile, setDraggedFile] = useState<FileEntry | null>(null);
-  const mouseSensor = useSensor(MouseSensor, { activationConstraint: { distance: 8 } });
-  const sensors = useSensors(mouseSensor);
+  const [movingFile, setMovingFile] = useState<FileEntry | null>(null);
+  const [moveFolders, setMoveFolders] = useState<FileEntry[]>([]);
+  const [moveCurrentPath, setMoveCurrentPath] = useState<string>('');
 
   const loadFiles = async (path?: string) => {
     setLoading(true);
@@ -180,57 +180,6 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree({ r
       }
     }
   };
-
-  // --- DnD handlers ---
-
-  const handleDragStart = (event: DragStartEvent) => {
-    const file = event.active.data.current?.file as FileEntry | undefined;
-    if (file) setDraggedFile(file);
-  };
-
-  const handleDragEnd = (event: DragEndEvent) => {
-    setDraggedFile(null);
-    const { active, over } = event;
-    if (!over) return;
-
-    const sourceFile = active.data.current?.file as FileEntry | undefined;
-    if (!sourceFile) return;
-
-    // over.id is `folder:PATH` for droppable folders, or `root-drop` for root area
-    const overId = String(over.id);
-    let targetDir: string;
-    if (overId === 'root-drop') {
-      targetDir = currentPath;
-    } else if (overId.startsWith('folder:')) {
-      targetDir = overId.slice('folder:'.length);
-    } else {
-      return;
-    }
-
-    const norm = (p: string) => p.replace(/\\/g, '/');
-    const sourcePath = norm(sourceFile.path);
-    const sourceDir = sourcePath.split('/').slice(0, -1).join('/');
-    const fileName = sourcePath.split('/').pop() || '';
-
-    // Don't move to the same directory
-    if (norm(targetDir) === sourceDir) return;
-    // Don't move a folder into itself or its children
-    if (sourceFile.is_dir && (norm(targetDir) === sourcePath || norm(targetDir).startsWith(sourcePath + '/'))) {
-      toast.error('Cannot move folder into itself');
-      return;
-    }
-
-    const newPath = targetDir + '/' + fileName;
-    renameFile(sourceFile.path, newPath)
-      .then(() => {
-        toast.success(`Moved "${fileName}"`);
-        refreshFolder(sourceDir);
-        refreshFolder(targetDir);
-      })
-      .catch(() => toast.error('Failed to move file'));
-  };
-
-  const handleDragCancel = () => setDraggedFile(null);
 
   useEffect(() => {
     setChildrenCache(new Map());
@@ -339,6 +288,16 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree({ r
         break;
       case 'open-new-tab':
         if (target && !target.is_dir) onFileOpenNewTab?.(target.path);
+        break;
+      case 'move-to':
+        if (target) {
+          setMovingFile(target);
+          setMoveCurrentPath(currentPath);
+          // Load folders for the move dialog
+          listFiles(currentPath).then(({ data }) => {
+            setMoveFolders((data.files || []).filter(f => f.is_dir && f.path !== target.path));
+          });
+        }
         break;
       case 'delete':
         if (target) {
@@ -525,6 +484,15 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree({ r
     workspaceRoot,
   }));
 
+  // Listen for external refresh events (e.g. after DnD file move in Workspace)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const handleRefreshStable = useCallback(handleRefresh, [currentPath, expandedFolders]);
+  useEffect(() => {
+    const handler = () => handleRefreshStable();
+    window.addEventListener('filetree-refresh', handler);
+    return () => window.removeEventListener('filetree-refresh', handler);
+  }, [handleRefreshStable]);
+
   // Guard: prevent blur from re-submitting after Enter/Escape in creation input
   const createSubmittedRef = useRef(false);
 
@@ -612,66 +580,33 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree({ r
     <div
       className="h-full flex flex-col"
       style={{ background: 'transparent' }}
-      data-filetree-dnd=""
     >
-      {/* File list with DnD */}
-      <DndContext
-        sensors={sensors}
-        onDragStart={handleDragStart}
-        onDragEnd={handleDragEnd}
-        onDragCancel={handleDragCancel}
+      {/* File list */}
+      <div
+        className="flex-1 overflow-y-auto py-1 select-none"
+        style={{ WebkitTouchCallout: 'none' }}
+        onContextMenu={handleEmptyContextMenu}
+        {...emptyLongPressHandlers}
       >
-        <RootDropZone
-          onContextMenu={handleEmptyContextMenu}
-          longPressHandlers={emptyLongPressHandlers}
-        >
-          {loading ? (
-            <div className="p-4 text-center text-sm" style={{ color: 'var(--text-secondary)' }}>
-              <span className="glow-pulse inline-block">Loading...</span>
-            </div>
-          ) : (
-            <>
-              {/* Root-level inline creation input */}
-              {creatingType && !creatingInFolder && renderCreationInput(0)}
+        {loading ? (
+          <div className="p-4 text-center text-sm" style={{ color: 'var(--text-secondary)' }}>
+            <span className="glow-pulse inline-block">Loading...</span>
+          </div>
+        ) : (
+          <>
+            {/* Root-level inline creation input */}
+            {creatingType && !creatingInFolder && renderCreationInput(0)}
 
-              {files.length === 0 && !creatingType ? (
-                <div className="p-4 text-center text-sm" style={{ color: 'var(--text-secondary)' }}>
-                  Empty directory
-                </div>
-              ) : (
-                renderItems(files, 0)
-              )}
-            </>
-          )}
-        </RootDropZone>
-
-        {/* DragOverlay: visual ghost during drag */}
-        <DragOverlay dropAnimation={null}>
-          {draggedFile && (
-            <div
-              className="flex items-center gap-1.5 py-1 px-3 text-sm rounded"
-              style={{
-                background: 'rgba(127, 0, 255, 0.15)',
-                border: '1px solid var(--accent)',
-                color: 'var(--text-primary)',
-                backdropFilter: 'blur(8px)',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              {draggedFile.is_dir ? (
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
-                </svg>
-              ) : (
-                <span className="w-4 text-[10px] font-mono text-center font-bold" style={{ color: getFileColor(draggedFile) }}>
-                  {getFileIcon(draggedFile)}
-                </span>
-              )}
-              {draggedFile.name}
-            </div>
-          )}
-        </DragOverlay>
-      </DndContext>
+            {files.length === 0 && !creatingType ? (
+              <div className="p-4 text-center text-sm" style={{ color: 'var(--text-secondary)' }}>
+                Empty directory
+              </div>
+            ) : (
+              renderItems(files, 0)
+            )}
+          </>
+        )}
+      </div>
 
       {/* Context menu */}
       {contextMenu && (
@@ -683,36 +618,108 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree({ r
           onClose={() => setContextMenu(null)}
         />
       )}
+
+      {/* Move to dialog */}
+      {movingFile && (
+        <div
+          className="absolute inset-0 z-50 flex flex-col"
+          style={{ background: 'rgba(3,1,8,0.85)', backdropFilter: 'blur(8px)' }}
+        >
+          <div className="flex items-center gap-2 px-3 py-2 shrink-0" style={{ borderBottom: '1px solid var(--glass-border)' }}>
+            <span className="text-xs font-semibold" style={{ color: 'var(--text-secondary)' }}>
+              Move "{movingFile.name}" to:
+            </span>
+            <div className="flex-1" />
+            <button
+              type="button"
+              className="text-xs px-2 py-0.5 rounded"
+              style={{ color: 'var(--text-secondary)', border: '1px solid var(--glass-border)' }}
+              onClick={() => setMovingFile(null)}
+            >
+              Cancel
+            </button>
+          </div>
+          {/* Move here button */}
+          <button
+            type="button"
+            className="w-full flex items-center gap-2 px-3 py-2 text-sm text-left"
+            style={{
+              color: 'var(--accent-bright)',
+              borderBottom: '1px solid var(--glass-border)',
+              background: 'rgba(127,0,255,0.08)',
+            }}
+            onClick={() => {
+              const fileName = movingFile.name;
+              const destPath = moveCurrentPath.replace(/\\/g, '/') + '/' + fileName;
+              const srcPath = movingFile.path;
+              if (srcPath.replace(/\\/g, '/') === destPath) {
+                toast.error('Already in this folder');
+                return;
+              }
+              renameFile(srcPath, destPath)
+                .then(() => {
+                  toast.success(`Moved ${fileName}`);
+                  setMovingFile(null);
+                  handleRefresh();
+                })
+                .catch(() => toast.error('Failed to move'));
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+            </svg>
+            Move here ({moveCurrentPath.split(/[/\\]/).pop() || '/'})
+          </button>
+          {/* Go up */}
+          {moveCurrentPath && moveCurrentPath !== (rootPath || '') && moveCurrentPath !== workspaceRoot && (
+            <button
+              type="button"
+              className="w-full flex items-center gap-2 px-3 py-1.5 text-sm text-left"
+              style={{ color: 'var(--text-secondary)' }}
+              onClick={() => {
+                const parent = moveCurrentPath.split(/[/\\]/).slice(0, -1).join('/');
+                setMoveCurrentPath(parent);
+                listFiles(parent).then(({ data }) => {
+                  setMoveFolders((data.files || []).filter(f => f.is_dir && f.path !== movingFile.path));
+                });
+              }}
+            >
+              ..
+            </button>
+          )}
+          {/* Folder list */}
+          <div className="flex-1 overflow-y-auto">
+            {moveFolders.length === 0 ? (
+              <div className="p-3 text-xs text-center" style={{ color: 'var(--text-muted)' }}>
+                No subfolders
+              </div>
+            ) : (
+              moveFolders.map(folder => (
+                <button
+                  key={folder.path}
+                  type="button"
+                  className="file-tree-item w-full flex items-center gap-2 px-3 py-1.5 text-sm text-left"
+                  style={{ color: 'var(--text-primary)' }}
+                  onClick={() => {
+                    setMoveCurrentPath(folder.path);
+                    listFiles(folder.path).then(({ data }) => {
+                      setMoveFolders((data.files || []).filter(f => f.is_dir && f.path !== movingFile.path));
+                    });
+                  }}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                  </svg>
+                  {folder.name}
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 });
 
 export default FileTree;
 
-/** Root-level drop zone — accepts file drops into current directory */
-function RootDropZone({
-  children,
-  onContextMenu,
-  longPressHandlers,
-}: {
-  children: React.ReactNode;
-  onContextMenu: (e: React.MouseEvent) => void;
-  longPressHandlers: Record<string, unknown>;
-}) {
-  const { setNodeRef, isOver } = useDroppable({ id: 'root-drop' });
-  return (
-    <div
-      ref={setNodeRef}
-      className="flex-1 overflow-y-auto py-1 select-none"
-      style={{
-        WebkitTouchCallout: 'none',
-        outline: isOver ? '2px dashed var(--accent)' : 'none',
-        outlineOffset: '-2px',
-      }}
-      onContextMenu={onContextMenu}
-      {...longPressHandlers}
-    >
-      {children}
-    </div>
-  );
-}

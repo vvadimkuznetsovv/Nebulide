@@ -44,6 +44,11 @@ export default function EditorPanel() {
   const activeTab = openTabs.find((t) => t.id === activeTabId) || null;
   const [fileMode, setFileMode] = useState<'tree' | 'search'>('tree');
 
+  // Ref callback for path breadcrumb — scrolls to end to show filename
+  const scrollEndRef = useCallback((el: HTMLDivElement | null) => {
+    if (el) requestAnimationFrame(() => { el.scrollLeft = el.scrollWidth; });
+  }, []);
+
   // When editor is collapsed and user selects a file or clicks a tab, restore 50/50
   const ensureEditorVisible = useCallback(() => {
     const editorPanel = editorCodePanelRef.current;
@@ -273,7 +278,7 @@ export default function EditorPanel() {
               {activeTab && (
                 <div
                   className="px-3 py-1 text-[11px] font-mono shrink-0 whitespace-nowrap"
-                  ref={(el) => { if (el) requestAnimationFrame(() => { el.scrollLeft = el.scrollWidth; }); }}
+                  ref={scrollEndRef}
                   style={{
                     color: 'var(--text-muted)',
                     borderBottom: '1px solid var(--glass-border)',

@@ -24,7 +24,7 @@ export function mergeEventHandlers(
   return merged;
 }
 
-const LONG_PRESS_MS = 500;
+const LONG_PRESS_MS = 600;
 const MOVE_THRESHOLD_SQ = 100; // 10px squared
 
 interface UseLongPressOptions {

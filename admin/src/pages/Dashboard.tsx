@@ -11,6 +11,7 @@ function formatBytes(bytes: number): string {
 
 const MAX_HISTORY = 60;
 const ACID_GREEN = '#39ff14';
+const CYAN = '#06b6d4';
 
 function CpuChart({ history }: { history: number[] }) {
   const w = 600;
@@ -82,29 +83,113 @@ function CpuChart({ history }: { history: number[] }) {
   );
 }
 
+function MemChart({ history }: { history: number[] }) {
+  const w = 600;
+  const h = 120;
+  const padL = 36;
+  const padR = 8;
+  const padT = 6;
+  const padB = 20;
+  const chartW = w - padL - padR;
+  const chartH = h - padT - padB;
+
+  const points = history.map((val, i) => {
+    const x = padL + (i / (MAX_HISTORY - 1)) * chartW;
+    const y = padT + chartH - (Math.min(val, 100) / 100) * chartH;
+    return `${x},${y}`;
+  });
+
+  const linePath = points.length > 1 ? `M${points.join('L')}` : '';
+  const areaPath = points.length > 1
+    ? `M${padL + (0 / (MAX_HISTORY - 1)) * chartW},${padT + chartH}L${points.join('L')}L${padL + ((history.length - 1) / (MAX_HISTORY - 1)) * chartW},${padT + chartH}Z`
+    : '';
+
+  const gridLines = [0, 25, 50, 75, 100];
+
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} width="100%" style={{ display: 'block' }}>
+      <defs>
+        <linearGradient id="memGrad" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={CYAN} stopOpacity="0.3" />
+          <stop offset="100%" stopColor={CYAN} stopOpacity="0.02" />
+        </linearGradient>
+        <filter id="memGlow">
+          <feGaussianBlur stdDeviation="2" result="blur" />
+          <feMerge>
+            <feMergeNode in="blur" />
+            <feMergeNode in="SourceGraphic" />
+          </feMerge>
+        </filter>
+      </defs>
+
+      {gridLines.map((val) => {
+        const y = padT + chartH - (val / 100) * chartH;
+        return (
+          <g key={val}>
+            <line x1={padL} y1={y} x2={w - padR} y2={y} stroke="rgba(255,255,255,0.06)" strokeWidth="1" />
+            <text x={padL - 6} y={y + 4} fill="rgba(255,255,255,0.3)" fontSize="10" textAnchor="end" fontFamily="monospace">
+              {val}%
+            </text>
+          </g>
+        );
+      })}
+
+      <text x={padL} y={h - 2} fill="rgba(255,255,255,0.25)" fontSize="9" fontFamily="monospace">5m ago</text>
+      <text x={w - padR} y={h - 2} fill="rgba(255,255,255,0.25)" fontSize="9" textAnchor="end" fontFamily="monospace">now</text>
+
+      {areaPath && <path d={areaPath} fill="url(#memGrad)" />}
+      {linePath && <path d={linePath} fill="none" stroke={CYAN} strokeWidth="2" filter="url(#memGlow)" strokeLinejoin="round" />}
+
+      {history.length > 0 && (
+        <circle
+          cx={padL + ((history.length - 1) / (MAX_HISTORY - 1)) * chartW}
+          cy={padT + chartH - (Math.min(history[history.length - 1], 100) / 100) * chartH}
+          r="4"
+          fill={CYAN}
+          style={{ filter: `drop-shadow(0 0 6px ${CYAN})` }}
+        />
+      )}
+    </svg>
+  );
+}
+
 export default function Dashboard() {
   const [stats, setStats] = useState<Stats | null>(null);
   const cpuHistoryRef = useRef<number[]>([]);
   const [cpuHistory, setCpuHistory] = useState<number[]>([]);
   const [cpuPercent, setCpuPercent] = useState(0);
+  const memHistoryRef = useRef<number[]>([]);
+  const [memHistory, setMemHistory] = useState<number[]>([]);
+  const [memPercent, setMemPercent] = useState(0);
+  const [memUsed, setMemUsed] = useState(0);
+  const [memTotal, setMemTotal] = useState(0);
   const intervalRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
 
   useEffect(() => {
     getStats().then((r) => setStats(r.data));
 
-    const fetchCpu = () => {
+    const fetchMonitoring = () => {
       getMonitoring().then((r) => {
         const cpu = r.data.system.cpu_percent ?? 0;
         setCpuPercent(cpu);
-        const hist = [...cpuHistoryRef.current, cpu];
-        if (hist.length > MAX_HISTORY) hist.splice(0, hist.length - MAX_HISTORY);
-        cpuHistoryRef.current = hist;
-        setCpuHistory(hist);
+        const cpuHist = [...cpuHistoryRef.current, cpu];
+        if (cpuHist.length > MAX_HISTORY) cpuHist.splice(0, cpuHist.length - MAX_HISTORY);
+        cpuHistoryRef.current = cpuHist;
+        setCpuHistory(cpuHist);
+
+        const mem = r.data.system.mem_percent ?? 0;
+        setMemPercent(mem);
+        setMemUsed(r.data.system.mem_used_bytes ?? 0);
+        setMemTotal(r.data.system.mem_total_bytes ?? 0);
+        const memHist = [...memHistoryRef.current, mem];
+        if (memHist.length > MAX_HISTORY) memHist.splice(0, memHist.length - MAX_HISTORY);
+        memHistoryRef.current = memHist;
+        setMemHistory(memHist);
       }).catch(() => {});
     };
 
-    fetchCpu();
-    intervalRef.current = setInterval(fetchCpu, 5000);
+    fetchMonitoring();
+    intervalRef.current = setInterval(fetchMonitoring, 5000);
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
   }, []);
 
@@ -139,26 +224,57 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* CPU Load Chart */}
-      <div className="stat-card" style={{ padding: '16px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={ACID_GREEN} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
-            </svg>
-            <span style={{ color: 'var(--text-primary)', fontSize: '15px', fontWeight: 600 }}>CPU Load</span>
+      {/* CPU & RAM Charts */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="stat-card" style={{ padding: '16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={ACID_GREEN} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+              </svg>
+              <span style={{ color: 'var(--text-primary)', fontSize: '15px', fontWeight: 600 }}>CPU Load</span>
+            </div>
+            <span style={{
+              color: ACID_GREEN,
+              fontSize: '22px',
+              fontWeight: 700,
+              fontFamily: 'monospace',
+              textShadow: '0 0 8px rgba(57,255,20,0.5)',
+            }}>
+              {cpuPercent.toFixed(1)}%
+            </span>
           </div>
-          <span style={{
-            color: ACID_GREEN,
-            fontSize: '22px',
-            fontWeight: 700,
-            fontFamily: 'monospace',
-            textShadow: '0 0 8px rgba(57,255,20,0.5)',
-          }}>
-            {cpuPercent.toFixed(1)}%
-          </span>
+          <CpuChart history={cpuHistory} />
         </div>
-        <CpuChart history={cpuHistory} />
+
+        <div className="stat-card" style={{ padding: '16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={CYAN} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <rect x="2" y="6" width="20" height="12" rx="2" />
+                <line x1="6" y1="10" x2="6" y2="14" />
+                <line x1="10" y1="10" x2="10" y2="14" />
+                <line x1="14" y1="10" x2="14" y2="14" />
+              </svg>
+              <span style={{ color: 'var(--text-primary)', fontSize: '15px', fontWeight: 600 }}>RAM Usage</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: '10px' }}>
+              <span style={{ color: 'var(--text-muted)', fontSize: '12px', fontFamily: 'monospace' }}>
+                {formatBytes(memUsed)} / {formatBytes(memTotal)}
+              </span>
+              <span style={{
+                color: CYAN,
+                fontSize: '22px',
+                fontWeight: 700,
+                fontFamily: 'monospace',
+                textShadow: `0 0 8px rgba(6,182,212,0.5)`,
+              }}>
+                {memPercent.toFixed(1)}%
+              </span>
+            </div>
+          </div>
+          <MemChart history={memHistory} />
+        </div>
       </div>
     </div>
   );

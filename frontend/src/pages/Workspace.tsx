@@ -4,6 +4,7 @@ import {
   DndContext,
   DragOverlay,
   MouseSensor,
+  TouchSensor,
   useSensor,
   useSensors,
   pointerWithin,
@@ -11,26 +12,8 @@ import {
   type DragEndEvent,
   type Modifier,
 } from '@dnd-kit/core';
-
-/**
- * Custom MouseSensor that ignores pointer events from inside FileTree's DndContext.
- * Without this, both nested DndContexts process the same events simultaneously,
- * causing dual state updates → infinite re-render loop (React #185).
- */
-class PanelMouseSensor extends MouseSensor {
-  static activators = [
-    {
-      eventName: 'onMouseDown' as const,
-      handler: ({ nativeEvent }: React.MouseEvent) => {
-        if ((nativeEvent.target as Element).closest('[data-filetree-dnd]')) {
-          return false;
-        }
-        return true;
-      },
-    },
-  ];
-}
 import { useAuth } from '../hooks/useAuth';
+import { renameFile } from '../api/files';
 import { useLayoutStore, type PanelId } from '../store/layoutStore';
 import { findPanelNode, isDetachedEditor } from '../store/layoutUtils';
 import { useWorkspaceStore } from '../store/workspaceStore';
@@ -148,18 +131,17 @@ export default function Workspace() {
 
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
 
-  // DnD sensors — PanelMouseSensor skips events from FileTree (data-filetree-dnd).
-  const mouseSensor = useSensor(PanelMouseSensor, { activationConstraint: { distance: 8 } });
-  const sensors = useSensors(mouseSensor);
+  const mouseSensor = useSensor(MouseSensor, { activationConstraint: { distance: 8 } });
+  const touchSensor = useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 5 } });
+  const sensors = useSensors(mouseSensor, touchSensor);
 
   // DnD handlers
   const handleDragStart = useCallback((event: DragStartEvent) => {
     const dragId = String(event.active.id);
-
-    // Ignore drags from nested DndContext (FileTree file/folder DnD)
-    if (dragId.startsWith('file:') || dragId.startsWith('folder:')) return;
-
     setActiveDragId(dragId);
+
+    // File tree DnD — don't set panel dragging state
+    if (dragId.startsWith('file:')) return;
 
     // Editor tab drag from File Manager
     if (dragId.startsWith('editor-tab:')) {
@@ -171,16 +153,33 @@ export default function Workspace() {
 
   const handleDragEnd = useCallback((event: DragEndEvent) => {
     const dragId = String(event.active.id);
-
-    // Ignore drags from nested DndContext (FileTree file/folder DnD)
-    if (dragId.startsWith('file:') || dragId.startsWith('folder:')) return;
-
     setActiveDragId(null);
     setDragging(null);
 
     const { over } = event;
     if (!over) return;
     const targetId = String(over.id);
+
+    // === File tree DnD: move file/folder into target folder ===
+    if (dragId.startsWith('file:') && targetId.startsWith('folder:')) {
+      const srcPath = dragId.slice('file:'.length);
+      const destFolder = targetId.slice('folder:'.length);
+      const fileName = srcPath.split(/[/\\]/).pop() || '';
+      const destPath = destFolder.replace(/\\/g, '/') + '/' + fileName;
+      const normSrc = srcPath.replace(/\\/g, '/');
+      // Don't move onto itself or into same parent
+      if (normSrc === destPath || normSrc.startsWith(destFolder.replace(/\\/g, '/') + '/')) return;
+      renameFile(srcPath, destPath)
+        .then(() => {
+          // Notify FileTree to refresh
+          window.dispatchEvent(new CustomEvent('filetree-refresh'));
+          import('react-hot-toast').then(m => m.default.success(`Moved ${fileName}`));
+        })
+        .catch(() => {
+          import('react-hot-toast').then(m => m.default.error('Failed to move file'));
+        });
+      return;
+    }
 
     // === Editor tab dragged from File Manager ===
     if (dragId.startsWith('editor-tab:')) {
@@ -255,6 +254,25 @@ export default function Workspace() {
   // Get drag overlay content
   const getDragOverlayContent = () => {
     if (!activeDragId) return null;
+
+    // File tree item
+    if (activeDragId.startsWith('file:')) {
+      const filePath = activeDragId.slice('file:'.length);
+      const fileName = filePath.split(/[/\\]/).pop() || 'File';
+      return (
+        <div className="drag-overlay-panel">
+          <div className="flex items-center gap-2 px-3 py-2">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <polyline points="14 2 14 8 20 8" />
+            </svg>
+            <span className="text-xs font-semibold" style={{ color: 'rgba(255,255,255,0.8)' }}>
+              {fileName}
+            </span>
+          </div>
+        </div>
+      );
+    }
 
     // Editor tab from FM
     if (activeDragId.startsWith('editor-tab:')) {

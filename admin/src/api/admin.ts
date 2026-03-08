@@ -28,7 +28,9 @@ export interface Invite {
   id: string;
   code: string;
   created_by: string;
+  created_by_username: string;
   used_by: string | null;
+  used_by_username: string;
   used_at: string | null;
   expires_at: string;
   created_at: string;

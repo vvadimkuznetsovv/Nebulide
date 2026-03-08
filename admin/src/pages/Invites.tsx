@@ -50,6 +50,8 @@ export default function Invites() {
             <tr>
               <th>Code</th>
               <th>Status</th>
+              <th>Created By</th>
+              <th>Used By</th>
               <th>Expires</th>
               <th>Actions</th>
             </tr>
@@ -72,6 +74,23 @@ export default function Invites() {
                       <span className="badge active">Active</span>
                     )}
                   </td>
+                  <td style={{ fontSize: '13px' }}>
+                    {inv.created_by_username || <span style={{ color: 'var(--text-muted)' }}>&mdash;</span>}
+                  </td>
+                  <td style={{ fontSize: '13px' }}>
+                    {used ? (
+                      <div>
+                        <span style={{ fontWeight: 600 }}>{inv.used_by_username}</span>
+                        {inv.used_at && (
+                          <div style={{ color: 'var(--text-muted)', fontSize: '12px', marginTop: '2px' }}>
+                            {new Date(inv.used_at).toLocaleString()}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      <span style={{ color: 'var(--text-muted)' }}>&mdash;</span>
+                    )}
+                  </td>
                   <td style={{ color: 'var(--text-muted)', fontSize: '13px' }}>
                     {new Date(inv.expires_at).toLocaleString()}
                   </td>
@@ -90,7 +109,7 @@ export default function Invites() {
             })}
             {invites.length === 0 && (
               <tr>
-                <td colSpan={4} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '24px' }}>
+                <td colSpan={6} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: '24px' }}>
                   No invites yet. Create one to invite users.
                 </td>
               </tr>

@@ -98,12 +98,14 @@ function SwipeableToastItem({ t, updateHeight }: {
     setTransform(0, 0, SPRING_TRANSITION, 1);
   }, [setTransform]);
 
+  const setRef = useCallback((el: HTMLDivElement | null) => {
+    (ref as React.MutableRefObject<HTMLDivElement | null>).current = el;
+    if (el) updateHeight(t.id, el.getBoundingClientRect().height);
+  }, [t.id, updateHeight]);
+
   return (
     <div
-      ref={(el) => {
-        (ref as React.MutableRefObject<HTMLDivElement | null>).current = el;
-        if (el) updateHeight(t.id, el.getBoundingClientRect().height);
-      }}
+      ref={setRef}
       style={{
         ...toastStyle,
         opacity: t.visible ? 1 : 0,
