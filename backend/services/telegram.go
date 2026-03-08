@@ -103,11 +103,15 @@ func (t *TelegramBot) handleMessage(msg *tgbotapi.Message) {
 	// Sanitize filename
 	fileName = sanitizeFileName(fileName)
 
-	// Download file
+	// Download file (Telegram Bot API limit: 20 MB for getFile)
 	fileURL, err := t.bot.GetFileDirectURL(fileID)
 	if err != nil {
 		log.Printf("[TelegramBot] GetFileDirectURL error: %v", err)
-		reply := tgbotapi.NewMessage(chatID, "Ошибка получения файла.")
+		errMsg := "Ошибка получения файла."
+		if strings.Contains(err.Error(), "file is too big") {
+			errMsg = "Файл слишком большой (лимит Telegram Bot API — 20 МБ). Попробуй сжать или разделить файл."
+		}
+		reply := tgbotapi.NewMessage(chatID, errMsg)
 		t.bot.Send(reply)
 		return
 	}
