@@ -1,5 +1,6 @@
 import { useToaster, toast as hotToast, ToastIcon, resolveValue } from 'react-hot-toast';
-import { useRef, useCallback, CSSProperties } from 'react';
+import { useRef, useCallback } from 'react';
+import type { CSSProperties } from 'react';
 
 const DISMISS_THRESHOLD = 60;
 const SPRING_TRANSITION = 'transform 0.25s ease, opacity 0.25s ease';
@@ -29,9 +30,8 @@ const toastStyle: CSSProperties = {
   touchAction: 'none' as const,
 };
 
-function SwipeableToastItem({ t, offset, updateHeight }: {
+function SwipeableToastItem({ t, updateHeight }: {
   t: { id: string; visible: boolean; type: string; message: any; icon?: any; };
-  offset: number;
   updateHeight: (id: string, height: number) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -155,7 +155,7 @@ export default function SwipeableToaster() {
               transition: 'transform 0.2s ease',
             }}
           >
-            <SwipeableToastItem t={t} offset={offset} updateHeight={updateHeight} />
+            <SwipeableToastItem t={t} updateHeight={updateHeight} />
           </div>
         );
       })}
