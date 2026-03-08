@@ -48,6 +48,8 @@ interface TermSession {
   notifyRerender: (() => void) | null;
   lastCols: number;
   lastRows: number;
+  /** Suppress resize events briefly after connect to prevent prompt duplication */
+  resizeLocked: boolean;
 }
 
 const sessions = new Map<string, TermSession>();
@@ -80,6 +82,7 @@ function createXterm(instanceId: string): TermSession {
     notifyRerender: null,
     lastCols: 0,
     lastRows: 0,
+    resizeLocked: false,
   };
 
   const xterm = new XTerm({
@@ -146,20 +149,17 @@ async function connectWs(instanceId: string): Promise<void> {
   const session = sessions.get(instanceId);
   if (!session) return;
 
-  session.xterm.write(_blue('[WS] Getting token...') + '\r\n');
-
   let token: string;
   try {
     token = await ensureFreshToken();
   } catch {
-    session.xterm.write(_yellow('[WS] Auth expired — refreshing...') + '\r\n');
+    session.xterm.write(_yellow('[WS] Auth expired — refreshing...]') + '\r\n');
     try {
       const newToken = await refreshTokenOnce();
       if (!newToken) throw new Error('null');
       token = newToken;
     } catch {
       session.xterm.write(_red('[WS] Auth failed — please reload or re-login]') + '\r\n');
-      session.xterm.write(_blue('[Right-click \u2192 Reconnect]') + '\r\n');
       session.notifyRerender?.();
       return;
     }
@@ -169,9 +169,7 @@ async function connectWs(instanceId: string): Promise<void> {
   const wsId = getWorkspaceSessionId();
   const wsInstanceId = `${instanceId}@ws:${wsId}`;
   const url = `${protocol}//${window.location.host}/ws/terminal?token=${token}&instanceId=${encodeURIComponent(wsInstanceId)}`;
-  const safeUrl = url.replace(/token=[^&]+/, 'token=***');
-  session.xterm.write(_blue(`[WS] Connecting ${safeUrl}`) + '\r\n');
-  console.log(`[Terminal] connectWs id=${instanceId} attempt=${session.reconnectAttempts} url=${safeUrl}`);
+  console.log(`[Terminal] connectWs id=${instanceId} attempt=${session.reconnectAttempts}`);
 
   const ws = new WebSocket(url);
   ws.binaryType = 'arraybuffer';
@@ -182,33 +180,22 @@ async function connectWs(instanceId: string): Promise<void> {
   ws.onopen = () => {
     opened = true;
     session.xterm.write(_green('[WS] Connected!') + '\r\n');
-    console.log(`[Terminal] ws.onopen id=${instanceId}`);
     session.reconnectAttempts = 0;
+    // Suppress external resize events briefly — the single resize below is enough.
+    // Without this, ResizeObserver / fit() / active-effect fire extra resizes
+    // that cause duplicate prompt lines on mobile.
+    session.resizeLocked = true;
     try {
       session.fitAddon.fit();
       const dims = session.fitAddon.proposeDimensions();
       if (dims) {
+        session.lastCols = dims.cols;
+        session.lastRows = dims.rows;
         ws.send(JSON.stringify({ type: 'resize', rows: dims.rows, cols: dims.cols }));
       }
     } catch { /* xterm may not be attached yet */ }
-
-    // Force shell to redraw prompt via SIGWINCH (dummy resize toggle).
-    // The replay buffer sends recent output, but the shell prompt line
-    // needs SIGWINCH to redraw after reconnect. Also refresh xterm viewport.
-    setTimeout(() => {
-      try {
-        const dims2 = session.fitAddon.proposeDimensions();
-        if (dims2 && ws.readyState === WebSocket.OPEN) {
-          ws.send(JSON.stringify({ type: 'resize', rows: dims2.rows + 1, cols: dims2.cols }));
-          setTimeout(() => {
-            if (ws.readyState === WebSocket.OPEN) {
-              ws.send(JSON.stringify({ type: 'resize', rows: dims2.rows, cols: dims2.cols }));
-            }
-            session.xterm.refresh(0, session.xterm.rows - 1);
-          }, 50);
-        }
-      } catch { /* ignore */ }
-    }, 150);
+    // Unlock resize after layout settles
+    setTimeout(() => { session.resizeLocked = false; }, 300);
   };
 
   ws.onmessage = (event) => {
@@ -219,31 +206,26 @@ async function connectWs(instanceId: string): Promise<void> {
     }
   };
 
-  ws.onerror = (e) => {
+  ws.onerror = () => {
     session.xterm.write(_red('[WS] Connection error!') + '\r\n');
-    console.warn(`[Terminal] ws.onerror id=${instanceId}`, e);
   };
 
   ws.onclose = (e) => {
-    const info = `code=${e.code} reason=${e.reason || 'none'} opened=${opened}`;
-    session.xterm.write(_yellow(`[WS] Closed ${info}`) + '\r\n');
-    console.log(`[Terminal] ws.onclose id=${instanceId} ${info} session.ws===ws:${session.ws === ws} inMap:${sessions.has(instanceId)}`);
+    const opened_ = opened;
+    console.log(`[Terminal] ws.onclose id=${instanceId} code=${e.code} opened=${opened_}`);
 
     // WS was superseded by a newer connection — don't reconnect
-    if (session.ws !== ws) {
-      console.log(`[Terminal] ws.onclose IGNORED (superseded) id=${instanceId}`);
-      return;
-    }
+    if (session.ws !== ws) return;
     session.ws = null;
 
     if (!sessions.has(instanceId)) return; // session was destroyed
 
     if (session.reconnectAttempts < MAX_RECONNECT) {
       session.reconnectAttempts++;
-      const delay = opened ? RECONNECT_DELAY : RECONNECT_DELAY_BACKEND_DOWN;
-      const label = opened
-        ? `[Shell exited \u2014 reconnecting ${session.reconnectAttempts}/${MAX_RECONNECT}...]`
-        : `[Backend unreachable \u2014 retrying ${session.reconnectAttempts}/${MAX_RECONNECT}...]`;
+      const delay = opened_ ? RECONNECT_DELAY : RECONNECT_DELAY_BACKEND_DOWN;
+      const label = opened_
+        ? `[Shell exited — reconnecting ${session.reconnectAttempts}/${MAX_RECONNECT}...]`
+        : `[Backend unreachable — retrying ${session.reconnectAttempts}/${MAX_RECONNECT}...]`;
       session.xterm.write(_yellow(label) + '\r\n');
       session.reconnectTimer = window.setTimeout(() => {
         session.reconnectTimer = null;
@@ -251,7 +233,6 @@ async function connectWs(instanceId: string): Promise<void> {
       }, delay);
     } else {
       session.xterm.write(_red('[Disconnected — max retries reached]') + '\r\n');
-      session.xterm.write(_blue('[Right-click \u2192 Reconnect]') + '\r\n');
       session.reconnectAttempts = 0;
     }
     session.notifyRerender?.();
@@ -274,21 +255,16 @@ function forceReconnect(instanceId: string): void {
     session.ws = null;
   }
   session.reconnectAttempts = 0;
-  session.xterm.write('\r\n' + _blue('[Reconnecting...]') + '\r\n');
   // Small delay to allow backend to finish starting after redeploy
   setTimeout(() => connectWs(instanceId), 500);
 }
 
 function getOrCreateSession(instanceId: string): TermSession {
   let session = sessions.get(instanceId);
-  const existed = !!session;
   if (!session) {
     session = createXterm(instanceId);
-    session.xterm.write(_blue(`[Terminal] Session created id=${instanceId}`) + '\r\n');
   }
-  const wsState = session.ws ? ['CONNECTING','OPEN','CLOSING','CLOSED'][session.ws.readyState] : 'null';
-  console.log(`[Terminal] getOrCreateSession id=${instanceId} existed=${existed} wsState=${wsState}`);
-  session.xterm.write(_blue(`[Terminal] getOrCreate existed=${existed} wsState=${wsState}`) + '\r\n');
+  console.log(`[Terminal] getOrCreateSession id=${instanceId} existed=${!!session.ws}`);
   if (!session.ws || session.ws.readyState > WebSocket.OPEN) {
     connectWs(instanceId);
   }
@@ -460,10 +436,10 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
     if (!s) return;
     try {
       s.fitAddon.fit();
+      // Skip sending resize while locked (connectWs already sent the initial resize)
+      if (s.resizeLocked) return;
       const dims = s.fitAddon.proposeDimensions();
       if (dims && s.ws?.readyState === WebSocket.OPEN) {
-        // Only send resize when dimensions actually changed — prevents
-        // redundant SIGWINCH signals that cause prompt duplication on mobile
         if (dims.cols !== s.lastCols || dims.rows !== s.lastRows) {
           s.lastCols = dims.cols;
           s.lastRows = dims.rows;
