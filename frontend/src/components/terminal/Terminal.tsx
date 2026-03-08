@@ -140,7 +140,6 @@ function createXterm(instanceId: string): TermSession {
 }
 
 // ANSI color helpers for in-terminal diagnostics
-const _blue = (s: string) => `\x1b[38;2;110;180;255m${s}\x1b[0m`;
 const _green = (s: string) => `\x1b[38;2;74;222;128m${s}\x1b[0m`;
 const _yellow = (s: string) => `\x1b[38;2;251;191;36m${s}\x1b[0m`;
 const _red = (s: string) => `\x1b[38;2;248;113;113m${s}\x1b[0m`;
