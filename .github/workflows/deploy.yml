@@ -42,4 +42,9 @@ jobs:
             HOOK'
             echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S chmod +x /etc/letsencrypt/renewal-hooks/deploy/reload-docker-nginx.sh
 
+            # SSH login Telegram notification script
+            echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S cp /opt/nebulide/ssh-notify.sh /opt/nebulide/ssh-notify.sh.tmp 2>/dev/null || true
+            echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S install -m 700 -o root -g root /opt/nebulide/ssh-notify.sh /opt/nebulide/ssh-notify.sh
+            echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S bash -c 'grep -q ssh-notify /etc/pam.d/sshd || echo "session optional pam_exec.so /opt/nebulide/ssh-notify.sh" >> /etc/pam.d/sshd'
+
             echo "Deployed successfully"

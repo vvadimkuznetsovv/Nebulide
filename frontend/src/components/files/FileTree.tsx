@@ -107,7 +107,7 @@ export default function FileTree({ rootPath, onFileSelect, onFileDoubleClick, on
   // DnD state
   const [draggedFile, setDraggedFile] = useState<FileEntry | null>(null);
   const mouseSensor = useSensor(MouseSensor, { activationConstraint: { distance: 8 } });
-  const touchSensor = useSensor(TouchSensor, { activationConstraint: { delay: 200, tolerance: 5 } });
+  const touchSensor = useSensor(TouchSensor, { activationConstraint: { delay: 250, tolerance: 3 } });
   const sensors = useSensors(mouseSensor, touchSensor);
 
   const loadFiles = async (path?: string) => {

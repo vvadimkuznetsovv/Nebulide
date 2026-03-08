@@ -1413,6 +1413,9 @@ body { animation: scrollbarShimmer 8s ease-in-out infinite; }
     margin: 1px 0;
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
+    touch-action: none;
+    -webkit-user-select: none;
+    user-select: none;
   }
   .file-tree-item:hover {
     background: rgba(127, 0, 255, 0.12);
@@ -1844,8 +1847,9 @@ body { animation: scrollbarShimmer 8s ease-in-out infinite; }
 @media (max-width: 640px) {
   .terminal-search-bar input { width: 120px; }
 
-  /* Allow native horizontal scroll on tab bar — dnd-kit uses delay-based activation */
+  /* Allow native scroll on tab bar & file tree — dnd-kit uses delay-based activation */
   .panel-tab { touch-action: manipulation; }
+  .file-tree-item { touch-action: manipulation; }
 }
 
 .prose a { color: var(--accent) !important; }
