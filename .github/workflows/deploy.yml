@@ -16,34 +16,13 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           passphrase: ${{ secrets.SSH_PASSPHRASE }}
-          script_stop: false
+          script_stop: true
           script: |
-            # ── Telegram helper ──
             TG_TOKEN=$(grep TELEGRAM_BOT_TOKEN /opt/nebulide/.env | cut -d= -f2)
             TG_CHAT=289626498
             HOST=$(hostname)
-            tg_send() {
-              [ -n "$TG_TOKEN" ] && curl -s -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
-                -d chat_id="$TG_CHAT" -d text="$1" -d parse_mode=HTML >/dev/null 2>&1 || true
-            }
+            tg_send() { [ -n "$TG_TOKEN" ] && curl -s -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" -d chat_id="$TG_CHAT" -d text="$1" -d parse_mode=HTML >/dev/null 2>&1 || true; }
 
-            # ── Error trap: send failure notification ──
-            deploy_failed() {
-              local code=$?
-              COMMIT=$(sudo git -C /opt/nebulide log -1 --format='%h %s' 2>/dev/null || echo "unknown")
-              tg_send "❌ <b>Deploy ошибка</b>
-🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥
-🖥 <code>${HOST}</code>
-📦 <code>${COMMIT}</code>
-💥 Exit code: ${code}
-🕐 $(date '+%Y-%m-%d %H:%M:%S %Z')
-🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥"
-              exit $code
-            }
-            trap deploy_failed ERR
-            set -e
-
-            # ── Deploy ──
             echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S git -C /opt/nebulide fetch origin main
             echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S git -C /opt/nebulide reset --hard origin/main
             echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S npm ci --prefix /opt/nebulide/frontend
@@ -82,13 +61,26 @@ jobs:
             echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S systemctl enable ssh-watcher.service
             echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S systemctl restart ssh-watcher.service
 
-            # ── Success notification ──
             COMMIT=$(sudo git -C /opt/nebulide log -1 --format='%h %s')
-            tg_send "✅ <b>Deploy успешен</b>
-🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩
-🖥 <code>${HOST}</code>
-📦 <code>${COMMIT}</code>
-🕐 $(date '+%Y-%m-%d %H:%M:%S %Z')
-🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩"
+            tg_send "$(printf '✅ <b>Deploy успешен</b>\n🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩\n🖥 <code>%s</code>\n📦 <code>%s</code>\n🕐 %s\n🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩' "$HOST" "$COMMIT" "$(date '+%Y-%m-%d %H:%M:%S %Z')")"
 
             echo "Deployed successfully"
+
+      - name: Notify deploy failure
+        if: failure()
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          port: ${{ secrets.SERVER_PORT }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          passphrase: ${{ secrets.SSH_PASSPHRASE }}
+          script: |
+            TG_TOKEN=$(grep TELEGRAM_BOT_TOKEN /opt/nebulide/.env | cut -d= -f2)
+            TG_CHAT=289626498
+            HOST=$(hostname)
+            COMMIT=$(sudo git -C /opt/nebulide log -1 --format='%h %s' 2>/dev/null || echo "unknown")
+            [ -n "$TG_TOKEN" ] && curl -s -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+              -d chat_id="$TG_CHAT" \
+              -d text="$(printf '❌ <b>Deploy ошибка</b>\n🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥\n🖥 <code>%s</code>\n📦 <code>%s</code>\n🕐 %s\n🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥' "$HOST" "$COMMIT" "$(date '+%Y-%m-%d %H:%M:%S %Z')")" \
+              -d parse_mode=HTML >/dev/null 2>&1 || true
