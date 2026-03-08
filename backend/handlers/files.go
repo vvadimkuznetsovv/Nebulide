@@ -1,7 +1,9 @@
 package handlers
 
 import (
+	"archive/zip"
 	"fmt"
+	"io"
 	"io/fs"
 	"net/http"
 	"os"
@@ -9,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"github.com/nwaples/rardecode/v2"
 
 	"nebulide/config"
 )
@@ -493,6 +496,158 @@ func (h *FilesHandler) SearchFiles(c *gin.Context) {
 	})
 
 	c.JSON(http.StatusOK, gin.H{"results": results})
+}
+
+// Extract unpacks a zip or rar archive into the same directory.
+func (h *FilesHandler) Extract(c *gin.Context) {
+	var req struct {
+		Path string `json:"path" binding:"required"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
+
+	fullPath, err := h.safePathForUser(req.Path, c)
+	if err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	info, err := os.Stat(fullPath)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
+		return
+	}
+	if info.IsDir() {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Cannot extract a directory"})
+		return
+	}
+
+	// Determine archive type
+	ext := strings.ToLower(filepath.Ext(fullPath))
+	destDir := filepath.Dir(fullPath)
+
+	// Use archive name as subfolder to avoid cluttering parent
+	baseName := strings.TrimSuffix(filepath.Base(fullPath), filepath.Ext(fullPath))
+	extractDir := filepath.Join(destDir, baseName)
+
+	// If folder already exists, add suffix
+	if _, err := os.Stat(extractDir); err == nil {
+		for i := 2; ; i++ {
+			extractDir = filepath.Join(destDir, fmt.Sprintf("%s(%d)", baseName, i))
+			if _, err := os.Stat(extractDir); os.IsNotExist(err) {
+				break
+			}
+		}
+	}
+
+	// Verify extractDir stays within sandbox
+	if _, err := h.safePathForUser(extractDir, c); err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	switch ext {
+	case ".zip":
+		if err := extractZip(fullPath, extractDir); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to extract: " + err.Error()})
+			return
+		}
+	case ".rar":
+		if err := extractRar(fullPath, extractDir); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to extract: " + err.Error()})
+			return
+		}
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Unsupported archive format. Supported: .zip, .rar"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Extracted", "path": extractDir})
+}
+
+func extractZip(archivePath, destDir string) error {
+	r, err := zip.OpenReader(archivePath)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+
+	for _, f := range r.File {
+		// Prevent zip slip
+		target := filepath.Join(destDir, f.Name)
+		if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(destDir)+string(os.PathSeparator)) && filepath.Clean(target) != filepath.Clean(destDir) {
+			continue
+		}
+
+		if f.FileInfo().IsDir() {
+			os.MkdirAll(target, 0755)
+			continue
+		}
+
+		os.MkdirAll(filepath.Dir(target), 0755)
+		outFile, err := os.Create(target)
+		if err != nil {
+			return err
+		}
+
+		rc, err := f.Open()
+		if err != nil {
+			outFile.Close()
+			return err
+		}
+
+		_, err = io.Copy(outFile, io.LimitReader(rc, 500*1024*1024)) // 500MB per file limit
+		rc.Close()
+		outFile.Close()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func extractRar(archivePath, destDir string) error {
+	r, err := rardecode.OpenReader(archivePath)
+	if err != nil {
+		return err
+	}
+	defer r.Close()
+
+	for {
+		header, err := r.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return err
+		}
+
+		target := filepath.Join(destDir, header.Name)
+		// Prevent path traversal
+		if !strings.HasPrefix(filepath.Clean(target), filepath.Clean(destDir)+string(os.PathSeparator)) && filepath.Clean(target) != filepath.Clean(destDir) {
+			continue
+		}
+
+		if header.IsDir {
+			os.MkdirAll(target, 0755)
+			continue
+		}
+
+		os.MkdirAll(filepath.Dir(target), 0755)
+		outFile, err := os.Create(target)
+		if err != nil {
+			return err
+		}
+
+		_, err = io.Copy(outFile, io.LimitReader(r, 500*1024*1024))
+		outFile.Close()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (h *FilesHandler) safePath(requestedPath string) (string, error) {

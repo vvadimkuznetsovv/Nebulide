@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback, useImperativeHandle, forwardRef, type ReactNode } from 'react';
-import { listFiles, readFile, deleteFile, writeFile, mkdirFile, renameFile, sendToTelegram, type FileEntry } from '../../api/files';
+import { listFiles, readFile, deleteFile, writeFile, mkdirFile, renameFile, sendToTelegram, extractArchive, type FileEntry } from '../../api/files';
 import FileTreeItem from './FileTreeItem';
 import ContextMenu, { type ContextMenuItem } from './ContextMenu';
 import { useLongPress } from '../../hooks/useLongPress';
@@ -34,6 +34,7 @@ const ICONS = {
   move: iconMulti('M4 4v7a4 4 0 0 0 4 4h12', 'M15 10l5 5-5 5'),
   trash: iconMulti('M3 6h18', 'M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2'),
   send: iconMulti('M22 2L11 13', 'M22 2l-7 20-4-9-9-4 20-7'),
+  extract: iconMulti('M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4', 'M7 10l5 5 5-5', 'M12 15V3'),
 };
 
 function getMenuItems(target: FileEntry | null, hasTelegram: boolean): ContextMenuItem[] {
@@ -59,6 +60,7 @@ function getMenuItems(target: FileEntry | null, hasTelegram: boolean): ContextMe
       { label: 'Delete', action: 'delete', danger: true, icon: ICONS.trash },
     ];
   }
+  const isArchive = /\.(zip|rar)$/i.test(target.name);
   const items: ContextMenuItem[] = [
     { label: 'New File', action: 'new-file', icon: ICONS.filePlus },
     { label: 'New Folder', action: 'new-folder', icon: ICONS.folderPlus },
@@ -67,6 +69,10 @@ function getMenuItems(target: FileEntry | null, hasTelegram: boolean): ContextMe
     { label: 'Move to...', action: 'move-to', icon: ICONS.move },
     { label: 'Open in New Tab', action: 'open-new-tab', icon: ICONS.externalLink },
   ];
+  if (isArchive) {
+    items.push({ type: 'separator' });
+    items.push({ label: 'Extract Here', action: 'extract', icon: ICONS.extract });
+  }
   if (hasTelegram) {
     items.push({ type: 'separator' });
     items.push({ label: 'Send to Telegram', action: 'send-telegram', icon: ICONS.send });
@@ -306,6 +312,19 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree({ r
           listFiles(currentPath).then(({ data }) => {
             setMoveFolders((data.files || []).filter(f => f.is_dir && f.path !== target.path));
           });
+        }
+        break;
+      case 'extract':
+        if (target && !target.is_dir) {
+          const parentDir = target.path.split(/[/\\]/).slice(0, -1).join('/');
+          toast.promise(
+            extractArchive(target.path).then(() => refreshFolder(parentDir)),
+            {
+              loading: 'Extracting...',
+              success: 'Extracted',
+              error: (err) => err?.response?.data?.error || 'Failed to extract',
+            }
+          );
         }
         break;
       case 'send-telegram':

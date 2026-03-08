@@ -56,6 +56,10 @@ export interface SearchResponse {
 export const searchFiles = (params: { q: string; type?: 'content' | 'name'; include?: string; exclude?: string }) =>
   api.get<SearchResponse>('/files/search', { params });
 
+// Extract archive (zip/rar) in place
+export const extractArchive = (path: string) =>
+  api.post('/files/extract', { path });
+
 // Send file to user's Telegram via bot
 export const sendToTelegram = (filePath: string) =>
   api.post('/telegram/send', { file_path: filePath });

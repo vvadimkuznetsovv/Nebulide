@@ -148,6 +148,7 @@ func main() {
 		protected.POST("/files/mkdir", filesHandler.Mkdir)
 		protected.POST("/files/rename", filesHandler.Rename)
 		protected.GET("/files/search", filesHandler.SearchFiles)
+		protected.POST("/files/extract", filesHandler.Extract)
 	}
 
 	// Telegram route (own auth — accepts both regular JWT and scoped tg-send tokens)

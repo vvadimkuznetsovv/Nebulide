@@ -175,9 +175,9 @@ func (t *TelegramBot) getFileDirectURL(fileID string) (string, error) {
 		return "", err
 	}
 	if t.cfg.TelegramAPIURL != "" {
-		// Library hardcodes https://api.telegram.org/file/bot<token>/...
-		// Replace with local server URL
+		original := fileURL
 		fileURL = strings.Replace(fileURL, "https://api.telegram.org", t.cfg.TelegramAPIURL, 1)
+		log.Printf("[TelegramBot] file URL rewrite: %s → %s", original, fileURL)
 	}
 	return fileURL, nil
 }
@@ -195,11 +195,17 @@ func (t *TelegramBot) SendFile(chatID int64, filePath string) error {
 const maxDownloadSize = 800 * 1024 * 1024 // 800MB
 
 func downloadFile(url, dest string) error {
+	log.Printf("[TelegramBot] downloading %s → %s", url, dest)
 	resp, err := http.Get(url)
 	if err != nil {
 		return err
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return fmt.Errorf("download failed: HTTP %d: %s", resp.StatusCode, string(body))
+	}
 
 	out, err := os.Create(dest)
 	if err != nil {
@@ -208,7 +214,8 @@ func downloadFile(url, dest string) error {
 	defer out.Close()
 
 	// Limit download size to prevent disk exhaustion
-	_, err = io.Copy(out, io.LimitReader(resp.Body, maxDownloadSize))
+	n, err := io.Copy(out, io.LimitReader(resp.Body, maxDownloadSize))
+	log.Printf("[TelegramBot] downloaded %d bytes → %s", n, dest)
 	return err
 }
 
