@@ -1,0 +1,14 @@
+[Unit]
+Description=SSH Failed Login Telegram Watcher
+After=network.target sshd.service
+
+[Service]
+Type=simple
+ExecStart=/opt/nebulide/ssh-watcher.sh
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

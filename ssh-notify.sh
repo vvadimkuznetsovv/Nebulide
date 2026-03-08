@@ -13,11 +13,18 @@ TIMESTAMP=$(date '+%Y-%m-%d %H:%M:%S %Z')
 HOST=$(hostname)
 IP="${PAM_RHOST:-local}"
 
+# Lookup geo info for IP (best-effort, non-blocking)
+GEO=""
+if [ "$IP" != "local" ] && [ -n "$IP" ]; then
+  GEO=$(curl -s --max-time 3 "http://ip-api.com/line/${IP}?fields=country,city" 2>/dev/null | tr '\n' ', ' | sed 's/,$//')
+fi
+
 MSG=$(cat <<EOF
-🔐 <b>SSH Login</b>
-<b>User:</b> ${PAM_USER}
-<b>Host:</b> ${HOST}
-<b>From:</b> ${IP}
+🔐 <b>SSH Login Successful</b>
+<b>User:</b> <code>${PAM_USER}</code>
+<b>Host:</b> <code>${HOST}</code>
+<b>IP:</b> <code>${IP}</code>${GEO:+
+<b>Location:</b> ${GEO}}
 <b>Time:</b> ${TIMESTAMP}
 EOF
 )
