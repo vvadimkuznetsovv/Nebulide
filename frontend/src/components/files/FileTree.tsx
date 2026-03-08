@@ -103,6 +103,7 @@ export default function FileTree({ rootPath, onFileSelect, onFileDoubleClick, on
   const [childrenCache, setChildrenCache] = useState<Map<string, FileEntry[]>>(new Map());
   const [loadingFolders, setLoadingFolders] = useState<Set<string>>(new Set());
   const [creatingInFolder, setCreatingInFolder] = useState<string | null>(null);
+  const [workspaceRoot, setWorkspaceRoot] = useState<string>('');
 
   // DnD state — mouse only (touch DnD disabled, use context menu to move files on mobile)
   const [draggedFile, setDraggedFile] = useState<FileEntry | null>(null);
@@ -245,6 +246,8 @@ export default function FileTree({ rootPath, onFileSelect, onFileDoubleClick, on
         setFiles(data.files || []);
         setCurrentPath(data.path);
         saveCurrentPath(data.path);
+        // Capture workspace root on first load (no explicit rootPath = workspace dir)
+        if (!workspaceRoot) setWorkspaceRoot(data.path);
         // Fetch children for each expanded folder in parallel
         if (saved.size > 0) {
           const fetches = [...saved].map((fp) =>
@@ -610,65 +613,119 @@ export default function FileTree({ rootPath, onFileSelect, onFileDoubleClick, on
     >
       {/* Header */}
       <div
-        className="flex items-center gap-2 px-3 py-2 text-xs"
-        style={{
-          borderBottom: '1px solid var(--glass-border)',
-          color: 'var(--text-secondary)',
-        }}
+        className="flex flex-col"
+        style={{ borderBottom: '1px solid var(--glass-border)' }}
       >
-        {canGoUp && (
-          <button
-            type="button"
-            onClick={goUp}
-            className="hover:opacity-70 transition-opacity px-1"
-            title="Go up"
-          >
-            ..
-          </button>
-        )}
-        <span
-          className="flex-1 font-mono whitespace-nowrap"
-          ref={(el) => { if (el) requestAnimationFrame(() => { el.scrollLeft = el.scrollWidth; }); }}
-          style={{ overflowX: 'auto', scrollbarWidth: 'none' }}
-          title={currentPath}
+        {/* Path breadcrumb */}
+        <div
+          className="flex items-center gap-1 px-3 py-1.5 text-xs"
+          style={{ color: 'var(--text-secondary)' }}
         >
-          {currentPath.replace(/\\/g, '/')}
-        </span>
-        {sharedDir && (
+          {canGoUp && (
+            <button
+              type="button"
+              onClick={goUp}
+              className="hover:opacity-70 transition-opacity px-1 shrink-0"
+              title="Go up"
+            >
+              ..
+            </button>
+          )}
+          <span
+            className="flex-1 font-mono whitespace-nowrap"
+            ref={(el) => { if (el) requestAnimationFrame(() => { el.scrollLeft = el.scrollWidth; }); }}
+            style={{ overflowX: 'auto', scrollbarWidth: 'none' }}
+            title={currentPath}
+          >
+            {currentPath.replace(/\\/g, '/')}
+          </span>
+        </div>
+        {/* Quick nav buttons */}
+        <div
+          className="flex items-center gap-1 px-2 pb-1.5 text-xs"
+          style={{ color: 'var(--text-secondary)' }}
+        >
+          {/* Home (workspace root) */}
           <button
             type="button"
             onClick={() => {
+              if (workspaceRoot && currentPath !== workspaceRoot) {
+                setExpandedFolders(new Set());
+                setChildrenCache(new Map());
+                setCreatingInFolder(null);
+                loadFiles(workspaceRoot);
+              }
+            }}
+            className="hover:opacity-70 transition-opacity p-1 rounded"
+            title="Home (workspace root)"
+            style={{ color: (!workspaceRoot || currentPath === workspaceRoot) ? 'var(--accent-bright)' : undefined }}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+              <polyline points="9 22 9 12 15 12 15 22" />
+            </svg>
+          </button>
+          {/* Uploads (Telegram bot files) */}
+          <button
+            type="button"
+            onClick={() => {
+              const uploadsPath = (workspaceRoot || currentPath) + '/uploads';
               setExpandedFolders(new Set());
               setChildrenCache(new Map());
               setCreatingInFolder(null);
-              loadFiles(sharedDir);
+              loadFiles(uploadsPath);
             }}
-            className="hover:opacity-70 transition-opacity p-0.5"
-            title="Shared folder"
-            style={{ color: currentPath === sharedDir ? 'var(--accent-bright)' : undefined }}
+            className="hover:opacity-70 transition-opacity p-1 rounded"
+            title="Uploads (Telegram bot files)"
+            style={{ color: currentPath.endsWith('/uploads') ? 'var(--accent-bright)' : undefined }}
           >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
               stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-              <circle cx="9" cy="7" r="4" />
-              <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-              <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+              <polyline points="17 8 12 3 7 8" />
+              <line x1="12" y1="3" x2="12" y2="15" />
             </svg>
           </button>
-        )}
-        <button
-          type="button"
-          onClick={handleRefresh}
-          className="hover:opacity-70 transition-opacity p-0.5"
-          title="Refresh"
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-            stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <polyline points="23 4 23 10 17 10" />
-            <polyline points="1 20 1 14 7 14" />
-            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
-          </svg>
-        </button>
+          {/* Shared folder */}
+          {sharedDir && (
+            <button
+              type="button"
+              onClick={() => {
+                setExpandedFolders(new Set());
+                setChildrenCache(new Map());
+                setCreatingInFolder(null);
+                loadFiles(sharedDir);
+              }}
+              className="hover:opacity-70 transition-opacity p-1 rounded"
+              title="Shared folder"
+              style={{ color: currentPath === sharedDir ? 'var(--accent-bright)' : undefined }}
+            >
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
+                <circle cx="9" cy="7" r="4" />
+                <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
+                <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+              </svg>
+            </button>
+          )}
+          <div className="flex-1" />
+          {/* Refresh */}
+          <button
+            type="button"
+            onClick={handleRefresh}
+            className="hover:opacity-70 transition-opacity p-1 rounded"
+            title="Refresh"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="23 4 23 10 17 10" />
+              <polyline points="1 20 1 14 7 14" />
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       {/* File list with DnD */}
@@ -687,7 +744,7 @@ export default function FileTree({ rootPath, onFileSelect, onFileDoubleClick, on
               <span className="glow-pulse inline-block">Loading...</span>
             </div>
           ) : (
-            <div className="inline-block min-w-full">
+            <>
               {/* Root-level inline creation input */}
               {creatingType && !creatingInFolder && renderCreationInput(0)}
 
@@ -698,7 +755,7 @@ export default function FileTree({ rootPath, onFileSelect, onFileDoubleClick, on
               ) : (
                 renderItems(files, 0)
               )}
-            </div>
+            </>
           )}
         </RootDropZone>
 
@@ -758,7 +815,7 @@ function RootDropZone({
   return (
     <div
       ref={setNodeRef}
-      className="flex-1 overflow-y-auto overflow-x-auto py-1 select-none"
+      className="flex-1 overflow-y-auto py-1 select-none"
       style={{
         WebkitTouchCallout: 'none',
         outline: isOver ? '2px dashed var(--accent)' : 'none',

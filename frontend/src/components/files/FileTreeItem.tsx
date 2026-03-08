@@ -1,4 +1,4 @@
-import { useRef } from 'react';
+import { useRef, useCallback } from 'react';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import type { FileEntry } from '../../api/files';
 import { useLongPress, mergeEventHandlers } from '../../hooks/useLongPress';
@@ -104,10 +104,12 @@ export default function FileTreeItem({
   });
 
   // Merge refs for folder items (both draggable + droppable)
-  const setRef = (el: HTMLElement | null) => {
+  // MUST be useCallback — inline ref functions change identity every render,
+  // causing @dnd-kit to re-register nodes → setState → re-render → infinite loop (React #185)
+  const setRef = useCallback((el: HTMLElement | null) => {
     setDragRef(el);
     if (file.is_dir) setDropRef(el);
-  };
+  }, [setDragRef, setDropRef, file.is_dir]);
 
   // Merge long-press + drag listeners
   const mergedHandlers = mergeEventHandlers(longPressHandlers, dragListeners);
