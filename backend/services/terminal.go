@@ -5,12 +5,26 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	gopty "github.com/aymanbagabas/go-pty"
 )
+
+const scrollbackDir = "/tmp/terminal-scrollback"
+
+// sanitizeKey makes a session key safe for use as a filename.
+func sanitizeKey(key string) string {
+	r := strings.NewReplacer("/", "_", "\\", "_", ":", "_", " ", "_", "%", "_")
+	return r.Replace(key)
+}
+
+func scrollbackPath(sessionKey string) string {
+	return filepath.Join(scrollbackDir, sanitizeKey(sessionKey)+".buf")
+}
 
 // ── multiWriter: broadcasts PTY output to all connected WebSocket clients ──
 
@@ -23,11 +37,64 @@ type multiWriter struct {
 	// replayBuf stores the last N bytes of PTY output so that new
 	// connections see the current prompt / recent output.
 	replayBuf []byte
+
+	// Persistent scrollback: file path and dirty flag for periodic flush.
+	filePath string
+	dirty    bool
+	stopCh   chan struct{}
 }
 
-func newMultiWriter() *multiWriter {
-	return &multiWriter{
-		writers: make(map[io.Writer]io.Closer),
+func newMultiWriter(filePath string) *multiWriter {
+	os.MkdirAll(scrollbackDir, 0755)
+
+	mw := &multiWriter{
+		writers:  make(map[io.Writer]io.Closer),
+		filePath: filePath,
+		stopCh:   make(chan struct{}),
+	}
+
+	// Load existing scrollback from disk (survives container restart)
+	if data, err := os.ReadFile(filePath); err == nil && len(data) > 0 {
+		if len(data) > replayBufCap {
+			data = data[len(data)-replayBufCap:]
+		}
+		mw.replayBuf = data
+		log.Printf("[TerminalService] loaded scrollback %d bytes from %s", len(data), filePath)
+	}
+
+	// Periodic flush to disk every 5 seconds
+	go mw.flushLoop()
+
+	return mw
+}
+
+func (mw *multiWriter) flushLoop() {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			mw.flushToDisk()
+		case <-mw.stopCh:
+			mw.flushToDisk() // final flush
+			return
+		}
+	}
+}
+
+func (mw *multiWriter) flushToDisk() {
+	mw.mu.Lock()
+	if !mw.dirty || len(mw.replayBuf) == 0 {
+		mw.mu.Unlock()
+		return
+	}
+	buf := make([]byte, len(mw.replayBuf))
+	copy(buf, mw.replayBuf)
+	mw.dirty = false
+	mw.mu.Unlock()
+
+	if err := os.WriteFile(mw.filePath, buf, 0644); err != nil {
+		log.Printf("[TerminalService] scrollback flush error: %v", err)
 	}
 }
 
@@ -42,6 +109,7 @@ func (mw *multiWriter) Write(p []byte) (int, error) {
 	if len(mw.replayBuf) > replayBufCap {
 		mw.replayBuf = mw.replayBuf[len(mw.replayBuf)-replayBufCap:]
 	}
+	mw.dirty = true
 
 	for w, closer := range mw.writers {
 		if _, err := w.Write(p); err != nil {
@@ -71,6 +139,20 @@ func (mw *multiWriter) Remove(w io.Writer) {
 	mw.mu.Lock()
 	defer mw.mu.Unlock()
 	delete(mw.writers, w)
+}
+
+// Stop stops the flush loop and performs a final flush.
+func (mw *multiWriter) Stop() {
+	select {
+	case <-mw.stopCh:
+	default:
+		close(mw.stopCh)
+	}
+}
+
+// DeleteFile removes the scrollback file from disk.
+func (mw *multiWriter) DeleteFile() {
+	os.Remove(mw.filePath)
 }
 
 // ── TerminalService ──
@@ -135,9 +217,9 @@ func (s *TerminalService) GetOrCreate(sessionKey string, workingDir string, sand
 		if alive {
 			return existing, nil
 		}
-		// Shell is dead — clean up
+		// Shell is dead — clean up (keep scrollback file for replay)
 		log.Printf("[TerminalService] dead session, recreating key=%s", sessionKey)
-		existing.Close()
+		existing.CloseKeepScrollback()
 		delete(s.sessions, sessionKey)
 	} else {
 		log.Printf("[TerminalService] no existing session, creating new key=%s", sessionKey)
@@ -152,7 +234,7 @@ func (s *TerminalService) Create(sessionKey string, workingDir string, sandboxed
 	defer s.mu.Unlock()
 
 	if existing, ok := s.sessions[sessionKey]; ok {
-		existing.Close()
+		existing.CloseKeepScrollback()
 		delete(s.sessions, sessionKey)
 	}
 
@@ -214,6 +296,12 @@ func (s *TerminalService) createLocked(sessionKey string, workingDir string, san
 		env = append(env, "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
 	}
 	env = append(env, "TERM=xterm-256color", "COLORTERM=truecolor")
+
+	// Per-user bash history: persists across deploys in workspace directory.
+	// All terminals of the same user share one history file.
+	histFile := filepath.Join(workingDir, ".nebulide_history")
+	env = append(env, "HISTFILE="+histFile, "HISTSIZE=10000", "HISTFILESIZE=20000")
+
 	for k, v := range extraEnv {
 		env = append(env, k+"="+v)
 	}
@@ -229,7 +317,7 @@ func (s *TerminalService) createLocked(sessionKey string, workingDir string, san
 		Pty:  p,
 		Cmd:  cmd,
 		Done: make(chan struct{}),
-		mw:   newMultiWriter(),
+		mw:   newMultiWriter(scrollbackPath(sessionKey)),
 	}
 
 	log.Printf("[TerminalService] shell started pid=%d key=%s", cmd.Process.Pid, sessionKey)
@@ -326,7 +414,23 @@ func (ts *TerminalSession) RemoveWriter(w io.Writer) {
 	ts.mw.Remove(w)
 }
 
+// Close terminates the session and deletes its scrollback file.
+// Used when user explicitly closes a terminal.
 func (ts *TerminalSession) Close() {
+	ts.mw.Stop()
+	ts.mw.DeleteFile()
+	if ts.Pty != nil {
+		ts.Pty.Close()
+	}
+	if ts.Cmd != nil && ts.Cmd.Process != nil {
+		ts.Cmd.Process.Kill()
+	}
+}
+
+// CloseKeepScrollback terminates the session but keeps the scrollback file.
+// Used when shell dies or container restarts — scrollback survives for replay.
+func (ts *TerminalSession) CloseKeepScrollback() {
+	ts.mw.Stop()
 	if ts.Pty != nil {
 		ts.Pty.Close()
 	}
