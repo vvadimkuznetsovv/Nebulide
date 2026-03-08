@@ -34,8 +34,8 @@ export default function MessageBubble({ role, content, isStreaming, onContextMen
         style={
           isUser
             ? {
-                background: 'linear-gradient(135deg, rgba(110, 180, 255, 0.3), rgba(110, 180, 255, 0.15))',
-                border: '1px solid rgba(110, 180, 255, 0.3)',
+                background: 'linear-gradient(135deg, rgba(var(--accent-light-rgb), 0.3), rgba(var(--accent-light-rgb), 0.15))',
+                border: '1px solid rgba(var(--accent-light-rgb), 0.3)',
                 color: '#fff',
                 WebkitBackdropFilter: 'blur(16px)',
                 backdropFilter: 'blur(16px)',

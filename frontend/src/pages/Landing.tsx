@@ -7,9 +7,9 @@ export default function Landing() {
 
       {/* Floating orbs */}
       <div className="fixed top-20 right-1/4 w-72 h-72 rounded-full opacity-20 blur-3xl pointer-events-none"
-           style={{ background: 'radial-gradient(circle, rgba(110,180,255,0.5), transparent)' }} />
+           style={{ background: 'radial-gradient(circle, rgba(var(--accent-light-rgb),0.5), transparent)' }} />
       <div className="fixed bottom-20 left-1/3 w-56 h-56 rounded-full opacity-15 blur-3xl pointer-events-none"
-           style={{ background: 'radial-gradient(circle, rgba(160,100,255,0.5), transparent)' }} />
+           style={{ background: 'radial-gradient(circle, rgba(var(--accent-rgb),0.5), transparent)' }} />
 
       <div className="relative z-10 max-w-lg text-center">
         {/* Logo */}

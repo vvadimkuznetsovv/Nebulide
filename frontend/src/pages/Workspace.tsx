@@ -226,11 +226,12 @@ export default function Workspace() {
         destFolder = filePath.split(/[/\\]/).slice(0, -1).join('/');
       }
       const fileName = srcPath.split(/[/\\]/).pop() || '';
-      const destPath = destFolder.replace(/\\/g, '/') + '/' + fileName;
+      const normDest = destFolder.replace(/\\/g, '/');
+      const destPath = normDest + '/' + fileName;
       const normSrc = srcPath.replace(/\\/g, '/');
       const srcParent = normSrc.split('/').slice(0, -1).join('/');
-      // Don't move onto itself, into same parent, or into own subtree
-      if (normSrc === destPath || srcParent === destFolder.replace(/\\/g, '/') || normSrc.startsWith(destFolder.replace(/\\/g, '/') + '/')) return;
+      // Guards: same path, already in folder, folder onto itself, or dest inside source (cycle)
+      if (normSrc === destPath || srcParent === normDest || normDest === normSrc || normDest.startsWith(normSrc + '/')) return;
       renameFile(srcPath, destPath)
         .then(() => {
           window.dispatchEvent(new CustomEvent('filetree-refresh'));

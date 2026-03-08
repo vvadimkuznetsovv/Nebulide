@@ -1098,19 +1098,19 @@
       color: rgba(255, 255, 255, 0.95);
       background: rgba(var(--accent-rgb), 0.15);
       border-color: rgba(var(--accent-light-rgb), 0.7);
-      box-shadow: 0 0 10px 3px rgba(160, 80, 255, 0.5);
+      box-shadow: 0 0 10px 3px rgba(var(--accent-rgb), 0.5);
     }
     .tab-close-btn {
       animation: none;
       color: rgba(255, 255, 255, 0.95);
       background: rgba(var(--accent-rgb), 0.15);
       border-color: rgba(var(--accent-light-rgb), 0.7);
-      box-shadow: 0 0 10px 3px rgba(160, 80, 255, 0.5);
+      box-shadow: 0 0 10px 3px rgba(var(--accent-rgb), 0.5);
     }
 
     /* Panel borders — more visible on mobile */
     .workspace-glass-panel {
-      border-color: rgba(180, 130, 255, 0.35);
+      border-color: rgba(var(--accent-light-rgb), 0.35);
       box-shadow: 0px 4px 20px rgba(0, 0, 0, 0.3), 0 0 12px 1px rgba(var(--accent-rgb), 0.2);
     }
     /* glassShimmer on selected file in tree */
@@ -1125,7 +1125,7 @@
       box-shadow: 0 0 6px rgba(var(--accent-rgb), 0.3);
     }
     /* Scrollbar — static purple */
-    ::-webkit-scrollbar-thumb { background: rgba(140, 50, 255, 0.6); }
+    ::-webkit-scrollbar-thumb { background: rgba(var(--accent-rgb), 0.6); }
 
     /* Login card mobile */
     .login-card {
@@ -1165,7 +1165,7 @@
 
     /* Login card border more visible on mobile */
     .login-card {
-      border-color: rgba(180, 130, 255, 0.4) !important;
+      border-color: rgba(var(--accent-light-rgb), 0.4) !important;
       box-shadow: 0px 8px 32px rgba(0, 0, 0, 0.4), 0 0 20px 2px rgba(var(--accent-rgb), 0.2) !important;
     }
   }
@@ -1177,20 +1177,15 @@
   font-weight: 400;
 }
 
-@property --sb-color {
-  syntax: '<color>';
-  initial-value: rgba(160, 80, 255, 0.5);
-  inherits: true;
-}
 @keyframes scrollbarShimmer {
-  0%, 100% { --sb-color: rgba(140, 50, 255, 0.5); }
-  50% { --sb-color: rgba(220, 180, 255, 0.75); }
+  0%, 100% { --sb-color: rgba(var(--accent-rgb), 0.5); }
+  50% { --sb-color: rgba(var(--accent-light-rgb), 0.75); }
 }
-body { animation: scrollbarShimmer 8s ease-in-out infinite; }
+body { --sb-color: rgba(var(--accent-rgb), 0.5); animation: scrollbarShimmer 8s ease-in-out infinite; }
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--sb-color); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(220, 180, 255, 0.9); }
+::-webkit-scrollbar-thumb:hover { background: rgba(var(--accent-light-rgb), 0.9); }
 
   /* ==========================================
      PANEL MERGE TAB BAR — merged panels with tabs

@@ -82,7 +82,7 @@ export default function MessageList({ messages, streamContent, isStreaming }: Me
           <div
             className="text-6xl mb-6 glow-pulse"
             style={{
-              background: 'linear-gradient(135deg, var(--accent), #a78bfa)',
+              background: 'linear-gradient(135deg, var(--accent), var(--accent-light))',
               WebkitBackgroundClip: 'text',
               WebkitTextFillColor: 'transparent',
               filter: 'drop-shadow(0 0 20px var(--accent-glow))',

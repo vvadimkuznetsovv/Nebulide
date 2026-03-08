@@ -780,7 +780,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                         alignItems: 'center',
                         justifyContent: 'center',
                         background: 'rgba(var(--accent-rgb), 0.15)',
-                        border: '1px solid rgba(160, 100, 255, 0.4)',
+                        border: '1px solid rgba(var(--accent-rgb), 0.4)',
                         color: 'rgba(255,255,255,0.8)',
                         backdropFilter: 'blur(8px)',
                         boxShadow: '0 0 6px 1px rgba(var(--accent-rgb),0.2)',
