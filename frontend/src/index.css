@@ -1414,7 +1414,7 @@ body { --sb-color: rgba(var(--accent-rgb), 0.5); animation: scrollbarShimmer 8s 
     -webkit-tap-highlight-color: transparent;
     -webkit-user-select: none;
     user-select: none;
-    touch-action: manipulation;
+    touch-action: none;
   }
   .file-tree-item:hover {
     background: rgba(var(--accent-rgb), 0.12);
