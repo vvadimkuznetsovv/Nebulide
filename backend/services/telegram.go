@@ -143,12 +143,12 @@ func (t *TelegramBot) handleMessage(msg *tgbotapi.Message) {
 	os.MkdirAll(uploadsDir, 0755)
 
 	destPath := filepath.Join(uploadsDir, fileName)
-	// Avoid overwriting
+	// Avoid overwriting — name(2).ext, name(3).ext, ...
 	if _, err := os.Stat(destPath); err == nil {
 		ext := filepath.Ext(fileName)
 		base := strings.TrimSuffix(fileName, ext)
-		for i := 1; ; i++ {
-			destPath = filepath.Join(uploadsDir, fmt.Sprintf("%s_%d%s", base, i, ext))
+		for i := 2; ; i++ {
+			destPath = filepath.Join(uploadsDir, fmt.Sprintf("%s(%d)%s", base, i, ext))
 			if _, err := os.Stat(destPath); os.IsNotExist(err) {
 				break
 			}
