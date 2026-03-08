@@ -42,11 +42,13 @@ services:
     depends_on:
       - postgres
       - redis
+      - telegram-bot-api
     env_file:
       - .env
     environment:
       DB_HOST: postgres
       REDIS_URL: redis:6379
+      TELEGRAM_API_URL: http://telegram-bot-api:8081
     volumes:
       - /home/nebulide/workspace:/home/nebulide/workspace
       - /home/nebulide/workspaces:/home/nebulide/workspaces
@@ -56,6 +58,16 @@ services:
       - ssh_keys:/root/.ssh
       - ~/.ssh:/root/.ssh-mount:ro
       - claude_data:/root/.claude
+
+  telegram-bot-api:
+    image: aiogram/telegram-bot-api:latest
+    restart: unless-stopped
+    environment:
+      TELEGRAM_API_ID: ${TELEGRAM_API_ID}
+      TELEGRAM_API_HASH: ${TELEGRAM_API_HASH}
+      TELEGRAM_LOCAL: "true"
+    volumes:
+      - telegram_bot_api_data:/var/lib/telegram-bot-api
 
   code-server:
     build:
@@ -80,4 +92,5 @@ volumes:
   claude_data:
   shared_data:
   code-server-config:
+  telegram_bot_api_data:
   nginx_logs:

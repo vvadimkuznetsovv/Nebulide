@@ -35,6 +35,7 @@ type Config struct {
 	AdminPassword string
 
 	TelegramBotToken string
+	TelegramAPIURL   string
 }
 
 func Load() *Config {
@@ -66,6 +67,7 @@ func Load() *Config {
 		AdminPassword: getEnv("ADMIN_PASSWORD", ""),
 
 		TelegramBotToken: getEnv("TELEGRAM_BOT_TOKEN", ""),
+		TelegramAPIURL:   getEnv("TELEGRAM_API_URL", ""),
 	}
 }
 

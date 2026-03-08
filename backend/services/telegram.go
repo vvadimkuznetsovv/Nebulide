@@ -26,10 +26,24 @@ func NewTelegramBot(cfg *config.Config, db *gorm.DB) (*TelegramBot, error) {
 	if cfg.TelegramBotToken == "" {
 		return nil, fmt.Errorf("TELEGRAM_BOT_TOKEN not set")
 	}
-	bot, err := tgbotapi.NewBotAPI(cfg.TelegramBotToken)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create telegram bot: %w", err)
+
+	var bot *tgbotapi.BotAPI
+	var err error
+
+	if cfg.TelegramAPIURL != "" {
+		// Use local Telegram Bot API server (2GB file limit)
+		bot, err = tgbotapi.NewBotAPIWithAPIEndpoint(cfg.TelegramBotToken, cfg.TelegramAPIURL+"/bot%s/%s")
+		if err != nil {
+			return nil, fmt.Errorf("failed to create telegram bot (local API): %w", err)
+		}
+		log.Printf("[TelegramBot] Using local API: %s", cfg.TelegramAPIURL)
+	} else {
+		bot, err = tgbotapi.NewBotAPI(cfg.TelegramBotToken)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create telegram bot: %w", err)
+		}
 	}
+
 	log.Printf("[TelegramBot] Authorized as @%s", bot.Self.UserName)
 	return &TelegramBot{bot: bot, cfg: cfg, db: db}, nil
 }
@@ -103,13 +117,17 @@ func (t *TelegramBot) handleMessage(msg *tgbotapi.Message) {
 	// Sanitize filename
 	fileName = sanitizeFileName(fileName)
 
-	// Download file (Telegram Bot API limit: 20 MB for getFile)
-	fileURL, err := t.bot.GetFileDirectURL(fileID)
+	// Download file via Bot API (local server: 2GB limit, official: 20MB)
+	fileURL, err := t.getFileDirectURL(fileID)
 	if err != nil {
 		log.Printf("[TelegramBot] GetFileDirectURL error: %v", err)
 		errMsg := "Ошибка получения файла."
 		if strings.Contains(err.Error(), "file is too big") {
-			errMsg = "Файл слишком большой (лимит Telegram Bot API — 20 МБ). Попробуй сжать или разделить файл."
+			if t.cfg.TelegramAPIURL != "" {
+				errMsg = "Файл слишком большой (лимит — 2 ГБ). Попробуй сжать или разделить файл."
+			} else {
+				errMsg = "Файл слишком большой (лимит Telegram Bot API — 20 МБ). Попробуй сжать или разделить файл."
+			}
 		}
 		reply := tgbotapi.NewMessage(chatID, errMsg)
 		t.bot.Send(reply)
@@ -147,6 +165,21 @@ func (t *TelegramBot) handleMessage(msg *tgbotapi.Message) {
 	savedName := filepath.Base(destPath)
 	reply := tgbotapi.NewMessage(chatID, fmt.Sprintf("Файл сохранён: uploads/%s", savedName))
 	t.bot.Send(reply)
+}
+
+// getFileDirectURL returns the download URL for a file.
+// For local Bot API server, rewrites the URL to point to the local endpoint.
+func (t *TelegramBot) getFileDirectURL(fileID string) (string, error) {
+	fileURL, err := t.bot.GetFileDirectURL(fileID)
+	if err != nil {
+		return "", err
+	}
+	if t.cfg.TelegramAPIURL != "" {
+		// Library hardcodes https://api.telegram.org/file/bot<token>/...
+		// Replace with local server URL
+		fileURL = strings.Replace(fileURL, "https://api.telegram.org", t.cfg.TelegramAPIURL, 1)
+	}
+	return fileURL, nil
 }
 
 // SendFile sends a file from the filesystem to a Telegram chat.
