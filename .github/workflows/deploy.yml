@@ -18,7 +18,8 @@ jobs:
           passphrase: ${{ secrets.SSH_PASSPHRASE }}
           script_stop: true
           script: |
-            echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S git -C /opt/nebulide pull origin main
+            echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S git -C /opt/nebulide fetch origin main
+            echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S git -C /opt/nebulide reset --hard origin/main
             echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S npm ci --prefix /opt/nebulide/frontend
             echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S npm run build --prefix /opt/nebulide/frontend
             echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S npm ci --prefix /opt/nebulide/admin
