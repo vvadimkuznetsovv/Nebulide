@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { listClaudeSessions, listClaudePlans, readClaudePlan } from '../../api/claudeSessions';
-import type { ClaudeProject, ClaudeSession, ClaudePlan } from '../../api/claudeSessions';
+import { listClaudeSessions, listClaudePlans, readClaudePlan, readClaudeSession } from '../../api/claudeSessions';
+import type { ClaudeProject, ClaudeSession, ClaudePlan, ClaudeSessionMessage } from '../../api/claudeSessions';
 import { useLayoutStore } from '../../store/layoutStore';
 import { typeCommandInTerminal } from '../terminal/Terminal';
 import toast from 'react-hot-toast';
@@ -45,6 +45,9 @@ export default function ChatPanel(_props: ChatPanelProps) {
   const [plans, setPlans] = useState<ClaudePlan[]>([]);
   const [expandedPlan, setExpandedPlan] = useState<string | null>(null);
   const [planContent, setPlanContent] = useState<string>('');
+  const [expandedSession, setExpandedSession] = useState<string | null>(null);
+  const [sessionMessages, setSessionMessages] = useState<ClaudeSessionMessage[]>([]);
+  const [previewLoading, setPreviewLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [launching, setLaunching] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -83,6 +86,25 @@ export default function ChatPanel(_props: ChatPanelProps) {
     setLaunching(null);
   }, [launching, openTerminalWithId]);
 
+  const handlePreviewSession = useCallback(async (session: ClaudeSession & { project: string }) => {
+    const key = session.session_id;
+    if (expandedSession === key) {
+      setExpandedSession(null);
+      return;
+    }
+    setPreviewLoading(true);
+    try {
+      // Try with session_id first (internal ID), fall back to filename
+      const { data } = await readClaudeSession(session.project, session.session_id);
+      setSessionMessages(data.messages || []);
+      setExpandedSession(key);
+    } catch {
+      toast.error('Failed to load session preview');
+    } finally {
+      setPreviewLoading(false);
+    }
+  }, [expandedSession]);
+
   const handlePlanClick = useCallback(async (slug: string) => {
     if (expandedPlan === slug) {
       setExpandedPlan(null);
@@ -99,7 +121,7 @@ export default function ChatPanel(_props: ChatPanelProps) {
 
   const allSessions = useMemo(() => {
     const flat = projects.flatMap((p) =>
-      p.sessions.map((s) => ({ ...s, project: p.slug }))
+      p.sessions.map((s) => ({ ...s, project: s.project || p.slug }))
     );
     flat.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
     return flat;
@@ -112,6 +134,7 @@ export default function ChatPanel(_props: ChatPanelProps) {
       s.first_message?.toLowerCase().includes(q)
       || s.slug?.toLowerCase().includes(q)
       || projectDisplayName(s.project).toLowerCase().includes(q)
+      || s.session_id.toLowerCase().includes(q)
     );
   }, [allSessions, searchQuery]);
 
@@ -294,60 +317,149 @@ export default function ChatPanel(_props: ChatPanelProps) {
             </div>
             {filteredSessions.map((session) => {
               const isLaunching = launching === session.session_id;
+              const isExpanded = expandedSession === session.session_id;
               return (
-                <button
-                  key={session.session_id}
-                  type="button"
-                  onClick={() => handleOpenSession(session)}
-                  disabled={isLaunching}
-                  style={{
-                    width: '100%', textAlign: 'left',
-                    background: isLaunching ? 'rgba(var(--accent-rgb), 0.08)' : 'none',
-                    border: 'none', padding: '10px 16px', cursor: isLaunching ? 'wait' : 'pointer',
-                    display: 'flex', gap: 10, alignItems: 'flex-start',
-                    transition: 'background 0.15s',
-                    opacity: isLaunching ? 0.7 : 1,
-                  }}
-                  onMouseEnter={(e) => { if (!isLaunching) e.currentTarget.style.background = 'var(--glass-hover)'; }}
-                  onMouseLeave={(e) => { if (!isLaunching) e.currentTarget.style.background = 'none'; }}
-                >
-                  {/* Terminal icon */}
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 2 }}>
-                    <polyline points="4 17 10 11 4 5" />
-                    <line x1="12" y1="19" x2="20" y2="19" />
-                  </svg>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    {/* Session name — first_message as primary */}
-                    <div style={{
-                      fontSize: 12, fontWeight: 500, color: 'var(--text-primary)',
-                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                    }}>
-                      {sessionDisplayName(session)}
-                    </div>
-                    {/* 2-line preview of first_message */}
-                    {session.first_message && (
+                <div key={session.session_id}>
+                  <div
+                    style={{
+                      width: '100%', textAlign: 'left',
+                      background: isLaunching ? 'rgba(var(--accent-rgb), 0.08)' : 'none',
+                      padding: '10px 16px',
+                      display: 'flex', gap: 10, alignItems: 'flex-start',
+                      transition: 'background 0.15s',
+                      opacity: isLaunching ? 0.7 : 1,
+                    }}
+                    onMouseEnter={(e) => { if (!isLaunching) e.currentTarget.style.background = 'var(--glass-hover)'; }}
+                    onMouseLeave={(e) => { if (!isLaunching) e.currentTarget.style.background = isLaunching ? 'rgba(var(--accent-rgb), 0.08)' : 'none'; }}
+                  >
+                    {/* Terminal icon */}
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 2 }}>
+                      <polyline points="4 17 10 11 4 5" />
+                      <line x1="12" y1="19" x2="20" y2="19" />
+                    </svg>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      {/* Session name — first_message as primary */}
                       <div style={{
-                        fontSize: 11, color: 'var(--text-muted)', marginTop: 3,
-                        overflow: 'hidden', textOverflow: 'ellipsis',
-                        display: '-webkit-box',
-                        WebkitLineClamp: 2,
-                        WebkitBoxOrient: 'vertical',
-                        lineHeight: '1.4',
+                        fontSize: 12, fontWeight: 500, color: 'var(--text-primary)',
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                       }}>
-                        {session.first_message}
+                        {sessionDisplayName(session)}
                       </div>
-                    )}
-                    {/* Meta line */}
-                    <div style={{
-                      fontSize: 10, color: 'var(--text-muted)', marginTop: 3,
-                      display: 'flex', gap: 8,
-                    }}>
-                      <span>{projectDisplayName(session.project)}</span>
-                      <span>{formatSize(session.size_mb)}</span>
-                      <span>{timeAgo(session.updated_at)}</span>
+                      {/* 2-line preview of first_message */}
+                      {session.first_message && (
+                        <div style={{
+                          fontSize: 11, color: 'var(--text-muted)', marginTop: 3,
+                          overflow: 'hidden', textOverflow: 'ellipsis',
+                          display: '-webkit-box',
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: 'vertical',
+                          lineHeight: '1.4',
+                        }}>
+                          {session.first_message}
+                        </div>
+                      )}
+                      {/* Meta line + action buttons */}
+                      <div style={{
+                        fontSize: 10, color: 'var(--text-muted)', marginTop: 4,
+                        display: 'flex', alignItems: 'center', gap: 8,
+                      }}>
+                        <span>{projectDisplayName(session.project)}</span>
+                        <span>{formatSize(session.size_mb)}</span>
+                        <span>{timeAgo(session.updated_at)}</span>
+                        <span style={{ flex: 1 }} />
+                        {/* Preview button */}
+                        <button
+                          type="button"
+                          onClick={() => handlePreviewSession(session)}
+                          disabled={previewLoading && expandedSession !== session.session_id}
+                          title="Preview conversation"
+                          style={{
+                            background: isExpanded ? 'rgba(var(--accent-rgb), 0.15)' : 'rgba(var(--accent-rgb), 0.08)',
+                            border: '1px solid var(--glass-border)',
+                            borderRadius: 4, padding: '3px 8px',
+                            cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
+                            color: isExpanded ? 'var(--accent)' : 'var(--text-secondary)',
+                            fontSize: 10, fontFamily: 'inherit',
+                            transition: 'all 0.15s',
+                          }}
+                        >
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                            <circle cx="12" cy="12" r="3" />
+                          </svg>
+                          Preview
+                        </button>
+                        {/* Open button */}
+                        <button
+                          type="button"
+                          onClick={() => handleOpenSession(session)}
+                          disabled={!!launching}
+                          title="Resume in terminal"
+                          style={{
+                            background: 'rgba(var(--accent-rgb), 0.12)',
+                            border: '1px solid var(--glass-border)',
+                            borderRadius: 4, padding: '3px 8px',
+                            cursor: isLaunching ? 'wait' : 'pointer',
+                            display: 'flex', alignItems: 'center', gap: 4,
+                            color: 'var(--accent)',
+                            fontSize: 10, fontFamily: 'inherit',
+                            transition: 'all 0.15s',
+                          }}
+                        >
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polygon points="5 3 19 12 5 21 5 3" />
+                          </svg>
+                          Open
+                        </button>
+                      </div>
                     </div>
                   </div>
-                </button>
+
+                  {/* Expanded preview */}
+                  {isExpanded && (
+                    <div style={{
+                      margin: '0 16px 8px', padding: '10px 12px',
+                      borderRadius: 8,
+                      background: 'rgba(var(--accent-rgb), 0.04)',
+                      border: '1px solid var(--glass-border)',
+                      maxHeight: 400, overflow: 'auto',
+                    }}>
+                      {sessionMessages.length === 0 ? (
+                        <div style={{ color: 'var(--text-muted)', fontSize: 11, textAlign: 'center', padding: 12 }}>
+                          No messages in this session
+                        </div>
+                      ) : (
+                        sessionMessages.map((msg, i) => (
+                          <div key={i} style={{
+                            marginBottom: i < sessionMessages.length - 1 ? 10 : 0,
+                            paddingBottom: i < sessionMessages.length - 1 ? 10 : 0,
+                            borderBottom: i < sessionMessages.length - 1 ? '1px solid var(--glass-border)' : 'none',
+                          }}>
+                            <div style={{
+                              fontSize: 10, fontWeight: 600,
+                              color: msg.role === 'user' ? 'var(--accent)' : 'var(--text-secondary)',
+                              marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em',
+                            }}>
+                              {msg.role === 'user' ? 'You' : 'Claude'}
+                              {msg.timestamp && (
+                                <span style={{ fontWeight: 400, marginLeft: 8, color: 'var(--text-muted)' }}>
+                                  {timeAgo(msg.timestamp)}
+                                </span>
+                              )}
+                            </div>
+                            <pre style={{
+                              margin: 0, fontSize: 11, lineHeight: 1.5,
+                              color: 'var(--text-primary)', whiteSpace: 'pre-wrap',
+                              wordBreak: 'break-word', fontFamily: 'inherit',
+                            }}>
+                              {msg.content}
+                            </pre>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
               );
             })}
           </div>

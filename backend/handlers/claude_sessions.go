@@ -25,28 +25,34 @@ func NewClaudeSessionsHandler(cfg *config.Config) *ClaudeSessionsHandler {
 	return &ClaudeSessionsHandler{cfg: cfg}
 }
 
-// claudeDir returns the .claude directory path for the current user.
-func (h *ClaudeSessionsHandler) claudeDir(c *gin.Context) string {
-	// Terminal sets HOME=workingDir; Claude stores sessions under $HOME/.claude
-	// On Docker the process HOME is typically /root or /home/nebulide
+// claudeBaseDir returns the .claude directory (shared for all users in Docker).
+func (h *ClaudeSessionsHandler) claudeBaseDir() string {
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
-		// Fallback to workspace parent
 		home = filepath.Dir(h.cfg.ClaudeWorkingDir)
 	}
-
-	// Per-user: check if user has their own workspace with .claude inside
-	username, _ := c.Get("username")
-	if u, ok := username.(string); ok && u != "" && u != h.cfg.AdminUsername {
-		userDir := h.cfg.GetUserWorkspaceDir(u)
-		candidate := filepath.Join(userDir, ".claude")
-		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
-			return candidate
-		}
-		return "" // non-admin without .claude dir — no sessions to show
-	}
-
 	return filepath.Join(home, ".claude")
+}
+
+// workspaceSlug converts a workspace path to Claude's project slug format.
+// /home/nebulide/workspace → -home-nebulide-workspace
+func workspaceSlug(wsPath string) string {
+	return strings.ReplaceAll(filepath.ToSlash(wsPath), "/", "-")
+}
+
+// userWorkspaceSlug returns the slug prefix for the requesting user's workspace.
+func (h *ClaudeSessionsHandler) userWorkspaceSlug(c *gin.Context) string {
+	username, _ := c.Get("username")
+	u, _ := username.(string)
+	if u != "" && u != h.cfg.AdminUsername {
+		return workspaceSlug(h.cfg.GetUserWorkspaceDir(u))
+	}
+	return workspaceSlug(h.cfg.ClaudeWorkingDir)
+}
+
+// matchesWorkspace checks if a project slug belongs to the given workspace.
+func matchesWorkspace(projectSlug, wsSlug string) bool {
+	return projectSlug == wsSlug || strings.HasPrefix(projectSlug, wsSlug+"-")
 }
 
 var slugRe = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
@@ -60,21 +66,18 @@ type jsonlMeta struct {
 	Timestamp string `json:"timestamp"`
 	CWD       string `json:"cwd"`
 	Message   *struct {
-		Role    string `json:"role"`
+		Role    string          `json:"role"`
 		Content json.RawMessage `json:"content"`
 	} `json:"message,omitempty"`
 }
 
-func extractFirstMessage(meta jsonlMeta) string {
-	if meta.Message == nil || meta.Message.Role != "user" {
+func extractTextContent(meta jsonlMeta) string {
+	if meta.Message == nil {
 		return ""
 	}
 	// Content can be a string or array of content blocks
 	var s string
 	if err := json.Unmarshal(meta.Message.Content, &s); err == nil {
-		if len(s) > 200 {
-			s = s[:200]
-		}
 		return s
 	}
 	// Try array of blocks: [{"type":"text","text":"..."}]
@@ -83,17 +86,22 @@ func extractFirstMessage(meta jsonlMeta) string {
 		Text string `json:"text"`
 	}
 	if err := json.Unmarshal(meta.Message.Content, &blocks); err == nil {
+		var parts []string
 		for _, b := range blocks {
 			if b.Type == "text" && b.Text != "" {
-				t := b.Text
-				if len(t) > 200 {
-					t = t[:200]
-				}
-				return t
+				parts = append(parts, b.Text)
 			}
 		}
+		return strings.Join(parts, "\n")
 	}
 	return ""
+}
+
+func truncate(s string, max int) string {
+	if len(s) > max {
+		return s[:max]
+	}
+	return s
 }
 
 type sessionInfo struct {
@@ -104,6 +112,7 @@ type sessionInfo struct {
 	UpdatedAt    string  `json:"updated_at"`
 	SizeMB       float64 `json:"size_mb"`
 	FirstMessage string  `json:"first_message"`
+	Project      string  `json:"project"` // project slug (needed for preview)
 }
 
 type projectInfo struct {
@@ -111,13 +120,9 @@ type projectInfo struct {
 	Sessions []sessionInfo `json:"sessions"`
 }
 
-// List returns all Claude CLI sessions grouped by project.
+// List returns Claude CLI sessions filtered by the requesting user's workspace.
 func (h *ClaudeSessionsHandler) List(c *gin.Context) {
-	claudeBase := h.claudeDir(c)
-	if claudeBase == "" {
-		c.JSON(http.StatusOK, gin.H{"projects": []interface{}{}})
-		return
-	}
+	claudeBase := h.claudeBaseDir()
 	projectsDir := filepath.Join(claudeBase, "projects")
 
 	entries, err := os.ReadDir(projectsDir)
@@ -126,12 +131,20 @@ func (h *ClaudeSessionsHandler) List(c *gin.Context) {
 		return
 	}
 
+	wsSlug := h.userWorkspaceSlug(c)
+
 	var projects []projectInfo
 
 	for _, projEntry := range entries {
 		if !projEntry.IsDir() {
 			continue
 		}
+
+		// Filter: only include projects matching user's workspace
+		if !matchesWorkspace(projEntry.Name(), wsSlug) {
+			continue
+		}
+
 		projPath := filepath.Join(projectsDir, projEntry.Name())
 		files, err := os.ReadDir(projPath)
 		if err != nil {
@@ -154,9 +167,11 @@ func (h *ClaudeSessionsHandler) List(c *gin.Context) {
 				SessionID: strings.TrimSuffix(f.Name(), ".jsonl"),
 				SizeMB:    float64(fi.Size()) / (1024 * 1024),
 				UpdatedAt: fi.ModTime().UTC().Format(time.RFC3339),
+				Project:   projEntry.Name(),
 			}
 
-			// Read first 30 lines to extract metadata
+			// Read first 50 lines to extract metadata
+			hasConversation := false
 			func() {
 				file, err := os.Open(fullPath)
 				if err != nil {
@@ -169,7 +184,7 @@ func (h *ClaudeSessionsHandler) List(c *gin.Context) {
 				lineCount := 0
 				foundFirstMsg := false
 
-				for scanner.Scan() && lineCount < 30 {
+				for scanner.Scan() && lineCount < 50 {
 					lineCount++
 					line := scanner.Text()
 					if line == "" {
@@ -181,28 +196,38 @@ func (h *ClaudeSessionsHandler) List(c *gin.Context) {
 						continue
 					}
 
+					// Use internal sessionId (what claude --resume expects)
 					if meta.SessionID != "" && si.SessionID == strings.TrimSuffix(f.Name(), ".jsonl") {
-						// Keep the file-based session ID but capture metadata
-						if meta.Slug != "" {
-							si.Slug = meta.Slug
-						}
-						if meta.CWD != "" {
-							si.CWD = meta.CWD
-						}
-						if meta.Timestamp != "" && si.CreatedAt == "" {
-							si.CreatedAt = meta.Timestamp
-						}
+						si.SessionID = meta.SessionID
 					}
 
-					if !foundFirstMsg && meta.Type == "user" {
-						msg := extractFirstMessage(meta)
-						if msg != "" {
-							si.FirstMessage = msg
-							foundFirstMsg = true
+					if meta.Slug != "" {
+						si.Slug = meta.Slug
+					}
+					if meta.CWD != "" {
+						si.CWD = meta.CWD
+					}
+					if meta.Timestamp != "" && si.CreatedAt == "" {
+						si.CreatedAt = meta.Timestamp
+					}
+
+					if meta.Type == "user" {
+						hasConversation = true
+						if !foundFirstMsg {
+							msg := extractTextContent(meta)
+							if msg != "" {
+								si.FirstMessage = truncate(msg, 200)
+								foundFirstMsg = true
+							}
 						}
 					}
 				}
 			}()
+
+			// Skip files that have no conversation (e.g. file-history-snapshot only)
+			if !hasConversation {
+				continue
+			}
 
 			if si.CreatedAt == "" {
 				si.CreatedAt = si.UpdatedAt
@@ -240,6 +265,131 @@ func (h *ClaudeSessionsHandler) List(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"projects": projects})
 }
 
+// --- Session Preview ---
+
+type sessionMessage struct {
+	Role      string `json:"role"`
+	Content   string `json:"content"`
+	Timestamp string `json:"timestamp,omitempty"`
+}
+
+// ReadSession reads a session JSONL and returns the conversation messages.
+func (h *ClaudeSessionsHandler) ReadSession(c *gin.Context) {
+	project := c.Param("project")
+	sessionFile := c.Param("sessionFile")
+
+	if !slugRe.MatchString(project) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid project"})
+		return
+	}
+
+	// Security: only allow access to user's own workspace projects
+	wsSlug := h.userWorkspaceSlug(c)
+	if !matchesWorkspace(project, wsSlug) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	claudeBase := h.claudeBaseDir()
+	// Find JSONL file — sessionFile could be internal sessionId or filename
+	projDir := filepath.Join(claudeBase, "projects", project)
+
+	// Try to find file by internal sessionId (grep through files)
+	var fullPath string
+	files, err := os.ReadDir(projDir)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
+		return
+	}
+
+	// First try exact filename match
+	candidate := filepath.Join(projDir, sessionFile+".jsonl")
+	if _, err := os.Stat(candidate); err == nil {
+		fullPath = candidate
+	} else {
+		// Search by internal sessionId in files
+		for _, f := range files {
+			if f.IsDir() || !strings.HasSuffix(f.Name(), ".jsonl") {
+				continue
+			}
+			fp := filepath.Join(projDir, f.Name())
+			file, err := os.Open(fp)
+			if err != nil {
+				continue
+			}
+			scanner := bufio.NewScanner(file)
+			scanner.Buffer(make([]byte, 0, 64*1024), 256*1024)
+			for i := 0; i < 5 && scanner.Scan(); i++ {
+				var meta jsonlMeta
+				if json.Unmarshal([]byte(scanner.Text()), &meta) == nil && meta.SessionID == sessionFile {
+					fullPath = fp
+					break
+				}
+			}
+			file.Close()
+			if fullPath != "" {
+				break
+			}
+		}
+	}
+
+	if fullPath == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
+		return
+	}
+
+	fi, err := os.Stat(fullPath)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
+		return
+	}
+	if fi.Size() > 50<<20 { // 50MB limit
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "Session too large"})
+		return
+	}
+
+	file, err := os.Open(fullPath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read session"})
+		return
+	}
+	defer file.Close()
+
+	var messages []sessionMessage
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20) // 1MB line buffer
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			continue
+		}
+
+		var meta jsonlMeta
+		if err := json.Unmarshal([]byte(line), &meta); err != nil {
+			continue
+		}
+
+		if meta.Type == "user" || meta.Type == "assistant" {
+			text := extractTextContent(meta)
+			if text != "" {
+				messages = append(messages, sessionMessage{
+					Role:      meta.Type,
+					Content:   truncate(text, 5000),
+					Timestamp: meta.Timestamp,
+				})
+			}
+		}
+
+		// Limit to 100 messages for preview
+		if len(messages) >= 100 {
+			break
+		}
+	}
+
+	c.JSON(http.StatusOK, gin.H{"messages": messages})
+}
+
 // --- Plans ---
 
 type planInfo struct {
@@ -250,11 +400,7 @@ type planInfo struct {
 }
 
 func (h *ClaudeSessionsHandler) ListPlans(c *gin.Context) {
-	claudeBase := h.claudeDir(c)
-	if claudeBase == "" {
-		c.JSON(http.StatusOK, gin.H{"plans": []interface{}{}})
-		return
-	}
+	claudeBase := h.claudeBaseDir()
 	plansDir := filepath.Join(claudeBase, "plans")
 
 	entries, err := os.ReadDir(plansDir)
@@ -319,11 +465,7 @@ func (h *ClaudeSessionsHandler) ReadPlan(c *gin.Context) {
 		return
 	}
 
-	claudeBase := h.claudeDir(c)
-	if claudeBase == "" {
-		c.JSON(http.StatusNotFound, gin.H{"error": "Plan not found"})
-		return
-	}
+	claudeBase := h.claudeBaseDir()
 	fullPath := filepath.Join(claudeBase, "plans", slug+".md")
 
 	fi, err := os.Stat(fullPath)

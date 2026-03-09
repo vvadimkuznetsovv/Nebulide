@@ -469,11 +469,17 @@ func (ts *TerminalSession) RemoveWriter(w io.Writer) {
 func (ts *TerminalSession) Close() {
 	ts.mw.Stop()
 	ts.mw.DeleteFile()
+	ts.killProcessTree()
+}
+
+// killProcessTree kills the shell and all its child processes.
+// Platform-specific: see terminal_kill_unix.go / terminal_kill_windows.go.
+func (ts *TerminalSession) killProcessTree() {
+	if ts.Cmd != nil && ts.Cmd.Process != nil {
+		killProcessGroup(ts.Cmd.Process.Pid)
+	}
 	if ts.Pty != nil {
 		ts.Pty.Close()
-	}
-	if ts.Cmd != nil && ts.Cmd.Process != nil {
-		ts.Cmd.Process.Kill()
 	}
 }
 
@@ -481,11 +487,11 @@ func (ts *TerminalSession) Close() {
 // Used when shell dies or container restarts — scrollback survives for replay.
 func (ts *TerminalSession) CloseKeepScrollback() {
 	ts.mw.Stop()
+	if ts.Cmd != nil && ts.Cmd.Process != nil {
+		killProcessGroup(ts.Cmd.Process.Pid)
+	}
 	if ts.Pty != nil {
 		ts.Pty.Close()
-	}
-	if ts.Cmd != nil && ts.Cmd.Process != nil {
-		ts.Cmd.Process.Kill()
 	}
 }
 
@@ -509,7 +515,17 @@ func parseSessionKey(key string) (userID, instanceID string) {
 }
 
 // ListSessions returns info about all active terminal sessions.
+// Dead sessions are auto-reaped before returning.
 func (s *TerminalService) ListSessions() []SessionInfo {
+	s.mu.Lock()
+	for key, sess := range s.sessions {
+		if !sess.IsAlive() {
+			sess.Close()
+			delete(s.sessions, key)
+		}
+	}
+	s.mu.Unlock()
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	result := make([]SessionInfo, 0, len(s.sessions))
@@ -631,7 +647,17 @@ type SessionProcessInfo struct {
 }
 
 // ListSessionsWithPID returns all sessions with their process PIDs.
+// Dead sessions are auto-reaped before returning.
 func (s *TerminalService) ListSessionsWithPID() []SessionProcessInfo {
+	s.mu.Lock()
+	for key, sess := range s.sessions {
+		if !sess.IsAlive() {
+			sess.Close()
+			delete(s.sessions, key)
+		}
+	}
+	s.mu.Unlock()
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	result := make([]SessionProcessInfo, 0, len(s.sessions))

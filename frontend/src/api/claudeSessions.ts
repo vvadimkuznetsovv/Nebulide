@@ -8,6 +8,13 @@ export interface ClaudeSession {
   updated_at: string;
   size_mb: number;
   first_message: string;
+  project: string;
+}
+
+export interface ClaudeSessionMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  timestamp?: string;
 }
 
 export interface ClaudeProject {
@@ -30,3 +37,6 @@ export const listClaudePlans = () =>
 
 export const readClaudePlan = (slug: string) =>
   api.get<{ slug: string; content: string; title: string }>(`/claude-plans/${slug}`);
+
+export const readClaudeSession = (project: string, sessionFile: string) =>
+  api.get<{ messages: ClaudeSessionMessage[] }>(`/claude-sessions/${encodeURIComponent(project)}/${encodeURIComponent(sessionFile)}`);
