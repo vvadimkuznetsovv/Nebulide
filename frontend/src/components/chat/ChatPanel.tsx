@@ -1,176 +1,291 @@
-import { useState, useEffect, useRef } from 'react';
-import { useAuthStore } from '../../store/authStore';
+import { useState, useEffect, useCallback } from 'react';
+import { listClaudeSessions, listClaudePlans, readClaudePlan } from '../../api/claudeSessions';
+import type { ClaudeProject, ClaudeSession, ClaudePlan } from '../../api/claudeSessions';
+import { useLayoutStore } from '../../store/layoutStore';
+import { typeCommandInTerminal } from '../terminal/Terminal';
+import toast from 'react-hot-toast';
 
 interface ChatPanelProps {
   sessionId: string | null;
 }
 
-type Status = 'checking' | 'ok' | 'unavailable';
-
-// ── Singleton iframe: created once, NEVER removed from DOM ──
-// Survives any React remount (layout changes, tab switches, panel toggles).
-// Uses DOM reparenting: iframe wrapper is moved between the panel container
-// (when visible) and an offscreen holder (when panel unmounts).
-
-let iframeWrapper: HTMLDivElement | null = null;
-let iframeEl: HTMLIFrameElement | null = null;
-
-let offscreenHolder: HTMLDivElement | null = null;
-function ensureOffscreenHolder(): HTMLDivElement {
-  if (!offscreenHolder) {
-    offscreenHolder = document.createElement('div');
-    offscreenHolder.style.cssText =
-      'position:fixed;left:-9999px;top:-9999px;width:0;height:0;overflow:hidden;pointer-events:none;';
-    document.body.appendChild(offscreenHolder);
-  }
-  return offscreenHolder;
+function timeAgo(dateStr: string): string {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days}d ago`;
+  return new Date(dateStr).toLocaleDateString();
 }
 
-function ensureIframe(token: string): void {
-  if (iframeWrapper) return; // already created
-  console.log('[ChatPanel] Creating singleton iframe');
-
-  iframeWrapper = document.createElement('div');
-  iframeWrapper.style.cssText =
-    'position:absolute;inset:0;z-index:15;overflow:hidden;';
-
-  iframeEl = document.createElement('iframe');
-  iframeEl.src = `/code/?token=${token}`;
-  iframeEl.title = 'VS Code';
-  iframeEl.allow = 'clipboard-read; clipboard-write';
-  iframeEl.style.cssText =
-    'width:100%;height:100%;border:0;background:#1e1e1e;';
-  iframeWrapper.appendChild(iframeEl);
-
-  // Park in offscreen holder until a panel mounts
-  ensureOffscreenHolder().appendChild(iframeWrapper);
+function formatSize(mb: number): string {
+  if (mb < 1) return `${Math.round(mb * 1024)}KB`;
+  return `${mb.toFixed(1)}MB`;
 }
 
-function attachIframe(container: HTMLElement): void {
-  if (!iframeWrapper) return;
-  container.appendChild(iframeWrapper); // moves the node (no reload)
-}
-
-function detachIframe(): void {
-  if (!iframeWrapper) return;
-  ensureOffscreenHolder().appendChild(iframeWrapper); // back to offscreen
-}
-
-function isIframeCreated(): boolean {
-  return !!iframeWrapper;
+// Friendly name from project slug: "c--Users-evgen--projects-Clauder" → "Clauder"
+function projectDisplayName(slug: string): string {
+  const parts = slug.split('--');
+  return parts[parts.length - 1] || slug;
 }
 
 export default function ChatPanel(_props: ChatPanelProps) {
-  const token = useAuthStore((s) => s.accessToken);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const [projects, setProjects] = useState<ClaudeProject[]>([]);
+  const [plans, setPlans] = useState<ClaudePlan[]>([]);
+  const [expandedPlan, setExpandedPlan] = useState<string | null>(null);
+  const [planContent, setPlanContent] = useState<string>('');
+  const [loading, setLoading] = useState(true);
+  const [launching, setLaunching] = useState<string | null>(null);
 
-  // Probe result tracks which token was probed — auto-resets on token change
-  const [probe, setProbe] = useState<{ token: string; result: 'ok' | 'failed' } | null>(
-    isIframeCreated() ? { token: '', result: 'ok' } : null,
+  const openTerminalWithId = useLayoutStore((s) => s.openTerminalWithId);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [sessRes, plansRes] = await Promise.all([
+        listClaudeSessions(),
+        listClaudePlans(),
+      ]);
+      setProjects(sessRes.data.projects || []);
+      setPlans(plansRes.data.plans || []);
+    } catch {
+      // Offline or no .claude dir
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  const handleOpenSession = useCallback(async (session: ClaudeSession) => {
+    if (launching) return;
+    setLaunching(session.session_id);
+
+    const instanceId = `claude-${Date.now()}`;
+    openTerminalWithId(instanceId);
+
+    const ok = await typeCommandInTerminal(instanceId, `claude --resume ${session.session_id}`);
+    if (!ok) {
+      toast.error('Failed to connect to terminal');
+    }
+    setLaunching(null);
+  }, [launching, openTerminalWithId]);
+
+  const handlePlanClick = useCallback(async (slug: string) => {
+    if (expandedPlan === slug) {
+      setExpandedPlan(null);
+      return;
+    }
+    try {
+      const { data } = await readClaudePlan(slug);
+      setPlanContent(data.content);
+      setExpandedPlan(slug);
+    } catch {
+      toast.error('Failed to load plan');
+    }
+  }, [expandedPlan]);
+
+  const allSessions = projects.flatMap((p) =>
+    p.sessions.map((s) => ({ ...s, project: p.slug }))
   );
+  allSessions.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
 
-  // Derive status: no refs, no setState during render
-  const status: Status =
-    isIframeCreated() ? 'ok' :
-    !token ? 'unavailable' :
-    (probe?.token === token && probe.result === 'ok') ? 'ok' :
-    (probe?.token === token && probe.result === 'failed') ? 'unavailable' :
-    'checking';
-
-  // Probe code-server (fires when status is 'checking')
-  useEffect(() => {
-    if (status !== 'checking' || !token || isIframeCreated()) return;
-
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5000);
-
-    console.log('[ChatPanel] Probing /code/ ...');
-    fetch(`/code/?token=${token}`, { method: 'HEAD', signal: controller.signal })
-      .then(res => {
-        console.log('[ChatPanel] Probe response:', res.status, res.ok);
-        if (res.ok) {
-          ensureIframe(token);
-          setProbe({ token, result: 'ok' });
-        } else {
-          setProbe({ token, result: 'failed' });
-        }
-      })
-      .catch((err) => {
-        if (err instanceof DOMException && err.name === 'AbortError') {
-          console.log('[ChatPanel] Probe aborted (cleanup) — ignoring');
-          return;
-        }
-        console.warn('[ChatPanel] Probe failed:', err);
-        setProbe({ token, result: 'failed' });
-      })
-      .finally(() => clearTimeout(timer));
-
-    return () => { controller.abort(); clearTimeout(timer); };
-  }, [status, token]);
-
-  // Attach iframe to this container on mount, detach on unmount
-  useEffect(() => {
-    if (status !== 'ok' || !containerRef.current) return;
-    attachIframe(containerRef.current);
-    return () => { detachIframe(); };
-  }, [status]);
-
-  if (status === 'checking') {
+  if (loading) {
     return (
-      <div className="flex-1 flex items-center justify-center h-full">
-        <div style={{ color: 'var(--text-tertiary)', fontSize: 13 }}>Подключение...</div>
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
+        <div style={{ color: 'var(--text-tertiary)', fontSize: 13 }}>Загрузка...</div>
       </div>
     );
   }
 
-  if (status === 'unavailable') {
-    return (
-      <div className="flex-1 flex flex-col items-center justify-center h-full gap-4">
-        <div
-          style={{
-            width: 56,
-            height: 56,
-            borderRadius: '50%',
-            background: 'rgba(248,113,113,0.12)',
-            border: '1px solid rgba(248,113,113,0.3)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
-        >
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--danger)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="10" />
-            <line x1="12" y1="8" x2="12" y2="12" />
-            <line x1="12" y1="16" x2="12.01" y2="16" />
-          </svg>
-        </div>
-        <div style={{ textAlign: 'center' }}>
-          <p style={{ color: 'var(--text-primary)', fontWeight: 500, marginBottom: 6 }}>
-            Claude Code не запущен
-          </p>
-          <p style={{ color: 'var(--text-tertiary)', fontSize: 12 }}>
-            Запустите сервис через Docker Compose
-          </p>
-        </div>
+  const isEmpty = allSessions.length === 0 && plans.length === 0;
+
+  return (
+    <div style={{
+      flex: 1, display: 'flex', flexDirection: 'column', height: '100%',
+      overflow: 'hidden',
+    }}>
+      {/* Header */}
+      <div style={{
+        padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        borderBottom: '1px solid var(--glass-border)',
+        flexShrink: 0,
+      }}>
+        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>
+          Claude Sessions
+        </span>
         <button
           type="button"
-          onClick={() => { setProbe(null); }}
+          onClick={refresh}
+          title="Refresh"
           style={{
-            padding: '8px 20px',
-            borderRadius: 8,
-            border: '1px solid var(--glass-border)',
-            background: 'rgba(var(--accent-rgb),0.1)',
-            color: 'var(--text-secondary)',
-            fontSize: 13,
-            cursor: 'pointer',
+            background: 'none', border: 'none', cursor: 'pointer', padding: 4,
+            color: 'var(--text-muted)', display: 'flex',
           }}
         >
-          Повторить
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="23 4 23 10 17 10" />
+            <polyline points="1 20 1 14 7 14" />
+            <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" />
+          </svg>
         </button>
       </div>
-    );
-  }
 
-  // Container for the iframe — position:relative so absolute iframe fills it
-  return <div ref={containerRef} className="h-full" style={{ position: 'relative' }} />;
+      <div style={{ flex: 1, overflow: 'auto', padding: '8px 0' }}>
+        {isEmpty && (
+          <div style={{
+            display: 'flex', flexDirection: 'column', alignItems: 'center',
+            justifyContent: 'center', height: '100%', gap: 12,
+            color: 'var(--text-tertiary)', fontSize: 13,
+          }}>
+            <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.4 }}>
+              <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+            </svg>
+            <span>No Claude sessions found</span>
+            <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>
+              Run Claude in the terminal to create sessions
+            </span>
+          </div>
+        )}
+
+        {/* Plans section */}
+        {plans.length > 0 && (
+          <div style={{ marginBottom: 8 }}>
+            <div style={{
+              padding: '6px 16px', fontSize: 10, fontWeight: 700,
+              textTransform: 'uppercase', letterSpacing: '0.08em',
+              color: 'var(--text-muted)',
+            }}>
+              Plans
+            </div>
+            {plans.map((plan) => (
+              <div key={plan.slug}>
+                <button
+                  type="button"
+                  onClick={() => handlePlanClick(plan.slug)}
+                  style={{
+                    width: '100%', textAlign: 'left', background: 'none', border: 'none',
+                    padding: '8px 16px', cursor: 'pointer',
+                    display: 'flex', alignItems: 'center', gap: 10,
+                    transition: 'background 0.15s',
+                  }}
+                  onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--glass-hover)'; }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = 'none'; }}
+                >
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                    <line x1="16" y1="13" x2="8" y2="13" />
+                    <line x1="16" y1="17" x2="8" y2="17" />
+                  </svg>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{
+                      fontSize: 12, fontWeight: 500, color: 'var(--text-primary)',
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}>
+                      {plan.title}
+                    </div>
+                    <div style={{ fontSize: 10, color: 'var(--text-muted)', marginTop: 2 }}>
+                      {timeAgo(plan.updated_at)}
+                    </div>
+                  </div>
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+                    style={{ flexShrink: 0, transform: expandedPlan === plan.slug ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>
+                    <polyline points="9 18 15 12 9 6" />
+                  </svg>
+                </button>
+                {expandedPlan === plan.slug && (
+                  <div style={{
+                    margin: '0 16px 8px', padding: '10px 12px',
+                    borderRadius: 8,
+                    background: 'rgba(var(--accent-rgb), 0.04)',
+                    border: '1px solid var(--glass-border)',
+                    maxHeight: 300, overflow: 'auto',
+                  }}>
+                    <pre style={{
+                      margin: 0, fontSize: 11, lineHeight: 1.5,
+                      color: 'var(--text-secondary)', whiteSpace: 'pre-wrap',
+                      wordBreak: 'break-word', fontFamily: 'inherit',
+                    }}>
+                      {planContent}
+                    </pre>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Sessions section */}
+        {allSessions.length > 0 && (
+          <div>
+            <div style={{
+              padding: '6px 16px', fontSize: 10, fontWeight: 700,
+              textTransform: 'uppercase', letterSpacing: '0.08em',
+              color: 'var(--text-muted)',
+            }}>
+              Sessions
+            </div>
+            {allSessions.map((session) => {
+              const isLaunching = launching === session.session_id;
+              return (
+                <button
+                  key={session.session_id}
+                  type="button"
+                  onClick={() => handleOpenSession(session)}
+                  disabled={isLaunching}
+                  style={{
+                    width: '100%', textAlign: 'left',
+                    background: isLaunching ? 'rgba(var(--accent-rgb), 0.08)' : 'none',
+                    border: 'none', padding: '10px 16px', cursor: isLaunching ? 'wait' : 'pointer',
+                    display: 'flex', gap: 10, alignItems: 'flex-start',
+                    transition: 'background 0.15s',
+                    opacity: isLaunching ? 0.7 : 1,
+                  }}
+                  onMouseEnter={(e) => { if (!isLaunching) e.currentTarget.style.background = 'var(--glass-hover)'; }}
+                  onMouseLeave={(e) => { if (!isLaunching) e.currentTarget.style.background = 'none'; }}
+                >
+                  {/* Terminal icon */}
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 2 }}>
+                    <polyline points="4 17 10 11 4 5" />
+                    <line x1="12" y1="19" x2="20" y2="19" />
+                  </svg>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    {/* Session name */}
+                    <div style={{
+                      fontSize: 12, fontWeight: 500, color: 'var(--text-primary)',
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                    }}>
+                      {session.slug || session.session_id.slice(0, 8)}
+                    </div>
+                    {/* First message preview */}
+                    {session.first_message && (
+                      <div style={{
+                        fontSize: 11, color: 'var(--text-muted)', marginTop: 3,
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      }}>
+                        {session.first_message}
+                      </div>
+                    )}
+                    {/* Meta line */}
+                    <div style={{
+                      fontSize: 10, color: 'var(--text-muted)', marginTop: 3,
+                      display: 'flex', gap: 8,
+                    }}>
+                      <span>{projectDisplayName(session.project)}</span>
+                      <span>{formatSize(session.size_mb)}</span>
+                      <span>{timeAgo(session.updated_at)}</span>
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
 }

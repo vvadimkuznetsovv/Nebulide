@@ -8,6 +8,7 @@ import ContextMenu, { type ContextMenuItem } from '../files/ContextMenu';
 import { useLongPress } from '../../hooks/useLongPress';
 import { ensureFreshToken, refreshTokenOnce } from '../../api/tokenRefresh';
 import { useWorkspaceSessionStore } from '../../store/workspaceSessionStore';
+import api from '../../api/client';
 import toast from 'react-hot-toast';
 
 // ── Clipboard helper: first readText() on mobile may fail (permission not yet initialized) ──
@@ -67,6 +68,53 @@ export function getAnyTerminalSelection(): string | null {
     }
   }
   return null;
+}
+
+/** Send text to the first connected terminal session. Returns true if sent. */
+export function sendToActiveTerminal(text: string): boolean {
+  for (const sess of sessions.values()) {
+    if (sess.ws?.readyState === WebSocket.OPEN) {
+      sess.ws.send(new TextEncoder().encode(text));
+      return true;
+    }
+  }
+  return false;
+}
+
+/** Wait for a specific terminal instance WS to be ready, then send command + Enter */
+export async function sendCommandWhenReady(instanceId: string, command: string): Promise<boolean> {
+  // Poll for up to 5 seconds
+  for (let i = 0; i < 50; i++) {
+    const sess = sessions.get(instanceId);
+    if (sess?.ws?.readyState === WebSocket.OPEN) {
+      // Wait a bit for shell prompt to render
+      await new Promise(r => setTimeout(r, 300));
+      sess.ws.send(new TextEncoder().encode(command + '\r'));
+      return true;
+    }
+    await new Promise(r => setTimeout(r, 100));
+  }
+  return false;
+}
+
+/** Type command character-by-character for visual effect, then press Enter */
+export async function typeCommandInTerminal(instanceId: string, command: string): Promise<boolean> {
+  // Poll for up to 5 seconds
+  for (let i = 0; i < 50; i++) {
+    const sess = sessions.get(instanceId);
+    if (sess?.ws?.readyState === WebSocket.OPEN) {
+      await new Promise(r => setTimeout(r, 300));
+      for (const char of command) {
+        if (sess.ws.readyState !== WebSocket.OPEN) return false;
+        sess.ws.send(new TextEncoder().encode(char));
+        await new Promise(r => setTimeout(r, 25));
+      }
+      sess.ws.send(new TextEncoder().encode('\r'));
+      return true;
+    }
+    await new Promise(r => setTimeout(r, 100));
+  }
+  return false;
 }
 
 const MAX_RECONNECT = 5;
@@ -335,7 +383,8 @@ export function disconnectAllTerminalSessions(): void {
   }
 }
 
-/** Destroy a terminal session: close WS, dispose xterm, remove from Map.
+/** Destroy a terminal session: close WS, dispose xterm, remove from Map,
+ *  and tell the backend to kill the PTY process.
  *  Called by layoutStore when a detached terminal panel is closed. */
 export function destroyTerminalSession(instanceId: string): void {
   const session = sessions.get(instanceId);
@@ -352,6 +401,9 @@ export function destroyTerminalSession(instanceId: string): void {
   }
   session.xterm.dispose();
   sessions.delete(instanceId);
+
+  // Kill backend PTY session (fire-and-forget)
+  api.delete(`/terminals/${encodeURIComponent(instanceId)}`).catch(() => {});
 }
 
 // ── React component ──

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"archive/zip"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -9,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/gin-gonic/gin"
 	"github.com/nwaples/rardecode/v2"
@@ -334,8 +336,30 @@ func (h *FilesHandler) Rename(c *gin.Context) {
 	}
 
 	if err := os.Rename(fullOldPath, fullNewPath); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to rename"})
-		return
+		// Cross-device move (e.g. workspace → shared folder on different Docker volume):
+		// os.Rename returns EXDEV — fall back to copy + delete.
+		if isCrossDevice(err) {
+			info, statErr := os.Stat(fullOldPath)
+			if statErr != nil {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to move"})
+				return
+			}
+			var copyErr error
+			if info.IsDir() {
+				copyErr = copyDir(fullOldPath, fullNewPath)
+			} else {
+				copyErr = copyFileOnDisk(fullOldPath, fullNewPath)
+			}
+			if copyErr != nil {
+				os.RemoveAll(fullNewPath) // cleanup partial copy
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to move"})
+				return
+			}
+			os.RemoveAll(fullOldPath)
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to rename"})
+			return
+		}
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Renamed", "old_path": req.OldPath, "new_path": req.NewPath})
@@ -453,6 +477,15 @@ func (h *FilesHandler) Copy(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Copied", "path": req.Destination})
+}
+
+// isCrossDevice checks if an error is EXDEV (cross-device link).
+func isCrossDevice(err error) bool {
+	var linkErr *os.LinkError
+	if errors.As(err, &linkErr) {
+		return linkErr.Err == syscall.EXDEV
+	}
+	return false
 }
 
 func copyFileOnDisk(src, dst string) error {

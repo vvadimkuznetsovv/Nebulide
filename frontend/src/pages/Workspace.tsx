@@ -21,6 +21,7 @@ import { useWorkspaceStore } from '../store/workspaceStore';
 import { useWorkspaceSessionStore } from '../store/workspaceSessionStore';
 import { useSyncWS } from '../hooks/useSyncWS';
 import { syncThemeFromServer } from '../utils/theme';
+import { useGlobalImagePaste } from '../hooks/useGlobalImagePaste';
 import LavaLamp from '../components/LavaLamp';
 import Sidebar from '../components/layout/Sidebar';
 import LayoutRenderer from '../components/layout/LayoutRenderer';
@@ -68,6 +69,7 @@ const touchSnapCenter: Modifier = ({ activatorEvent, draggingNodeRect, overlayNo
 export default function Workspace() {
   useAuth();
   useSyncWS();
+  useGlobalImagePaste();
 
   // Initialize workspace sessions on mount + auto-save periodically
   const initSession = useWorkspaceSessionStore((s) => s.initSession);

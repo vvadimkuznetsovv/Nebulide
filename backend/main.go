@@ -65,6 +65,7 @@ func main() {
 	inviteHandler := handlers.NewInviteHandler(cfg, lockout)
 	adminHandler := handlers.NewAdminHandler(cfg, terminalService)
 	workspaceSessionsHandler := handlers.NewWorkspaceSessionsHandler(cfg)
+	claudeSessionsHandler := handlers.NewClaudeSessionsHandler(cfg)
 	syncHandler := handlers.NewSyncHandler(cfg)
 
 	// Router
@@ -156,6 +157,14 @@ func main() {
 		protected.GET("/files/download", filesHandler.Download)
 		protected.GET("/files/search", filesHandler.SearchFiles)
 		protected.POST("/files/extract", filesHandler.Extract)
+
+		// Terminal management (user kills own sessions)
+		protected.DELETE("/terminals/:instanceId", terminalHandler.KillTerminal)
+
+		// Claude CLI sessions & plans
+		protected.GET("/claude-sessions", claudeSessionsHandler.List)
+		protected.GET("/claude-plans", claudeSessionsHandler.ListPlans)
+		protected.GET("/claude-plans/:slug", claudeSessionsHandler.ReadPlan)
 	}
 
 	// Telegram route (own auth — accepts both regular JWT and scoped tg-send tokens)

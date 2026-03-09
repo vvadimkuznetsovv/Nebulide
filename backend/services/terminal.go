@@ -176,8 +176,31 @@ type TerminalSession struct {
 }
 
 func NewTerminalService() *TerminalService {
-	return &TerminalService{
+	ts := &TerminalService{
 		sessions: make(map[string]*TerminalSession),
+	}
+	go ts.reapLoop()
+	return ts
+}
+
+// reapLoop periodically removes dead terminal sessions (shell exited).
+func (s *TerminalService) reapLoop() {
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
+		s.mu.Lock()
+		var reaped []string
+		for key, sess := range s.sessions {
+			if !sess.IsAlive() {
+				sess.Close()
+				delete(s.sessions, key)
+				reaped = append(reaped, key)
+			}
+		}
+		s.mu.Unlock()
+		if len(reaped) > 0 {
+			log.Printf("[TerminalService] reaped %d dead sessions: %v", len(reaped), reaped)
+		}
 	}
 }
 
@@ -516,6 +539,22 @@ func (s *TerminalService) ListUserSessions(userID string) []SessionInfo {
 		}
 	}
 	return result
+}
+
+// KillSessionsByPrefix terminates all sessions whose key starts with prefix.
+// Returns the number of killed sessions.
+func (s *TerminalService) KillSessionsByPrefix(prefix string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	count := 0
+	for key, sess := range s.sessions {
+		if strings.HasPrefix(key, prefix) {
+			sess.Close()
+			delete(s.sessions, key)
+			count++
+		}
+	}
+	return count
 }
 
 // KillSession terminates a specific terminal session by key.

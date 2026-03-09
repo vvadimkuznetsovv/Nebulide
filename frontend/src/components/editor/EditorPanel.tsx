@@ -245,7 +245,16 @@ export default function EditorPanel() {
                   title="Uploads (Telegram)"
                   style={{
                     padding: '3px 6px',
-                    ...(isOverUploads ? { background: 'rgba(var(--accent-rgb), 0.3)', borderRadius: '4px', boxShadow: '0 0 8px rgba(var(--accent-rgb), 0.5)' } : {}),
+                    transition: 'background 0.2s, box-shadow 0.2s, border-color 0.2s',
+                    ...(isDraggingFile && isOverUploads ? {
+                      background: 'rgba(var(--accent-rgb), 0.35)',
+                      boxShadow: '0 0 12px 3px rgba(var(--accent-rgb), 0.5)',
+                      borderColor: 'rgba(var(--accent-rgb), 0.8)',
+                    } : isDraggingFile ? {
+                      background: 'rgba(var(--accent-rgb), 0.12)',
+                      boxShadow: '0 0 6px 1px rgba(var(--accent-rgb), 0.25)',
+                      borderColor: 'rgba(var(--accent-rgb), 0.4)',
+                    } : {}),
                   }}
                 >
                   <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -264,7 +273,16 @@ export default function EditorPanel() {
                     title="Shared folder"
                     style={{
                       padding: '3px 6px',
-                      ...(isOverShared ? { background: 'rgba(var(--accent-rgb), 0.3)', borderRadius: '4px', boxShadow: '0 0 8px rgba(var(--accent-rgb), 0.5)' } : {}),
+                      transition: 'background 0.2s, box-shadow 0.2s, border-color 0.2s',
+                      ...(isDraggingFile && isOverShared ? {
+                        background: 'rgba(var(--accent-rgb), 0.35)',
+                        boxShadow: '0 0 12px 3px rgba(var(--accent-rgb), 0.5)',
+                        borderColor: 'rgba(var(--accent-rgb), 0.8)',
+                      } : isDraggingFile ? {
+                        background: 'rgba(var(--accent-rgb), 0.12)',
+                        boxShadow: '0 0 6px 1px rgba(var(--accent-rgb), 0.25)',
+                        borderColor: 'rgba(var(--accent-rgb), 0.4)',
+                      } : {}),
                     }}
                   >
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">

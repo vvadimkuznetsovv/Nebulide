@@ -196,3 +196,20 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 	log.Printf("[Terminal] handler EXIT key=%s", sessionKey)
 	// Session stays alive — shell persists for reconnection.
 }
+
+// KillTerminal allows a user to kill their own terminal session(s) by instanceId.
+// Uses prefix match because the actual session key includes "@ws:{sessionId}" suffix.
+func (h *TerminalHandler) KillTerminal(c *gin.Context) {
+	userID, _ := c.Get("user_id")
+	instanceID := c.Param("instanceId")
+	if instanceID == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "instanceId required"})
+		return
+	}
+
+	prefix := "term:" + userID.(string) + ":" + instanceID
+	killed := h.terminal.KillSessionsByPrefix(prefix)
+
+	log.Printf("[Terminal] user killed %d sessions prefix=%s", killed, prefix)
+	c.JSON(http.StatusOK, gin.H{"killed": killed})
+}

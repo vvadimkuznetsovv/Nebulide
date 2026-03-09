@@ -74,6 +74,7 @@ interface LayoutState {
 
   // Detached terminals
   openNewTerminal: () => void;
+  openTerminalWithId: (instanceId: string) => void;
 
   // DnD
   setDragging: (panelId: PanelId | null) => void;
@@ -401,6 +402,20 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
     const panelId = makeDetachedTerminalPanelId(instanceId);
     set((state) => {
       // Place next to the existing terminal node if possible, otherwise at bottom edge
+      const termNode = findPanelNode(state.layout, 'terminal');
+      const newLayout = termNode
+        ? insertPanelAtNode(state.layout, panelId, termNode.id, 'right')
+        : insertPanelAtEdge(state.layout, panelId, 'bottom');
+      const newVis = { ...state.visibility, [panelId]: true };
+      const next = { ...state, layout: newLayout, visibility: newVis };
+      saveToStorage(next);
+      return { layout: newLayout, visibility: newVis };
+    });
+  },
+
+  openTerminalWithId: (instanceId: string) => {
+    const panelId = makeDetachedTerminalPanelId(instanceId);
+    set((state) => {
       const termNode = findPanelNode(state.layout, 'terminal');
       const newLayout = termNode
         ? insertPanelAtNode(state.layout, panelId, termNode.id, 'right')
