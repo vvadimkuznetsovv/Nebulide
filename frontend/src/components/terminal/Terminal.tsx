@@ -448,10 +448,10 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
   );
   const [copyMode, setCopyMode] = useState(false);
   const [row2Open, setRow2Open] = useState(() =>
-    localStorage.getItem('nebulide-terminal-toolbar-r2') !== 'closed',
+    localStorage.getItem('nebulide-terminal-toolbar-r2') === 'open',
   );
   const [row3Open, setRow3Open] = useState(() =>
-    localStorage.getItem('nebulide-terminal-toolbar-r3') !== 'closed',
+    localStorage.getItem('nebulide-terminal-toolbar-r3') === 'open',
   );
   const [followMode, setFollowMode] = useState(() =>
     localStorage.getItem('nebulide-terminal-follow') !== 'off',
