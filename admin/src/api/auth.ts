@@ -15,7 +15,9 @@ export function totpVerify(code: string, partialToken: string) {
     access_token: string;
     refresh_token: string;
     user: { id: string; username: string; is_admin: boolean };
-  }>('/auth/totp-verify', { code, partial_token: partialToken });
+  }>('/auth/totp-verify', { code }, {
+    headers: { Authorization: `Bearer ${partialToken}` },
+  });
 }
 
 export function getMe() {
