@@ -1,6 +1,6 @@
 import { useState, useRef, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { login, getMe } from '../api/auth';
+import { login, totpVerify, getMe } from '../api/auth';
 import { useAuthStore } from '../store/authStore';
 import MegaLogo from '../components/MegaLogo';
 
@@ -74,8 +74,22 @@ export default function Login() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [totpStep, setTotpStep] = useState(false);
+  const [totpCode, setTotpCode] = useState('');
+  const [partialToken, setPartialToken] = useState('');
   const navigate = useNavigate();
   const setAuth = useAuthStore((s) => s.setAuth);
+
+  const verifyAdmin = async (accessToken: string, refreshToken: string, user: { id: string; username: string; is_admin: boolean }) => {
+    setAuth(user, accessToken, refreshToken);
+    const me = await getMe();
+    if (!me.data.is_admin) {
+      useAuthStore.getState().clearAuth();
+      setError('Admin access required');
+      return;
+    }
+    navigate('/');
+  };
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -83,26 +97,23 @@ export default function Login() {
     setLoading(true);
 
     try {
-      const { data } = await login(username, password);
-      if (data.requires_totp) {
-        setError('TOTP not supported in admin panel yet');
-        return;
+      if (totpStep) {
+        const { data } = await totpVerify(totpCode, partialToken);
+        await verifyAdmin(data.access_token, data.refresh_token, data.user);
+      } else {
+        const { data } = await login(username, password);
+        if (data.requires_totp) {
+          setPartialToken(data.partial_token || '');
+          setTotpStep(true);
+          setTotpCode('');
+          return;
+        }
+        await verifyAdmin(data.access_token, data.refresh_token, data.user);
       }
-
-      setAuth(data.user, data.access_token, data.refresh_token);
-
-      // Verify admin access
-      const me = await getMe();
-      if (!me.data.is_admin) {
-        useAuthStore.getState().clearAuth();
-        setError('Admin access required');
-        return;
-      }
-
-      navigate('/');
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || 'Login failed';
       setError(msg);
+      if (totpStep) setTotpCode('');
     } finally {
       setLoading(false);
     }
@@ -140,45 +151,78 @@ export default function Login() {
             <div style={{ display: 'flex', justifyContent: 'center', marginBottom: '28px' }}>
               <MegaLogo size="large" />
             </div>
-            <p style={{ fontSize: '15px', color: 'rgba(255,255,255,0.4)', fontWeight: 500 }}>Admin Panel</p>
+            <p style={{ fontSize: '15px', color: 'rgba(255,255,255,0.4)', fontWeight: 500 }}>
+              {totpStep ? 'Two-Factor Authentication' : 'Admin Panel'}
+            </p>
           </div>
 
           <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            <div>
-              <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, marginBottom: '10px', letterSpacing: '0.1em', textTransform: 'uppercase' as const, color: 'rgba(255,255,255,0.9)', paddingLeft: '12px' }}>
-                Username
-              </label>
-              <PillInput type="text" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Enter username" autoFocus required />
-            </div>
-            <div>
-              <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, marginBottom: '10px', letterSpacing: '0.1em', textTransform: 'uppercase' as const, color: 'rgba(255,255,255,0.9)', paddingLeft: '12px' }}>
-                Password
-              </label>
-              <PillInput
-                type={showPassword ? 'text' : 'password'}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter password"
-                required
-                endIcon={
-                  <button
-                    type="button"
-                    title={showPassword ? 'Hide password' : 'Show password'}
-                    onClick={() => setShowPassword(!showPassword)}
-                    style={{
-                      background: 'none', border: 'none', cursor: 'pointer', padding: '4px',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      opacity: 0.7, transition: 'opacity 0.2s',
-                    }}
-                    onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.7'; }}
-                    tabIndex={-1}
-                  >
-                    <EyeIcon open={showPassword} />
-                  </button>
-                }
-              />
-            </div>
+            {!totpStep ? (
+              <>
+                <div>
+                  <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, marginBottom: '10px', letterSpacing: '0.1em', textTransform: 'uppercase' as const, color: 'rgba(255,255,255,0.9)', paddingLeft: '12px' }}>
+                    Username
+                  </label>
+                  <PillInput type="text" value={username} onChange={(e) => setUsername(e.target.value)} placeholder="Enter username" autoFocus required />
+                </div>
+                <div>
+                  <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, marginBottom: '10px', letterSpacing: '0.1em', textTransform: 'uppercase' as const, color: 'rgba(255,255,255,0.9)', paddingLeft: '12px' }}>
+                    Password
+                  </label>
+                  <PillInput
+                    type={showPassword ? 'text' : 'password'}
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="Enter password"
+                    required
+                    endIcon={
+                      <button
+                        type="button"
+                        title={showPassword ? 'Hide password' : 'Show password'}
+                        onClick={() => setShowPassword(!showPassword)}
+                        style={{
+                          background: 'none', border: 'none', cursor: 'pointer', padding: '4px',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          opacity: 0.7, transition: 'opacity 0.2s',
+                        }}
+                        onMouseEnter={(e) => { e.currentTarget.style.opacity = '1'; }}
+                        onMouseLeave={(e) => { e.currentTarget.style.opacity = '0.7'; }}
+                        tabIndex={-1}
+                      >
+                        <EyeIcon open={showPassword} />
+                      </button>
+                    }
+                  />
+                </div>
+              </>
+            ) : (
+              <div>
+                <label style={{ display: 'block', fontSize: '11px', fontWeight: 700, marginBottom: '10px', letterSpacing: '0.1em', textTransform: 'uppercase' as const, color: 'rgba(255,255,255,0.9)', paddingLeft: '12px' }}>
+                  Authentication Code
+                </label>
+                <PillInput
+                  type="text"
+                  inputMode="numeric"
+                  value={totpCode}
+                  onChange={(e) => setTotpCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+                  placeholder="Enter 6-digit code"
+                  autoFocus
+                  maxLength={6}
+                  autoComplete="one-time-code"
+                />
+                <button
+                  type="button"
+                  onClick={() => { setTotpStep(false); setTotpCode(''); setError(''); }}
+                  style={{
+                    marginTop: '12px', background: 'none', border: 'none',
+                    color: 'rgba(255,255,255,0.5)', fontSize: '13px', cursor: 'pointer',
+                    paddingLeft: '12px',
+                  }}
+                >
+                  ← Back to login
+                </button>
+              </div>
+            )}
 
             {error && (
               <div style={{
@@ -203,12 +247,12 @@ export default function Login() {
 
             <div style={{ height: '1px', background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent)', margin: '4px 0' }} />
 
-            <button type="submit" className="btn-accent" disabled={loading}
+            <button type="submit" className="btn-accent" disabled={loading || (totpStep && totpCode.length < 6)}
               style={{
                 width: '100%', padding: '18px', borderRadius: '9999px',
                 fontSize: '16px', fontWeight: 700, letterSpacing: '0.02em',
               }}>
-              {loading ? 'Signing in...' : 'Sign In'}
+              {loading ? 'Verifying...' : totpStep ? 'Verify' : 'Sign In'}
             </button>
           </form>
         </div>

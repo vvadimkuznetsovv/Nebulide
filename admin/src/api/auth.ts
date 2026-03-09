@@ -10,6 +10,14 @@ export function login(username: string, password: string) {
   }>('/auth/login', { username, password });
 }
 
+export function totpVerify(code: string, partialToken: string) {
+  return api.post<{
+    access_token: string;
+    refresh_token: string;
+    user: { id: string; username: string; is_admin: boolean };
+  }>('/auth/totp-verify', { code, partial_token: partialToken });
+}
+
 export function getMe() {
   return api.get<{ id: string; username: string; is_admin: boolean; totp_enabled: boolean }>('/auth/me');
 }
