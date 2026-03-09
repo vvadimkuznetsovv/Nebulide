@@ -17,6 +17,9 @@ export const ACCENT_PRESETS = [
   { name: 'Gold', hex: '#CCAA00' },
 ];
 
+// Purple preset uses accent color as-is (natural blue glow on dark bg)
+const PURPLE_HEX = '#7F00FF';
+
 function hexToRgb(hex: string): [number, number, number] {
   const r = parseInt(hex.slice(1, 3), 16);
   const g = parseInt(hex.slice(3, 5), 16);
@@ -98,7 +101,7 @@ export function applyAccentColor(hex: string) {
   root.style.setProperty('--accent-glow', `rgba(${r}, ${g}, ${b}, 0.4)`);
   root.style.setProperty('--accent-soft', `rgba(${r}, ${g}, ${b}, 0.15)`);
 
-  const [gr, gg, gb] = hueShift(hex, -40);
+  const [gr, gg, gb] = hex.toUpperCase() === PURPLE_HEX ? [r, g, b] : hueShift(hex, -70);
   root.style.setProperty('--blob-glow-rgb', `${gr}, ${gg}, ${gb}`);
   localStorage.setItem(ACCENT_KEY, hex);
 }
