@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { ChatSession } from '../api/sessions';
+import { useLayoutStore } from './layoutStore';
 
 export interface EditorTab {
   id: string;
@@ -223,6 +224,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     const updates: Partial<WorkspaceState> = { openTabs: newTabs, activeTabId: newActiveId };
     if (tempTabId === tabId) updates.tempTabId = null;
     set(updates);
+
+    if (newTabs.length === 0) {
+      const { visibility, toggleVisibility } = useLayoutStore.getState();
+      if (visibility['editor']) toggleVisibility('editor');
+    }
   },
 
   setActiveTab: (tabId) => set({ activeTabId: tabId }),
@@ -375,6 +381,11 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     }
 
     set({ previewTabs: newTabs, activePreviewTabId: newActiveId });
+
+    if (newTabs.length === 0) {
+      const { visibility, toggleVisibility } = useLayoutStore.getState();
+      if (visibility['preview']) toggleVisibility('preview');
+    }
   },
 
   setActivePreviewTab: (tabId) => set({ activePreviewTabId: tabId }),

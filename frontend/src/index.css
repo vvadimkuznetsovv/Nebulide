@@ -11,6 +11,7 @@
     --accent-mid-rgb: 140, 60, 255;
     --accent-glow: rgba(var(--accent-rgb), 0.4);
     --accent-soft: rgba(var(--accent-rgb), 0.15);
+    --blob-glow-rgb: var(--accent-rgb);
     --text-primary: rgba(255, 255, 255, 0.95);
     --text-secondary: rgba(255, 255, 255, 0.55);
     --text-tertiary: rgba(255, 255, 255, 0.3);
@@ -91,7 +92,7 @@
     top: 5%; left: 8%;
     background: var(--accent);
     filter: blur(22px);
-    box-shadow: 0 0 80px 35px var(--accent-glow);
+    box-shadow: 0 0 80px 35px rgba(var(--blob-glow-rgb), 0.4);
     animation: lava1 28s cubic-bezier(0.4, 0, 0.6, 1) infinite alternate;
   }
 
@@ -100,7 +101,7 @@
     bottom: 8%; right: 10%;
     background: var(--accent);
     filter: blur(20px);
-    box-shadow: 0 0 70px 30px var(--accent-glow);
+    box-shadow: 0 0 70px 30px rgba(var(--blob-glow-rgb), 0.4);
     animation: lava2 32s cubic-bezier(0.4, 0, 0.6, 1) infinite alternate;
   }
 
@@ -109,7 +110,7 @@
     top: 45%; left: 55%;
     background: var(--accent);
     filter: blur(18px);
-    box-shadow: 0 0 60px 25px var(--accent-glow);
+    box-shadow: 0 0 60px 25px rgba(var(--blob-glow-rgb), 0.4);
     animation: lava3 24s cubic-bezier(0.4, 0, 0.6, 1) infinite alternate;
   }
 
@@ -118,7 +119,7 @@
     top: 15%; right: 18%;
     background: var(--accent);
     filter: blur(16px);
-    box-shadow: 0 0 55px 22px var(--accent-glow);
+    box-shadow: 0 0 55px 22px rgba(var(--blob-glow-rgb), 0.4);
     animation: lava4 30s cubic-bezier(0.4, 0, 0.6, 1) infinite alternate;
   }
 
@@ -127,7 +128,7 @@
     bottom: 30%; left: 15%;
     background: var(--accent);
     filter: blur(16px);
-    box-shadow: 0 0 50px 20px var(--accent-glow);
+    box-shadow: 0 0 50px 20px rgba(var(--blob-glow-rgb), 0.4);
     animation: lava5 34s cubic-bezier(0.4, 0, 0.6, 1) infinite alternate;
   }
 
@@ -136,7 +137,7 @@
     top: 65%; left: 5%;
     background: var(--accent);
     filter: blur(20px);
-    box-shadow: 0 0 65px 28px var(--accent-glow);
+    box-shadow: 0 0 65px 28px rgba(var(--blob-glow-rgb), 0.4);
     animation: lava6 26s cubic-bezier(0.4, 0, 0.6, 1) infinite alternate;
   }
 
@@ -876,7 +877,7 @@
   .resize-handle-horizontal {
     width: 8px;
     cursor: col-resize;
-    margin: 0 -2px;
+    margin: 0 1px;
     z-index: 5;
   }
   .resize-handle-vertical {
@@ -1069,16 +1070,16 @@
     .lava-blob-5, .lava-blob-6 { display: none; }
 
     /* Blob 1: top-left corner, lava1 animation drifts it right-down toward center */
-    .lava-blob-1 { width: 340px; height: 340px; top: -8%; left: -10%; filter: blur(18px); box-shadow: 0 0 80px 30px rgba(var(--accent-rgb),0.55); }
+    .lava-blob-1 { width: 340px; height: 340px; top: -8%; left: -10%; filter: blur(18px); box-shadow: 0 0 80px 30px rgba(var(--blob-glow-rgb),0.55); }
 
     /* Blob 2: bottom-right corner, lava2 animation drifts it left-up toward center */
-    .lava-blob-2 { width: 310px; height: 310px; bottom: -8%; right: -10%; top: auto; filter: blur(16px); box-shadow: 0 0 70px 25px rgba(var(--accent-rgb),0.5); }
+    .lava-blob-2 { width: 310px; height: 310px; bottom: -8%; right: -10%; top: auto; filter: blur(16px); box-shadow: 0 0 70px 25px rgba(var(--blob-glow-rgb),0.5); }
 
     /* Blob 3: top-right corner, lava3 (rotate) drifts toward bottom-left */
-    .lava-blob-3 { width: 280px; height: 280px; top: -5%; right: -8%; left: auto; filter: blur(15px); box-shadow: 0 0 65px 22px rgba(var(--accent-rgb),0.5); }
+    .lava-blob-3 { width: 280px; height: 280px; top: -5%; right: -8%; left: auto; filter: blur(15px); box-shadow: 0 0 65px 22px rgba(var(--blob-glow-rgb),0.5); }
 
     /* Blob 4: bottom-left corner, lava4 drifts right-down */
-    .lava-blob-4 { width: 260px; height: 260px; bottom: -6%; left: -8%; top: auto; filter: blur(14px); box-shadow: 0 0 60px 20px rgba(var(--accent-rgb),0.5); }
+    .lava-blob-4 { width: 260px; height: 260px; bottom: -6%; left: -8%; top: auto; filter: blur(14px); box-shadow: 0 0 60px 20px rgba(var(--blob-glow-rgb),0.5); }
 
     /* ---- Reduce backdrop-filter blur (iOS Safari GPU cost) ---- */
     .liquid-glass           { -webkit-backdrop-filter: blur(8px) saturate(140%); backdrop-filter: blur(8px) saturate(140%); }
@@ -1293,21 +1294,25 @@
     justify-content: center;
     width: 36px;
     height: 36px;
-    color: rgba(255, 255, 255, 0.35);
-    background: transparent;
-    border: none;
-    border-right: 1px solid rgba(255, 255, 255, 0.06);
+    color: var(--text-secondary);
+    background: rgba(255, 255, 255, 0.05);
+    -webkit-backdrop-filter: blur(8px);
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
     cursor: pointer;
     transition: all 0.15s ease;
     flex-shrink: 0;
   }
   .editor-toggle-files:hover {
-    color: rgba(255, 255, 255, 0.6);
-    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.1);
+    border-color: rgba(255, 255, 255, 0.18);
   }
   .editor-toggle-files.active {
     color: var(--accent-bright);
-    background: rgba(var(--accent-rgb), 0.1);
+    background: rgba(var(--accent-rgb), 0.15);
+    border-color: rgba(var(--accent-rgb), 0.3);
   }
   .editor-tabs-scroll {
     display: flex;

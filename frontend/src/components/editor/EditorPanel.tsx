@@ -185,7 +185,7 @@ export default function EditorPanel() {
             <div className="h-full flex flex-col">
               {/* Toolbar: mode toggle + nav buttons */}
               <div
-                className="flex items-center gap-1 px-2 py-1 shrink-0 flex-wrap"
+                className="flex items-center gap-1.5 px-2 py-1.5 shrink-0 flex-wrap"
                 style={{ borderBottom: '1px solid var(--glass-border)' }}
               >
                 {/* Mode: tree / search */}
@@ -233,8 +233,6 @@ export default function EditorPanel() {
                     <line x1="21" y1="21" x2="16.65" y2="16.65" />
                   </svg>
                 </button>
-                {/* Separator */}
-                <div style={{ width: 1, height: 14, background: 'var(--glass-border)', margin: '0 2px' }} />
                 {/* Uploads (Telegram) — also droppable for file DnD */}
                 <button
                   ref={setUploadsDropRef}

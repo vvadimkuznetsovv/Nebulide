@@ -222,9 +222,10 @@ func (s *TerminalService) GetOrCreate(sessionKey string, workingDir string, sand
 		if alive {
 			return existing, nil
 		}
-		// Shell is dead — clean up (keep scrollback file for replay)
+		// Shell is dead — clean up and delete stale scrollback to prevent
+		// old output (e.g. from previous container) mixing with new shell.
 		log.Printf("[TerminalService] dead session, recreating key=%s", sessionKey)
-		existing.CloseKeepScrollback()
+		existing.Close()
 		delete(s.sessions, sessionKey)
 	} else {
 		log.Printf("[TerminalService] no existing session, creating new key=%s", sessionKey)

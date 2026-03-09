@@ -211,9 +211,9 @@ async function connectWs(instanceId: string): Promise<void> {
         ws.send(JSON.stringify({ type: 'resize', rows: dims.rows, cols: dims.cols }));
       }
     } catch { /* xterm may not be attached yet */ }
-    // Unlock resize after layout settles — 600ms accommodates slow
+    // Unlock resize after layout settles — 1500ms accommodates slow
     // mobile devices where CSS transitions / tab switches take longer.
-    setTimeout(() => { session.resizeLocked = false; }, 600);
+    setTimeout(() => { session.resizeLocked = false; }, 1500);
   };
 
   ws.onmessage = (event) => {
@@ -237,6 +237,12 @@ async function connectWs(instanceId: string): Promise<void> {
     session.ws = null;
 
     if (!sessions.has(instanceId)) return; // session was destroyed
+
+    // Shell exited — clear accumulated prompt redraws from xterm.
+    // New connection gets fresh output from backend (no stale scrollback).
+    if (opened_) {
+      session.xterm.clear();
+    }
 
     if (session.reconnectAttempts < MAX_RECONNECT) {
       session.reconnectAttempts++;
@@ -415,10 +421,17 @@ const TOOLBAR_KEYS: { label: string; data: string }[] = [
   { label: '\u2193', data: '\x1b[B' },
   { label: '\u2190', data: '\x1b[D' },
   { label: '\u2192', data: '\x1b[C' },
-  { label: 'C-c', data: '\x03' },
-  { label: 'C-d', data: '\x04' },
-  { label: 'C-z', data: '\x1a' },
-  { label: 'C-l', data: '\x0c' },
+];
+
+const CTRL_KEYS: { label: string; title: string; data: string }[] = [
+  { label: 'C-a', title: 'Ctrl+A \u2014 Beginning of line', data: '\x01' },
+  { label: 'C-b', title: 'Ctrl+B \u2014 Back one character', data: '\x02' },
+  { label: 'C-v', title: 'Ctrl+V \u2014 Insert next char literally', data: '\x16' },
+  { label: 'C-r', title: 'Ctrl+R \u2014 Reverse search history', data: '\x12' },
+  { label: 'C-c', title: 'Ctrl+C \u2014 Interrupt (SIGINT)', data: '\x03' },
+  { label: 'EOF', title: 'Ctrl+D \u2014 End of file / Exit', data: '\x04' },
+  { label: 'Susp', title: 'Ctrl+Z \u2014 Suspend (SIGTSTP)', data: '\x1a' },
+  { label: 'Clr', title: 'Ctrl+L \u2014 Clear screen', data: '\x0c' },
 ];
 
 export default function TerminalComponent({ instanceId, active, persistent }: TerminalProps) {
@@ -437,6 +450,9 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
   const [row2Open, setRow2Open] = useState(() =>
     localStorage.getItem('nebulide-terminal-toolbar-r2') !== 'closed',
   );
+  const [row3Open, setRow3Open] = useState(() =>
+    localStorage.getItem('nebulide-terminal-toolbar-r3') !== 'closed',
+  );
   const [followMode, setFollowMode] = useState(() =>
     localStorage.getItem('nebulide-terminal-follow') !== 'off',
   );
@@ -449,7 +465,7 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
     onLongPress: (x, y) => setCtxMenu({ x, y }),
   });
 
-  const RESIZE_COOLDOWN = 800; // min ms between resize messages to backend
+  const RESIZE_COOLDOWN = 1200; // min ms between resize messages to backend
 
   const fit = useCallback(() => {
     const s = sessions.get(instanceId);
@@ -511,7 +527,7 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
     }
 
     // Delay fit to let DOM settle (especially on mobile tab switches)
-    setTimeout(fit, 200);
+    setTimeout(fit, 400);
 
     let resizeTimer = 0;
     // fitAddon.fit() can change scrollbar visibility → container width changes →
@@ -543,6 +559,7 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
       if (document.visibilityState === 'visible') {
         const sess = sessions.get(instanceId);
         if (sess && (!sess.ws || sess.ws.readyState > WebSocket.OPEN)) {
+          sess.resizeLocked = true; // Lock before reconnect — connectWs.onopen will extend
           sess.reconnectAttempts = 0; // reset — this is a fresh wake
           connectWs(instanceId);
         }
@@ -640,8 +657,8 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
         }
       }
     };
-    el.addEventListener('paste', handlePaste);
-    return () => el.removeEventListener('paste', handlePaste);
+    el.addEventListener('paste', handlePaste, true);
+    return () => el.removeEventListener('paste', handlePaste, true);
   }, [instanceId]);
 
   // ── Context menu ──
@@ -1047,6 +1064,18 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
             >
               f-C
             </button>
+            <button
+              type="button"
+              className={`terminal-toolbar-btn${row3Open ? ' active' : ''}`}
+              onPointerDown={(e) => e.preventDefault()}
+              onClick={() => setRow3Open((v) => {
+                localStorage.setItem('nebulide-terminal-toolbar-r3', v ? 'closed' : 'open');
+                setTimeout(fit, 50);
+                return !v;
+              })}
+            >
+              f-E
+            </button>
           </>
         )}
       </div>
@@ -1134,6 +1163,34 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
           </button>
           <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => copyLines(0)}>
             CpAll
+          </button>
+        </div>
+      )}
+
+      {/* Row 4: Ctrl keys + Paste (toggled by f-E) */}
+      {row3Open && toolbarOpen && (
+        <div className="terminal-toolbar">
+          {CTRL_KEYS.map((k) => (
+            <button
+              key={k.label}
+              type="button"
+              className="terminal-toolbar-btn"
+              title={k.title}
+              onPointerDown={(e) => e.preventDefault()}
+              onClick={() => sendKey(k.data)}
+            >
+              {k.label}
+            </button>
+          ))}
+          <div className="terminal-toolbar-sep" />
+          <button
+            type="button"
+            className="terminal-toolbar-btn"
+            onPointerDown={(e) => e.preventDefault()}
+            onClick={pasteToTerminal}
+            title="Paste from clipboard"
+          >
+            Paste
           </button>
         </div>
       )}
