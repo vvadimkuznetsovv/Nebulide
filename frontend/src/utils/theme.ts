@@ -36,41 +36,41 @@ function hexToRgb(hex: string): [number, number, number] {
   return [r, g, b];
 }
 
-function hueShift(hex: string, degrees: number): [number, number, number] {
-  const [r, g, b] = hexToRgb(hex);
-  const rn = r / 255, gn = g / 255, bn = b / 255;
-  const max = Math.max(rn, gn, bn), min = Math.min(rn, gn, bn);
-  let h = 0, s = 0;
-  const l = (max + min) / 2;
-  if (max !== min) {
-    const d = max - min;
-    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
-    if (max === rn) h = ((gn - bn) / d + (gn < bn ? 6 : 0)) * 60;
-    else if (max === gn) h = ((bn - rn) / d + 2) * 60;
-    else h = ((rn - gn) / d + 4) * 60;
-  }
-  h = ((h + degrees) % 360 + 360) % 360;
-  const hn = h / 360;
-  const hue2rgb = (p: number, q: number, t: number) => {
-    if (t < 0) t += 1;
-    if (t > 1) t -= 1;
-    if (t < 1 / 6) return p + (q - p) * 6 * t;
-    if (t < 1 / 2) return q;
-    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
-    return p;
-  };
-  if (s === 0) {
-    const v = Math.round(l * 255);
-    return [v, v, v];
-  }
-  const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-  const p = 2 * l - q;
-  return [
-    Math.round(hue2rgb(p, q, hn + 1 / 3) * 255),
-    Math.round(hue2rgb(p, q, hn) * 255),
-    Math.round(hue2rgb(p, q, hn - 1 / 3) * 255),
-  ];
-}
+// function hueShift(hex: string, degrees: number): [number, number, number] {
+//   const [r, g, b] = hexToRgb(hex);
+//   const rn = r / 255, gn = g / 255, bn = b / 255;
+//   const max = Math.max(rn, gn, bn), min = Math.min(rn, gn, bn);
+//   let h = 0, s = 0;
+//   const l = (max + min) / 2;
+//   if (max !== min) {
+//     const d = max - min;
+//     s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+//     if (max === rn) h = ((gn - bn) / d + (gn < bn ? 6 : 0)) * 60;
+//     else if (max === gn) h = ((bn - rn) / d + 2) * 60;
+//     else h = ((rn - gn) / d + 4) * 60;
+//   }
+//   h = ((h + degrees) % 360 + 360) % 360;
+//   const hn = h / 360;
+//   const hue2rgb = (p: number, q: number, t: number) => {
+//     if (t < 0) t += 1;
+//     if (t > 1) t -= 1;
+//     if (t < 1 / 6) return p + (q - p) * 6 * t;
+//     if (t < 1 / 2) return q;
+//     if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+//     return p;
+//   };
+//   if (s === 0) {
+//     const v = Math.round(l * 255);
+//     return [v, v, v];
+//   }
+//   const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+//   const p = 2 * l - q;
+//   return [
+//     Math.round(hue2rgb(p, q, hn + 1 / 3) * 255),
+//     Math.round(hue2rgb(p, q, hn) * 255),
+//     Math.round(hue2rgb(p, q, hn - 1 / 3) * 255),
+//   ];
+// }
 
 function lighten(hex: string, amount: number): string {
   const [r, g, b] = hexToRgb(hex);
