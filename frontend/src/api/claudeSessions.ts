@@ -52,3 +52,6 @@ export interface ClaudeSearchResult {
 
 export const searchClaudeSessions = (q: string) =>
   api.get<{ results: ClaudeSearchResult[] }>('/claude-sessions/search', { params: { q } });
+
+export const deleteClaudeSession = (project: string, sessionId: string) =>
+  api.delete(`/claude-sessions/${encodeURIComponent(project)}/${encodeURIComponent(sessionId)}`);

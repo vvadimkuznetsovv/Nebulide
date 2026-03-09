@@ -558,6 +558,80 @@ func (h *ClaudeSessionsHandler) ReadSession(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"messages": messages})
 }
 
+// --- Delete Session ---
+
+// DeleteSession deletes a Claude session JSONL file.
+func (h *ClaudeSessionsHandler) DeleteSession(c *gin.Context) {
+	project := c.Param("project")
+	sessionFile := c.Param("sessionFile")
+
+	if !slugRe.MatchString(project) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid project"})
+		return
+	}
+
+	// Security: only allow access to user's own workspace projects
+	wsSlug := h.userWorkspaceSlug(c)
+	if !matchesWorkspace(project, wsSlug) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	claudeBase := h.claudeBaseDir()
+	projDir := filepath.Join(claudeBase, "projects", project)
+
+	// Find JSONL file — sessionFile could be internal sessionId or filename UUID
+	var fullPath string
+
+	// First try exact filename match
+	candidate := filepath.Join(projDir, sessionFile+".jsonl")
+	if _, err := os.Stat(candidate); err == nil {
+		fullPath = candidate
+	} else {
+		// Search by internal sessionId in files
+		files, err := os.ReadDir(projDir)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
+			return
+		}
+		for _, f := range files {
+			if f.IsDir() || !strings.HasSuffix(f.Name(), ".jsonl") {
+				continue
+			}
+			fp := filepath.Join(projDir, f.Name())
+			file, err := os.Open(fp)
+			if err != nil {
+				continue
+			}
+			scanner := bufio.NewScanner(file)
+			scanner.Buffer(make([]byte, 0, 64*1024), 256*1024)
+			for i := 0; i < 5 && scanner.Scan(); i++ {
+				var meta jsonlMeta
+				if json.Unmarshal([]byte(scanner.Text()), &meta) == nil && meta.SessionID == sessionFile {
+					fullPath = fp
+					break
+				}
+			}
+			file.Close()
+			if fullPath != "" {
+				break
+			}
+		}
+	}
+
+	if fullPath == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
+		return
+	}
+
+	if err := os.Remove(fullPath); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to delete session"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"message": "Session deleted"})
+}
+
 // --- Plans ---
 
 type planInfo struct {

@@ -165,6 +165,7 @@ func main() {
 		protected.GET("/claude-sessions", claudeSessionsHandler.List)
 		protected.GET("/claude-sessions/search", claudeSessionsHandler.SearchSessions)
 		protected.GET("/claude-sessions/:project/:sessionFile", claudeSessionsHandler.ReadSession)
+		protected.DELETE("/claude-sessions/:project/:sessionFile", claudeSessionsHandler.DeleteSession)
 		protected.GET("/claude-plans", claudeSessionsHandler.ListPlans)
 		protected.GET("/claude-plans/:slug", claudeSessionsHandler.ReadPlan)
 	}

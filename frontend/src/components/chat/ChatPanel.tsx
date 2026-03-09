@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import { listClaudeSessions, listClaudePlans, readClaudePlan, readClaudeSession, searchClaudeSessions } from '../../api/claudeSessions';
+import { listClaudeSessions, listClaudePlans, readClaudePlan, readClaudeSession, searchClaudeSessions, deleteClaudeSession } from '../../api/claudeSessions';
 import type { ClaudeProject, ClaudeSession, ClaudePlan, ClaudeSessionMessage, ClaudeSearchResult } from '../../api/claudeSessions';
 import { useLayoutStore } from '../../store/layoutStore';
 import { typeCommandInTerminal } from '../terminal/Terminal';
@@ -107,6 +107,18 @@ export default function ChatPanel(_props: ChatPanelProps) {
       setPreviewLoading(false);
     }
   }, [expandedSession]);
+
+  const handleDeleteSession = useCallback(async (session: ClaudeSession & { project: string }) => {
+    if (!confirm('Delete this session?')) return;
+    try {
+      await deleteClaudeSession(session.project, session.session_id);
+      if (expandedSession === session.session_id) setExpandedSession(null);
+      refresh();
+      toast.success('Session deleted');
+    } catch {
+      toast.error('Failed to delete session');
+    }
+  }, [expandedSession, refresh]);
 
   const handlePlanClick = useCallback(async (slug: string) => {
     if (expandedPlan === slug) {
@@ -448,6 +460,28 @@ export default function ChatPanel(_props: ChatPanelProps) {
                             <polygon points="5 3 19 12 5 21 5 3" />
                           </svg>
                           Open
+                        </button>
+                        {/* Delete button */}
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteSession(session)}
+                          title="Delete session"
+                          style={{
+                            background: 'rgba(255, 60, 60, 0.08)',
+                            border: '1px solid var(--glass-border)',
+                            borderRadius: 4, padding: '3px 6px',
+                            cursor: 'pointer', display: 'flex', alignItems: 'center',
+                            color: 'var(--text-muted)',
+                            fontSize: 10, fontFamily: 'inherit',
+                            transition: 'all 0.15s',
+                          }}
+                          onMouseEnter={(e) => { e.currentTarget.style.color = '#ff3c3c'; e.currentTarget.style.background = 'rgba(255, 60, 60, 0.15)'; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.background = 'rgba(255, 60, 60, 0.08)'; }}
+                        >
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="3 6 5 6 21 6" />
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                          </svg>
                         </button>
                       </div>
                     </div>
