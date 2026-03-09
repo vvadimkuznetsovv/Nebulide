@@ -92,7 +92,7 @@
     top: 5%; left: 8%;
     background: var(--accent);
     filter: blur(22px);
-    box-shadow: 0 0 80px 35px rgba(var(--blob-glow-rgb), 0.4);
+    box-shadow: 0 0 40px 15px rgba(var(--accent-rgb), 0.5), 0 0 80px 35px rgba(var(--blob-glow-rgb), 0.4);
     animation: lava1 28s cubic-bezier(0.4, 0, 0.6, 1) infinite alternate;
   }
 
@@ -101,7 +101,7 @@
     bottom: 8%; right: 10%;
     background: var(--accent);
     filter: blur(20px);
-    box-shadow: 0 0 70px 30px rgba(var(--blob-glow-rgb), 0.4);
+    box-shadow: 0 0 35px 12px rgba(var(--accent-rgb), 0.5), 0 0 70px 30px rgba(var(--blob-glow-rgb), 0.4);
     animation: lava2 32s cubic-bezier(0.4, 0, 0.6, 1) infinite alternate;
   }
 
@@ -110,7 +110,7 @@
     top: 45%; left: 55%;
     background: var(--accent);
     filter: blur(18px);
-    box-shadow: 0 0 60px 25px rgba(var(--blob-glow-rgb), 0.4);
+    box-shadow: 0 0 30px 10px rgba(var(--accent-rgb), 0.5), 0 0 60px 25px rgba(var(--blob-glow-rgb), 0.4);
     animation: lava3 24s cubic-bezier(0.4, 0, 0.6, 1) infinite alternate;
   }
 
@@ -119,7 +119,7 @@
     top: 15%; right: 18%;
     background: var(--accent);
     filter: blur(16px);
-    box-shadow: 0 0 55px 22px rgba(var(--blob-glow-rgb), 0.4);
+    box-shadow: 0 0 28px 9px rgba(var(--accent-rgb), 0.5), 0 0 55px 22px rgba(var(--blob-glow-rgb), 0.4);
     animation: lava4 30s cubic-bezier(0.4, 0, 0.6, 1) infinite alternate;
   }
 
@@ -128,7 +128,7 @@
     bottom: 30%; left: 15%;
     background: var(--accent);
     filter: blur(16px);
-    box-shadow: 0 0 50px 20px rgba(var(--blob-glow-rgb), 0.4);
+    box-shadow: 0 0 25px 8px rgba(var(--accent-rgb), 0.5), 0 0 50px 20px rgba(var(--blob-glow-rgb), 0.4);
     animation: lava5 34s cubic-bezier(0.4, 0, 0.6, 1) infinite alternate;
   }
 
@@ -137,7 +137,7 @@
     top: 65%; left: 5%;
     background: var(--accent);
     filter: blur(20px);
-    box-shadow: 0 0 65px 28px rgba(var(--blob-glow-rgb), 0.4);
+    box-shadow: 0 0 32px 12px rgba(var(--accent-rgb), 0.5), 0 0 65px 28px rgba(var(--blob-glow-rgb), 0.4);
     animation: lava6 26s cubic-bezier(0.4, 0, 0.6, 1) infinite alternate;
   }
 

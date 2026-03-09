@@ -17,8 +17,17 @@ export const ACCENT_PRESETS = [
   { name: 'Gold', hex: '#CCAA00' },
 ];
 
-// Purple preset uses accent color as-is (natural blue glow on dark bg)
-const PURPLE_HEX = '#7F00FF';
+// Per-preset glow hue shift (degrees). null = use accent color as-is.
+const PRESET_GLOW_SHIFT: Record<string, number | null> = {
+  '#7F00FF': null,    // Purple: natural blue glow on dark bg
+  '#0066FF': -70,     // Blue → turquoise
+  '#00B4D8': +120,    // Cyan → magenta/pink
+  '#00CC66': +120,    // Green → blue
+  '#FF0099': +120,    // Pink → cyan/teal
+  '#FF3355': +120,    // Red → blue/cyan
+  '#FF6600': +120,    // Orange → cyan/teal
+  '#CCAA00': +120,    // Gold → blue/purple
+};
 
 function hexToRgb(hex: string): [number, number, number] {
   const r = parseInt(hex.slice(1, 3), 16);
@@ -101,7 +110,10 @@ export function applyAccentColor(hex: string) {
   root.style.setProperty('--accent-glow', `rgba(${r}, ${g}, ${b}, 0.4)`);
   root.style.setProperty('--accent-soft', `rgba(${r}, ${g}, ${b}, 0.15)`);
 
-  const [gr, gg, gb] = hex.toUpperCase() === PURPLE_HEX ? [r, g, b] : hueShift(hex, -70);
+  const shift = PRESET_GLOW_SHIFT[hex.toUpperCase()];
+  const [gr, gg, gb] = shift === null ? [r, g, b]
+    : shift !== undefined ? hueShift(hex, shift)
+    : hueShift(hex, -70);
   root.style.setProperty('--blob-glow-rgb', `${gr}, ${gg}, ${gb}`);
   localStorage.setItem(ACCENT_KEY, hex);
 }
