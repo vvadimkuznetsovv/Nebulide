@@ -230,10 +230,11 @@ func (h *AdminHandler) KillTerminal(c *gin.Context) {
 
 	userID := c.Param("id")
 	instanceID := c.Param("instanceId")
-	sessionKey := "term:" + userID + ":" + instanceID
+	prefix := "term:" + userID + ":" + instanceID
 
-	if h.terminal.KillSession(sessionKey) {
-		c.JSON(http.StatusOK, gin.H{"message": "Terminal killed"})
+	killed := h.terminal.AdminKillSessionsByPrefix(prefix)
+	if killed > 0 {
+		c.JSON(http.StatusOK, gin.H{"message": "Terminal killed", "killed": killed})
 	} else {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Terminal session not found"})
 	}

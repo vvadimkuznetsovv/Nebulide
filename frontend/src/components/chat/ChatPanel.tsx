@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { listClaudeSessions, listClaudePlans, readClaudePlan } from '../../api/claudeSessions';
 import type { ClaudeProject, ClaudeSession, ClaudePlan } from '../../api/claudeSessions';
 import { useLayoutStore } from '../../store/layoutStore';
@@ -32,6 +32,14 @@ function projectDisplayName(slug: string): string {
   return parts[parts.length - 1] || slug;
 }
 
+function sessionDisplayName(session: ClaudeSession & { project: string }): string {
+  if (session.first_message) {
+    const msg = session.first_message;
+    return msg.length > 60 ? msg.slice(0, 60) + '...' : msg;
+  }
+  return session.slug || session.session_id.slice(0, 8);
+}
+
 export default function ChatPanel(_props: ChatPanelProps) {
   const [projects, setProjects] = useState<ClaudeProject[]>([]);
   const [plans, setPlans] = useState<ClaudePlan[]>([]);
@@ -39,6 +47,7 @@ export default function ChatPanel(_props: ChatPanelProps) {
   const [planContent, setPlanContent] = useState<string>('');
   const [loading, setLoading] = useState(true);
   const [launching, setLaunching] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const openTerminalWithId = useLayoutStore((s) => s.openTerminalWithId);
 
@@ -88,15 +97,28 @@ export default function ChatPanel(_props: ChatPanelProps) {
     }
   }, [expandedPlan]);
 
-  const allSessions = projects.flatMap((p) =>
-    p.sessions.map((s) => ({ ...s, project: p.slug }))
-  );
-  allSessions.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+  const allSessions = useMemo(() => {
+    const flat = projects.flatMap((p) =>
+      p.sessions.map((s) => ({ ...s, project: p.slug }))
+    );
+    flat.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+    return flat;
+  }, [projects]);
+
+  const filteredSessions = useMemo(() => {
+    if (!searchQuery) return allSessions;
+    const q = searchQuery.toLowerCase();
+    return allSessions.filter(s =>
+      s.first_message?.toLowerCase().includes(q)
+      || s.slug?.toLowerCase().includes(q)
+      || projectDisplayName(s.project).toLowerCase().includes(q)
+    );
+  }, [allSessions, searchQuery]);
 
   if (loading) {
     return (
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%' }}>
-        <div style={{ color: 'var(--text-tertiary)', fontSize: 13 }}>Загрузка...</div>
+        <div style={{ color: 'var(--text-tertiary)', fontSize: 13 }}>Loading...</div>
       </div>
     );
   }
@@ -133,6 +155,47 @@ export default function ChatPanel(_props: ChatPanelProps) {
           </svg>
         </button>
       </div>
+
+      {/* Search */}
+      {!isEmpty && (
+        <div style={{ padding: '8px 12px', flexShrink: 0 }}>
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 8,
+            background: 'rgba(var(--accent-rgb), 0.06)',
+            border: '1px solid var(--glass-border)',
+            borderRadius: 8, padding: '6px 10px',
+          }}>
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+              <circle cx="11" cy="11" r="8" />
+              <line x1="21" y1="21" x2="16.65" y2="16.65" />
+            </svg>
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search sessions..."
+              style={{
+                flex: 1, background: 'none', border: 'none', outline: 'none',
+                color: 'var(--text-primary)', fontSize: 12, fontFamily: 'inherit',
+              }}
+            />
+            {searchQuery && (
+              <button
+                type="button"
+                onClick={() => setSearchQuery('')}
+                style={{
+                  background: 'none', border: 'none', cursor: 'pointer',
+                  color: 'var(--text-muted)', display: 'flex', padding: 0,
+                }}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       <div style={{ flex: 1, overflow: 'auto', padding: '8px 0' }}>
         {isEmpty && (
@@ -220,16 +283,16 @@ export default function ChatPanel(_props: ChatPanelProps) {
         )}
 
         {/* Sessions section */}
-        {allSessions.length > 0 && (
+        {filteredSessions.length > 0 && (
           <div>
             <div style={{
               padding: '6px 16px', fontSize: 10, fontWeight: 700,
               textTransform: 'uppercase', letterSpacing: '0.08em',
               color: 'var(--text-muted)',
             }}>
-              Sessions
+              Sessions{searchQuery ? ` (${filteredSessions.length})` : ''}
             </div>
-            {allSessions.map((session) => {
+            {filteredSessions.map((session) => {
               const isLaunching = launching === session.session_id;
               return (
                 <button
@@ -254,18 +317,22 @@ export default function ChatPanel(_props: ChatPanelProps) {
                     <line x1="12" y1="19" x2="20" y2="19" />
                   </svg>
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    {/* Session name */}
+                    {/* Session name — first_message as primary */}
                     <div style={{
                       fontSize: 12, fontWeight: 500, color: 'var(--text-primary)',
                       overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                     }}>
-                      {session.slug || session.session_id.slice(0, 8)}
+                      {sessionDisplayName(session)}
                     </div>
-                    {/* First message preview */}
+                    {/* 2-line preview of first_message */}
                     {session.first_message && (
                       <div style={{
                         fontSize: 11, color: 'var(--text-muted)', marginTop: 3,
-                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        overflow: 'hidden', textOverflow: 'ellipsis',
+                        display: '-webkit-box',
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: 'vertical',
+                        lineHeight: '1.4',
                       }}>
                         {session.first_message}
                       </div>
@@ -283,6 +350,16 @@ export default function ChatPanel(_props: ChatPanelProps) {
                 </button>
               );
             })}
+          </div>
+        )}
+
+        {/* No search results */}
+        {searchQuery && filteredSessions.length === 0 && allSessions.length > 0 && (
+          <div style={{
+            padding: '20px 16px', textAlign: 'center',
+            color: 'var(--text-muted)', fontSize: 12,
+          }}>
+            No sessions matching "{searchQuery}"
           </div>
         )}
       </div>

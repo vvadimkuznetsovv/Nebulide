@@ -173,6 +173,10 @@ type TerminalSession struct {
 	mu       sync.Mutex
 	lastCols uint16
 	lastRows uint16
+
+	// Killed is set when admin explicitly kills this session.
+	// WS handler checks this to send close code 4001 (prevent frontend reconnect).
+	Killed bool
 }
 
 func NewTerminalService() *TerminalService {
@@ -549,6 +553,23 @@ func (s *TerminalService) KillSessionsByPrefix(prefix string) int {
 	count := 0
 	for key, sess := range s.sessions {
 		if strings.HasPrefix(key, prefix) {
+			sess.Close()
+			delete(s.sessions, key)
+			count++
+		}
+	}
+	return count
+}
+
+// AdminKillSessionsByPrefix is like KillSessionsByPrefix but sets the Killed flag
+// so WS handlers send close code 4001 (prevents frontend auto-reconnect).
+func (s *TerminalService) AdminKillSessionsByPrefix(prefix string) int {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	count := 0
+	for key, sess := range s.sessions {
+		if strings.HasPrefix(key, prefix) {
+			sess.Killed = true
 			sess.Close()
 			delete(s.sessions, key)
 			count++

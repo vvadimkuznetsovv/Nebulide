@@ -207,6 +207,11 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
         return { layout: newLayout, visibility: newVis };
       }
 
+      // For base terminal: hiding = kill PTY (fresh session on reopen)
+      if (wasVisible && panelId === 'terminal') {
+        destroyTerminalSession('default');
+      }
+
       // For detached editors: hiding = close (remove from layout)
       if (wasVisible && isDetachedEditor(panelId)) {
         const tabId = panelId.slice('editor:'.length);

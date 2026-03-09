@@ -152,9 +152,15 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 		}
 	}()
 
-	// Close WS when shell exits (e.g. Ctrl+D / exit) so frontend gets onclose and reconnects
+	// Close WS when shell exits (e.g. Ctrl+D / exit) so frontend gets onclose and reconnects.
+	// If admin killed the session, send close code 4001 to prevent frontend auto-reconnect.
 	go func() {
 		<-termSession.Done
+		if termSession.Killed {
+			log.Printf("[Terminal] admin-killed, sending 4001 key=%s", sessionKey)
+			conn.WriteControl(websocket.CloseMessage,
+				websocket.FormatCloseMessage(4001, "admin-killed"), time.Now().Add(time.Second))
+		}
 		log.Printf("[Terminal] shell exited, closing WS key=%s", sessionKey)
 		conn.Close()
 	}()

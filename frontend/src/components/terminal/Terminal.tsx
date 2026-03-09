@@ -286,6 +286,14 @@ async function connectWs(instanceId: string): Promise<void> {
 
     if (!sessions.has(instanceId)) return; // session was destroyed
 
+    // Admin killed this terminal — don't reconnect until user reopens manually
+    if (e.code === 4001) {
+      session.xterm.write(_red('[Terminal killed by admin]') + '\r\n');
+      session.reconnectAttempts = MAX_RECONNECT;
+      session.notifyRerender?.();
+      return;
+    }
+
     // Shell exited — clear accumulated prompt redraws from xterm.
     // New connection gets fresh output from backend (no stale scrollback).
     if (opened_) {

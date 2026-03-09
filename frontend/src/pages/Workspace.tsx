@@ -14,7 +14,8 @@ import {
 } from '@dnd-kit/core';
 import { ScrollAwareTouchSensor } from '../utils/ScrollAwareTouchSensor';
 import { useAuth } from '../hooks/useAuth';
-import { renameFile } from '../api/files';
+import { renameFile, copyFile } from '../api/files';
+import { useAuthStore } from '../store/authStore';
 import { useLayoutStore, type PanelId } from '../store/layoutStore';
 import { findPanelNode, isDetachedEditor } from '../store/layoutUtils';
 import { useWorkspaceStore } from '../store/workspaceStore';
@@ -192,6 +193,9 @@ export default function Workspace() {
   const anyPanelVisible = Object.entries(visibility).some(([, v]) => v);
 
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
+  const [pendingSharedDrop, setPendingSharedDrop] = useState<{
+    srcPath: string; destPath: string; fileName: string;
+  } | null>(null);
 
   const mouseSensor = useSensor(MouseSensor, { activationConstraint: { distance: 8 } });
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -245,6 +249,14 @@ export default function Workspace() {
       const srcParent = normSrc.split('/').slice(0, -1).join('/');
       // Guards: same path, already in folder, folder onto itself, or dest inside source (cycle)
       if (normSrc === destPath || srcParent === normDest || normDest === normSrc || normDest.startsWith(normSrc + '/')) return;
+
+      // Dropping into Shared folder → show Copy/Move modal
+      const sharedDir = useAuthStore.getState().user?.shared_dir;
+      if (sharedDir && normDest.startsWith(sharedDir.replace(/\\/g, '/'))) {
+        setPendingSharedDrop({ srcPath, destPath, fileName });
+        return;
+      }
+
       renameFile(srcPath, destPath)
         .then(() => {
           window.dispatchEvent(new CustomEvent('filetree-refresh'));
@@ -489,6 +501,97 @@ export default function Workspace() {
             Take over
           </button>
         </div>
+      )}
+
+      {/* Shared folder Copy/Move modal */}
+      {pendingSharedDrop && createPortal(
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+          style={{ background: 'rgba(0, 0, 0, 0.5)', backdropFilter: 'blur(6px)' }}
+          onClick={() => setPendingSharedDrop(null)}
+          onKeyDown={(e) => { if (e.key === 'Escape') setPendingSharedDrop(null); }}
+        >
+          <div
+            className="w-full max-w-xs rounded-2xl p-5"
+            style={{
+              background: 'rgba(20, 10, 30, 0.85)',
+              border: '1px solid var(--glass-border)',
+              backdropFilter: 'blur(20px)',
+              boxShadow: '0 0 30px rgba(var(--accent-rgb), 0.15)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>
+              Shared
+            </div>
+            <div style={{
+              fontSize: 12, color: 'var(--text-muted)', marginBottom: 16,
+              overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            }}>
+              {pendingSharedDrop.fileName}
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                type="button"
+                onClick={() => {
+                  const { srcPath, destPath, fileName } = pendingSharedDrop;
+                  setPendingSharedDrop(null);
+                  copyFile(srcPath, destPath)
+                    .then(() => {
+                      window.dispatchEvent(new CustomEvent('filetree-refresh'));
+                      import('react-hot-toast').then(m => m.default.success(`Copied ${fileName}`));
+                    })
+                    .catch(() => {
+                      import('react-hot-toast').then(m => m.default.error('Failed to copy'));
+                    });
+                }}
+                style={{
+                  flex: 1, padding: '10px 0', borderRadius: 10, fontSize: 13, fontWeight: 600,
+                  cursor: 'pointer', transition: 'all 0.15s',
+                  background: 'rgba(var(--accent-rgb), 0.12)',
+                  border: '1px solid rgba(var(--accent-rgb), 0.3)',
+                  color: 'var(--accent)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="9" y="9" width="13" height="13" rx="2" ry="2" />
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
+                Copy
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const { srcPath, destPath, fileName } = pendingSharedDrop;
+                  setPendingSharedDrop(null);
+                  renameFile(srcPath, destPath)
+                    .then(() => {
+                      window.dispatchEvent(new CustomEvent('filetree-refresh'));
+                      import('react-hot-toast').then(m => m.default.success(`Moved ${fileName}`));
+                    })
+                    .catch(() => {
+                      import('react-hot-toast').then(m => m.default.error('Failed to move'));
+                    });
+                }}
+                style={{
+                  flex: 1, padding: '10px 0', borderRadius: 10, fontSize: 13, fontWeight: 600,
+                  cursor: 'pointer', transition: 'all 0.15s',
+                  background: 'rgba(255, 255, 255, 0.06)',
+                  border: '1px solid rgba(255, 255, 255, 0.12)',
+                  color: 'var(--text-secondary)',
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M5 12h14" /><path d="M12 5l7 7-7 7" />
+                </svg>
+                Move
+              </button>
+            </div>
+          </div>
+        </div>,
+        document.body,
       )}
 
       {/* Lock warning modal */}

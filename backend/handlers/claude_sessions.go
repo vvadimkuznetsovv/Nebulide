@@ -43,6 +43,7 @@ func (h *ClaudeSessionsHandler) claudeDir(c *gin.Context) string {
 		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
 			return candidate
 		}
+		return "" // non-admin without .claude dir — no sessions to show
 	}
 
 	return filepath.Join(home, ".claude")
@@ -113,6 +114,10 @@ type projectInfo struct {
 // List returns all Claude CLI sessions grouped by project.
 func (h *ClaudeSessionsHandler) List(c *gin.Context) {
 	claudeBase := h.claudeDir(c)
+	if claudeBase == "" {
+		c.JSON(http.StatusOK, gin.H{"projects": []interface{}{}})
+		return
+	}
 	projectsDir := filepath.Join(claudeBase, "projects")
 
 	entries, err := os.ReadDir(projectsDir)
@@ -246,6 +251,10 @@ type planInfo struct {
 
 func (h *ClaudeSessionsHandler) ListPlans(c *gin.Context) {
 	claudeBase := h.claudeDir(c)
+	if claudeBase == "" {
+		c.JSON(http.StatusOK, gin.H{"plans": []interface{}{}})
+		return
+	}
 	plansDir := filepath.Join(claudeBase, "plans")
 
 	entries, err := os.ReadDir(plansDir)
@@ -311,6 +320,10 @@ func (h *ClaudeSessionsHandler) ReadPlan(c *gin.Context) {
 	}
 
 	claudeBase := h.claudeDir(c)
+	if claudeBase == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Plan not found"})
+		return
+	}
 	fullPath := filepath.Join(claudeBase, "plans", slug+".md")
 
 	fi, err := os.Stat(fullPath)
