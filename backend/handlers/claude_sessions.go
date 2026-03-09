@@ -265,6 +265,174 @@ func (h *ClaudeSessionsHandler) List(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"projects": projects})
 }
 
+// --- Session Search ---
+
+type searchResult struct {
+	SessionID string  `json:"session_id"`
+	Project   string  `json:"project"`
+	Slug      string  `json:"slug"`
+	UpdatedAt string  `json:"updated_at"`
+	SizeMB    float64 `json:"size_mb"`
+	Snippet   string  `json:"snippet"`
+}
+
+// SearchSessions performs full-text search across all session conversations.
+func (h *ClaudeSessionsHandler) SearchSessions(c *gin.Context) {
+	query := strings.TrimSpace(c.Query("q"))
+	if query == "" || len(query) < 2 {
+		c.JSON(http.StatusOK, gin.H{"results": []interface{}{}})
+		return
+	}
+	qLower := strings.ToLower(query)
+
+	claudeBase := h.claudeBaseDir()
+	projectsDir := filepath.Join(claudeBase, "projects")
+
+	entries, err := os.ReadDir(projectsDir)
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{"results": []interface{}{}})
+		return
+	}
+
+	wsSlug := h.userWorkspaceSlug(c)
+	var results []searchResult
+
+	for _, projEntry := range entries {
+		if !projEntry.IsDir() || !matchesWorkspace(projEntry.Name(), wsSlug) {
+			continue
+		}
+
+		projPath := filepath.Join(projectsDir, projEntry.Name())
+		files, _ := os.ReadDir(projPath)
+
+		for _, f := range files {
+			if f.IsDir() || !strings.HasSuffix(f.Name(), ".jsonl") {
+				continue
+			}
+
+			fullPath := filepath.Join(projPath, f.Name())
+			fi, err := os.Stat(fullPath)
+			if err != nil {
+				continue
+			}
+
+			// Search through messages
+			match := h.searchInSession(fullPath, qLower)
+			if match == nil {
+				continue
+			}
+
+			results = append(results, searchResult{
+				SessionID: match.sessionID,
+				Project:   projEntry.Name(),
+				Slug:      match.slug,
+				UpdatedAt: fi.ModTime().UTC().Format(time.RFC3339),
+				SizeMB:    float64(fi.Size()) / (1024 * 1024),
+				Snippet:   match.snippet,
+			})
+
+			// Limit results
+			if len(results) >= 30 {
+				break
+			}
+		}
+		if len(results) >= 30 {
+			break
+		}
+	}
+
+	// Sort by updated_at descending
+	sort.Slice(results, func(i, j int) bool {
+		return results[i].UpdatedAt > results[j].UpdatedAt
+	})
+
+	c.JSON(http.StatusOK, gin.H{"results": results})
+}
+
+type searchMatch struct {
+	sessionID string
+	slug      string
+	snippet   string
+}
+
+func (h *ClaudeSessionsHandler) searchInSession(filePath, qLower string) *searchMatch {
+	file, err := os.Open(filePath)
+	if err != nil {
+		return nil
+	}
+	defer file.Close()
+
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
+
+	var sessionID, slug string
+	lineCount := 0
+
+	for scanner.Scan() {
+		lineCount++
+		line := scanner.Text()
+		if line == "" {
+			continue
+		}
+
+		var meta jsonlMeta
+		if err := json.Unmarshal([]byte(line), &meta); err != nil {
+			continue
+		}
+
+		if meta.SessionID != "" && sessionID == "" {
+			sessionID = meta.SessionID
+		}
+		if meta.Slug != "" && slug == "" {
+			slug = meta.Slug
+		}
+
+		if meta.Type == "user" || meta.Type == "assistant" {
+			text := extractTextContent(meta)
+			if text == "" {
+				continue
+			}
+			textLower := strings.ToLower(text)
+			idx := strings.Index(textLower, qLower)
+			if idx >= 0 {
+				// Build snippet: ~40 chars before match, match, ~60 chars after
+				start := idx - 40
+				if start < 0 {
+					start = 0
+				}
+				end := idx + len(qLower) + 60
+				if end > len(text) {
+					end = len(text)
+				}
+				snippet := ""
+				if start > 0 {
+					snippet = "..."
+				}
+				snippet += text[start:end]
+				if end < len(text) {
+					snippet += "..."
+				}
+
+				if sessionID == "" {
+					sessionID = strings.TrimSuffix(filepath.Base(filePath), ".jsonl")
+				}
+
+				return &searchMatch{
+					sessionID: sessionID,
+					slug:      slug,
+					snippet:   snippet,
+				}
+			}
+		}
+
+		// Don't scan more than 2000 lines per file for performance
+		if lineCount > 2000 {
+			break
+		}
+	}
+	return nil
+}
+
 // --- Session Preview ---
 
 type sessionMessage struct {

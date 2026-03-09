@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback, useMemo } from 'react';
-import { listClaudeSessions, listClaudePlans, readClaudePlan, readClaudeSession } from '../../api/claudeSessions';
-import type { ClaudeProject, ClaudeSession, ClaudePlan, ClaudeSessionMessage } from '../../api/claudeSessions';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { listClaudeSessions, listClaudePlans, readClaudePlan, readClaudeSession, searchClaudeSessions } from '../../api/claudeSessions';
+import type { ClaudeProject, ClaudeSession, ClaudePlan, ClaudeSessionMessage, ClaudeSearchResult } from '../../api/claudeSessions';
 import { useLayoutStore } from '../../store/layoutStore';
 import { typeCommandInTerminal } from '../terminal/Terminal';
 import toast from 'react-hot-toast';
@@ -51,6 +51,9 @@ export default function ChatPanel(_props: ChatPanelProps) {
   const [loading, setLoading] = useState(true);
   const [launching, setLaunching] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<ClaudeSearchResult[] | null>(null);
+  const [searching, setSearching] = useState(false);
+  const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const openTerminalWithId = useLayoutStore((s) => s.openTerminalWithId);
 
@@ -127,16 +130,51 @@ export default function ChatPanel(_props: ChatPanelProps) {
     return flat;
   }, [projects]);
 
+  // Client-side quick filter for short queries, server search for full-text
   const filteredSessions = useMemo(() => {
-    if (!searchQuery) return allSessions;
+    if (!searchQuery || searchResults !== null) return allSessions;
     const q = searchQuery.toLowerCase();
     return allSessions.filter(s =>
       s.first_message?.toLowerCase().includes(q)
       || s.slug?.toLowerCase().includes(q)
       || projectDisplayName(s.project).toLowerCase().includes(q)
-      || s.session_id.toLowerCase().includes(q)
     );
-  }, [allSessions, searchQuery]);
+  }, [allSessions, searchQuery, searchResults]);
+
+  // Debounced server-side full-text search
+  const handleSearchChange = useCallback((value: string) => {
+    setSearchQuery(value);
+    if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
+
+    if (!value.trim() || value.trim().length < 2) {
+      setSearchResults(null);
+      setSearching(false);
+      return;
+    }
+
+    setSearching(true);
+    searchTimerRef.current = setTimeout(async () => {
+      try {
+        const { data } = await searchClaudeSessions(value.trim());
+        setSearchResults(data.results || []);
+      } catch {
+        setSearchResults(null);
+      } finally {
+        setSearching(false);
+      }
+    }, 400);
+  }, []);
+
+  // Open a search result in terminal
+  const handleOpenSearchResult = useCallback(async (result: ClaudeSearchResult) => {
+    if (launching) return;
+    setLaunching(result.session_id);
+    const instanceId = `claude-${Date.now()}`;
+    openTerminalWithId(instanceId);
+    const ok = await typeCommandInTerminal(instanceId, `claude --resume ${result.session_id}`);
+    if (!ok) toast.error('Failed to connect to terminal');
+    setLaunching(null);
+  }, [launching, openTerminalWithId]);
 
   if (loading) {
     return (
@@ -195,8 +233,8 @@ export default function ChatPanel(_props: ChatPanelProps) {
             <input
               type="text"
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search sessions..."
+              onChange={(e) => handleSearchChange(e.target.value)}
+              placeholder="Search sessions (full-text)..."
               style={{
                 flex: 1, background: 'none', border: 'none', outline: 'none',
                 color: 'var(--text-primary)', fontSize: 12, fontFamily: 'inherit',
@@ -205,7 +243,7 @@ export default function ChatPanel(_props: ChatPanelProps) {
             {searchQuery && (
               <button
                 type="button"
-                onClick={() => setSearchQuery('')}
+                onClick={() => { setSearchQuery(''); setSearchResults(null); setSearching(false); }}
                 style={{
                   background: 'none', border: 'none', cursor: 'pointer',
                   color: 'var(--text-muted)', display: 'flex', padding: 0,
@@ -465,8 +503,88 @@ export default function ChatPanel(_props: ChatPanelProps) {
           </div>
         )}
 
-        {/* No search results */}
-        {searchQuery && filteredSessions.length === 0 && allSessions.length > 0 && (
+        {/* Server search results */}
+        {searchResults !== null && searchResults.length > 0 && (
+          <div>
+            <div style={{
+              padding: '6px 16px', fontSize: 10, fontWeight: 700,
+              textTransform: 'uppercase', letterSpacing: '0.08em',
+              color: 'var(--text-muted)',
+            }}>
+              Full-text results ({searchResults.length})
+            </div>
+            {searchResults.map((result) => (
+              <div
+                key={result.session_id}
+                style={{
+                  padding: '10px 16px', display: 'flex', gap: 10, alignItems: 'flex-start',
+                  transition: 'background 0.15s',
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--glass-hover)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'none'; }}
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 2 }}>
+                  <circle cx="11" cy="11" r="8" />
+                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                </svg>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{
+                    fontSize: 12, fontWeight: 500, color: 'var(--text-primary)',
+                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                  }}>
+                    {result.slug || result.session_id.slice(0, 8)}
+                  </div>
+                  <div style={{
+                    fontSize: 11, color: 'var(--text-secondary)', marginTop: 3,
+                    lineHeight: '1.4', fontStyle: 'italic',
+                  }}>
+                    {result.snippet}
+                  </div>
+                  <div style={{
+                    fontSize: 10, color: 'var(--text-muted)', marginTop: 4,
+                    display: 'flex', alignItems: 'center', gap: 8,
+                  }}>
+                    <span>{projectDisplayName(result.project)}</span>
+                    <span>{formatSize(result.size_mb)}</span>
+                    <span>{timeAgo(result.updated_at)}</span>
+                    <span style={{ flex: 1 }} />
+                    <button
+                      type="button"
+                      onClick={() => handleOpenSearchResult(result)}
+                      disabled={!!launching}
+                      title="Resume in terminal"
+                      style={{
+                        background: 'rgba(var(--accent-rgb), 0.12)',
+                        border: '1px solid var(--glass-border)',
+                        borderRadius: 4, padding: '3px 8px',
+                        cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
+                        color: 'var(--accent)', fontSize: 10, fontFamily: 'inherit',
+                      }}
+                    >
+                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <polygon points="5 3 19 12 5 21 5 3" />
+                      </svg>
+                      Open
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Searching indicator */}
+        {searching && (
+          <div style={{
+            padding: '12px 16px', textAlign: 'center',
+            color: 'var(--text-muted)', fontSize: 11,
+          }}>
+            Searching...
+          </div>
+        )}
+
+        {/* No results */}
+        {searchQuery && !searching && searchResults !== null && searchResults.length === 0 && (
           <div style={{
             padding: '20px 16px', textAlign: 'center',
             color: 'var(--text-muted)', fontSize: 12,

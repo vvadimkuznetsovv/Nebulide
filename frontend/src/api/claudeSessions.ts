@@ -40,3 +40,15 @@ export const readClaudePlan = (slug: string) =>
 
 export const readClaudeSession = (project: string, sessionFile: string) =>
   api.get<{ messages: ClaudeSessionMessage[] }>(`/claude-sessions/${encodeURIComponent(project)}/${encodeURIComponent(sessionFile)}`);
+
+export interface ClaudeSearchResult {
+  session_id: string;
+  project: string;
+  slug: string;
+  updated_at: string;
+  size_mb: number;
+  snippet: string;
+}
+
+export const searchClaudeSessions = (q: string) =>
+  api.get<{ results: ClaudeSearchResult[] }>('/claude-sessions/search', { params: { q } });
