@@ -268,12 +268,14 @@ func (h *ClaudeSessionsHandler) List(c *gin.Context) {
 // --- Session Search ---
 
 type searchResult struct {
-	SessionID string  `json:"session_id"`
-	Project   string  `json:"project"`
-	Slug      string  `json:"slug"`
-	UpdatedAt string  `json:"updated_at"`
-	SizeMB    float64 `json:"size_mb"`
-	Snippet   string  `json:"snippet"`
+	SessionID    string  `json:"session_id"`
+	Project      string  `json:"project"`
+	Slug         string  `json:"slug"`
+	UpdatedAt    string  `json:"updated_at"`
+	SizeMB       float64 `json:"size_mb"`
+	Snippet      string  `json:"snippet"`
+	FirstMessage string  `json:"first_message"`
+	CWD          string  `json:"cwd"`
 }
 
 // SearchSessions performs full-text search across all session conversations.
@@ -323,12 +325,14 @@ func (h *ClaudeSessionsHandler) SearchSessions(c *gin.Context) {
 			}
 
 			results = append(results, searchResult{
-				SessionID: match.sessionID,
-				Project:   projEntry.Name(),
-				Slug:      match.slug,
-				UpdatedAt: fi.ModTime().UTC().Format(time.RFC3339),
-				SizeMB:    float64(fi.Size()) / (1024 * 1024),
-				Snippet:   match.snippet,
+				SessionID:    match.sessionID,
+				Project:      projEntry.Name(),
+				Slug:         match.slug,
+				UpdatedAt:    fi.ModTime().UTC().Format(time.RFC3339),
+				SizeMB:       float64(fi.Size()) / (1024 * 1024),
+				Snippet:      match.snippet,
+				FirstMessage: match.firstMessage,
+				CWD:          match.cwd,
 			})
 
 			// Limit results
@@ -350,9 +354,11 @@ func (h *ClaudeSessionsHandler) SearchSessions(c *gin.Context) {
 }
 
 type searchMatch struct {
-	sessionID string
-	slug      string
-	snippet   string
+	sessionID    string
+	slug         string
+	snippet      string
+	firstMessage string
+	cwd          string
 }
 
 func (h *ClaudeSessionsHandler) searchInSession(filePath, qLower string) *searchMatch {
@@ -365,7 +371,7 @@ func (h *ClaudeSessionsHandler) searchInSession(filePath, qLower string) *search
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
 
-	var sessionID, slug string
+	var sessionID, slug, cwd, firstMessage string
 	lineCount := 0
 
 	for scanner.Scan() {
@@ -386,12 +392,21 @@ func (h *ClaudeSessionsHandler) searchInSession(filePath, qLower string) *search
 		if meta.Slug != "" && slug == "" {
 			slug = meta.Slug
 		}
+		if meta.CWD != "" && cwd == "" {
+			cwd = meta.CWD
+		}
 
 		if meta.Type == "user" || meta.Type == "assistant" {
 			text := extractTextContent(meta)
 			if text == "" {
 				continue
 			}
+
+			// Capture first user message (like List does)
+			if meta.Type == "user" && firstMessage == "" {
+				firstMessage = truncate(text, 200)
+			}
+
 			textLower := strings.ToLower(text)
 			idx := strings.Index(textLower, qLower)
 			if idx >= 0 {
@@ -418,9 +433,11 @@ func (h *ClaudeSessionsHandler) searchInSession(filePath, qLower string) *search
 				}
 
 				return &searchMatch{
-					sessionID: sessionID,
-					slug:      slug,
-					snippet:   snippet,
+					sessionID:    sessionID,
+					slug:         slug,
+					snippet:      snippet,
+					firstMessage: firstMessage,
+					cwd:          cwd,
 				}
 			}
 		}

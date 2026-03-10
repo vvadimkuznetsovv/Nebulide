@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from 'react';
 import { listClaudeSessions, listClaudePlans, readClaudePlan, readClaudeSession, searchClaudeSessions, deleteClaudeSession } from '../../api/claudeSessions';
 import type { ClaudeProject, ClaudeSession, ClaudePlan, ClaudeSessionMessage, ClaudeSearchResult } from '../../api/claudeSessions';
 import { useLayoutStore } from '../../store/layoutStore';
@@ -32,12 +32,32 @@ function projectDisplayName(slug: string): string {
   return parts[parts.length - 1] || slug;
 }
 
-function sessionDisplayName(session: ClaudeSession & { project: string }): string {
+function sessionDisplayName(session: { first_message?: string; slug?: string; session_id: string }): string {
   if (session.first_message) {
     const msg = session.first_message;
     return msg.length > 60 ? msg.slice(0, 60) + '...' : msg;
   }
   return session.slug || session.session_id.slice(0, 8);
+}
+
+function highlightMatch(text: string, query: string): ReactNode {
+  if (!query) return text;
+  const idx = text.toLowerCase().indexOf(query.toLowerCase());
+  if (idx < 0) return text;
+  return <>
+    {text.slice(0, idx)}
+    <mark style={{ background: 'rgba(var(--accent-rgb), 0.3)', color: 'inherit', borderRadius: 2, padding: '0 2px' }}>
+      {text.slice(idx, idx + query.length)}
+    </mark>
+    {text.slice(idx + query.length)}
+  </>;
+}
+
+function copySessionId(sessionId: string) {
+  navigator.clipboard.writeText(sessionId).then(
+    () => toast.success('Session ID copied'),
+    () => toast.error('Failed to copy')
+  );
 }
 
 export default function ChatPanel(_props: ChatPanelProps) {
@@ -53,6 +73,7 @@ export default function ChatPanel(_props: ChatPanelProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<ClaudeSearchResult[] | null>(null);
   const [searching, setSearching] = useState(false);
+  const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const openTerminalWithId = useLayoutStore((s) => s.openTerminalWithId);
@@ -75,14 +96,16 @@ export default function ChatPanel(_props: ChatPanelProps) {
 
   useEffect(() => { refresh(); }, [refresh]);
 
-  const handleOpenSession = useCallback(async (session: ClaudeSession) => {
+  const handleOpenSession = useCallback(async (session: { session_id: string; cwd?: string }) => {
     if (launching) return;
     setLaunching(session.session_id);
 
     const instanceId = `claude-${Date.now()}`;
     openTerminalWithId(instanceId);
 
-    const ok = await typeCommandInTerminal(instanceId, `claude --resume ${session.session_id}`);
+    const resumeCmd = `claude --resume ${session.session_id}`;
+    const cmd = session.cwd ? `cd ${session.cwd} && ${resumeCmd}` : resumeCmd;
+    const ok = await typeCommandInTerminal(instanceId, cmd);
     if (!ok) {
       toast.error('Failed to connect to terminal');
     }
@@ -142,16 +165,28 @@ export default function ChatPanel(_props: ChatPanelProps) {
     return flat;
   }, [projects]);
 
+  // Project tabs for subfolder navigation
+  const projectTabs = useMemo(() =>
+    projects.map(p => ({ slug: p.slug, name: projectDisplayName(p.slug), count: p.sessions.length })),
+  [projects]);
+
   // Client-side quick filter for short queries, server search for full-text
   const filteredSessions = useMemo(() => {
-    if (!searchQuery || searchResults !== null) return allSessions;
+    let list = allSessions;
+
+    // Filter by selected project
+    if (selectedProject) {
+      list = list.filter(s => s.project === selectedProject);
+    }
+
+    if (!searchQuery || searchResults !== null) return list;
     const q = searchQuery.toLowerCase();
-    return allSessions.filter(s =>
+    return list.filter(s =>
       s.first_message?.toLowerCase().includes(q)
       || s.slug?.toLowerCase().includes(q)
       || projectDisplayName(s.project).toLowerCase().includes(q)
     );
-  }, [allSessions, searchQuery, searchResults]);
+  }, [allSessions, searchQuery, searchResults, selectedProject]);
 
   // Debounced server-side full-text search
   const handleSearchChange = useCallback((value: string) => {
@@ -177,16 +212,10 @@ export default function ChatPanel(_props: ChatPanelProps) {
     }, 400);
   }, []);
 
-  // Open a search result in terminal
+  // Open a search result in terminal (reuses handleOpenSession with cwd)
   const handleOpenSearchResult = useCallback(async (result: ClaudeSearchResult) => {
-    if (launching) return;
-    setLaunching(result.session_id);
-    const instanceId = `claude-${Date.now()}`;
-    openTerminalWithId(instanceId);
-    const ok = await typeCommandInTerminal(instanceId, `claude --resume ${result.session_id}`);
-    if (!ok) toast.error('Failed to connect to terminal');
-    setLaunching(null);
-  }, [launching, openTerminalWithId]);
+    handleOpenSession({ session_id: result.session_id, cwd: result.cwd });
+  }, [handleOpenSession]);
 
   if (loading) {
     return (
@@ -267,6 +296,49 @@ export default function ChatPanel(_props: ChatPanelProps) {
               </button>
             )}
           </div>
+        </div>
+      )}
+
+      {/* Project tabs */}
+      {projectTabs.length > 1 && !searchQuery && (
+        <div style={{
+          padding: '4px 12px 4px', flexShrink: 0,
+          display: 'flex', gap: 4, overflowX: 'auto',
+          scrollbarWidth: 'none',
+        }}>
+          <button
+            type="button"
+            onClick={() => setSelectedProject(null)}
+            style={{
+              flexShrink: 0, padding: '3px 10px', borderRadius: 12,
+              border: '1px solid var(--glass-border)', cursor: 'pointer',
+              fontSize: 10, fontFamily: 'inherit', whiteSpace: 'nowrap',
+              background: !selectedProject ? 'rgba(var(--accent-rgb), 0.15)' : 'rgba(var(--accent-rgb), 0.04)',
+              color: !selectedProject ? 'var(--accent)' : 'var(--text-muted)',
+              fontWeight: !selectedProject ? 600 : 400,
+              transition: 'all 0.15s',
+            }}
+          >
+            All ({allSessions.length})
+          </button>
+          {projectTabs.map(tab => (
+            <button
+              key={tab.slug}
+              type="button"
+              onClick={() => setSelectedProject(selectedProject === tab.slug ? null : tab.slug)}
+              style={{
+                flexShrink: 0, padding: '3px 10px', borderRadius: 12,
+                border: '1px solid var(--glass-border)', cursor: 'pointer',
+                fontSize: 10, fontFamily: 'inherit', whiteSpace: 'nowrap',
+                background: selectedProject === tab.slug ? 'rgba(var(--accent-rgb), 0.15)' : 'rgba(var(--accent-rgb), 0.04)',
+                color: selectedProject === tab.slug ? 'var(--accent)' : 'var(--text-muted)',
+                fontWeight: selectedProject === tab.slug ? 600 : 400,
+                transition: 'all 0.15s',
+              }}
+            >
+              {tab.name} ({tab.count})
+            </button>
+          ))}
         </div>
       )}
 
@@ -416,6 +488,21 @@ export default function ChatPanel(_props: ChatPanelProps) {
                         <span>{projectDisplayName(session.project)}</span>
                         <span>{formatSize(session.size_mb)}</span>
                         <span>{timeAgo(session.updated_at)}</span>
+                        <span
+                          onClick={() => copySessionId(session.session_id)}
+                          title={`Copy ID: ${session.session_id}`}
+                          style={{
+                            cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3,
+                            transition: 'color 0.15s',
+                          }}
+                          onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--accent)'; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-muted)'; }}
+                        >
+                          {session.session_id.slice(0, 8)}
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                          </svg>
+                        </span>
                         <span style={{ flex: 1 }} />
                         {/* Preview button */}
                         <button
@@ -547,63 +634,175 @@ export default function ChatPanel(_props: ChatPanelProps) {
             }}>
               Full-text results ({searchResults.length})
             </div>
-            {searchResults.map((result) => (
-              <div
-                key={result.session_id}
-                style={{
-                  padding: '10px 16px', display: 'flex', gap: 10, alignItems: 'flex-start',
-                  transition: 'background 0.15s',
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--glass-hover)'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = 'none'; }}
-              >
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 2 }}>
-                  <circle cx="11" cy="11" r="8" />
-                  <line x1="21" y1="21" x2="16.65" y2="16.65" />
-                </svg>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{
-                    fontSize: 12, fontWeight: 500, color: 'var(--text-primary)',
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                  }}>
-                    {result.slug || result.session_id.slice(0, 8)}
+            {searchResults.map((result) => {
+              const isLaunchingResult = launching === result.session_id;
+              const isExpandedResult = expandedSession === result.session_id;
+              return (
+                <div key={result.session_id}>
+                  <div
+                    style={{
+                      padding: '10px 16px', display: 'flex', gap: 10, alignItems: 'flex-start',
+                      transition: 'background 0.15s',
+                      opacity: isLaunchingResult ? 0.7 : 1,
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--glass-hover)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'none'; }}
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 2 }}>
+                      <circle cx="11" cy="11" r="8" />
+                      <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                    </svg>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{
+                        fontSize: 12, fontWeight: 500, color: 'var(--text-primary)',
+                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                      }}>
+                        {sessionDisplayName(result)}
+                      </div>
+                      {/* Highlighted snippet */}
+                      <div style={{
+                        fontSize: 11, color: 'var(--text-secondary)', marginTop: 3,
+                        lineHeight: '1.4', fontStyle: 'italic',
+                        overflow: 'hidden', textOverflow: 'ellipsis',
+                        display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical',
+                      }}>
+                        {highlightMatch(result.snippet, searchQuery)}
+                      </div>
+                      {/* Meta + actions */}
+                      <div style={{
+                        fontSize: 10, color: 'var(--text-muted)', marginTop: 4,
+                        display: 'flex', alignItems: 'center', gap: 8,
+                      }}>
+                        <span>{projectDisplayName(result.project)}</span>
+                        <span>{formatSize(result.size_mb)}</span>
+                        <span>{timeAgo(result.updated_at)}</span>
+                        <span
+                          onClick={() => copySessionId(result.session_id)}
+                          title={`Copy ID: ${result.session_id}`}
+                          style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 3, transition: 'color 0.15s' }}
+                          onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--accent)'; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-muted)'; }}
+                        >
+                          {result.session_id.slice(0, 8)}
+                          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                          </svg>
+                        </span>
+                        <span style={{ flex: 1 }} />
+                        {/* Preview */}
+                        <button
+                          type="button"
+                          onClick={() => handlePreviewSession({ ...result, first_message: result.first_message || '', created_at: result.updated_at, cwd: result.cwd || '', size_mb: result.size_mb } as ClaudeSession & { project: string })}
+                          disabled={previewLoading && expandedSession !== result.session_id}
+                          title="Preview conversation"
+                          style={{
+                            background: isExpandedResult ? 'rgba(var(--accent-rgb), 0.15)' : 'rgba(var(--accent-rgb), 0.08)',
+                            border: '1px solid var(--glass-border)',
+                            borderRadius: 4, padding: '3px 8px',
+                            cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
+                            color: isExpandedResult ? 'var(--accent)' : 'var(--text-secondary)',
+                            fontSize: 10, fontFamily: 'inherit', transition: 'all 0.15s',
+                          }}
+                        >
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
+                            <circle cx="12" cy="12" r="3" />
+                          </svg>
+                          Preview
+                        </button>
+                        {/* Open */}
+                        <button
+                          type="button"
+                          onClick={() => handleOpenSearchResult(result)}
+                          disabled={!!launching}
+                          title="Resume in terminal"
+                          style={{
+                            background: 'rgba(var(--accent-rgb), 0.12)',
+                            border: '1px solid var(--glass-border)',
+                            borderRadius: 4, padding: '3px 8px',
+                            cursor: isLaunchingResult ? 'wait' : 'pointer',
+                            display: 'flex', alignItems: 'center', gap: 4,
+                            color: 'var(--accent)', fontSize: 10, fontFamily: 'inherit',
+                            transition: 'all 0.15s',
+                          }}
+                        >
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polygon points="5 3 19 12 5 21 5 3" />
+                          </svg>
+                          Open
+                        </button>
+                        {/* Delete */}
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteSession({ ...result, first_message: result.first_message || '', created_at: result.updated_at, cwd: result.cwd || '', size_mb: result.size_mb } as ClaudeSession & { project: string })}
+                          title="Delete session"
+                          style={{
+                            background: 'rgba(255, 60, 60, 0.08)',
+                            border: '1px solid var(--glass-border)',
+                            borderRadius: 4, padding: '3px 6px',
+                            cursor: 'pointer', display: 'flex', alignItems: 'center',
+                            color: 'var(--text-muted)', fontSize: 10, fontFamily: 'inherit',
+                            transition: 'all 0.15s',
+                          }}
+                          onMouseEnter={(e) => { e.currentTarget.style.color = '#ff3c3c'; e.currentTarget.style.background = 'rgba(255, 60, 60, 0.15)'; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.background = 'rgba(255, 60, 60, 0.08)'; }}
+                        >
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="3 6 5 6 21 6" />
+                            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+                          </svg>
+                        </button>
+                      </div>
+                    </div>
                   </div>
-                  <div style={{
-                    fontSize: 11, color: 'var(--text-secondary)', marginTop: 3,
-                    lineHeight: '1.4', fontStyle: 'italic',
-                  }}>
-                    {result.snippet}
-                  </div>
-                  <div style={{
-                    fontSize: 10, color: 'var(--text-muted)', marginTop: 4,
-                    display: 'flex', alignItems: 'center', gap: 8,
-                  }}>
-                    <span>{projectDisplayName(result.project)}</span>
-                    <span>{formatSize(result.size_mb)}</span>
-                    <span>{timeAgo(result.updated_at)}</span>
-                    <span style={{ flex: 1 }} />
-                    <button
-                      type="button"
-                      onClick={() => handleOpenSearchResult(result)}
-                      disabled={!!launching}
-                      title="Resume in terminal"
-                      style={{
-                        background: 'rgba(var(--accent-rgb), 0.12)',
-                        border: '1px solid var(--glass-border)',
-                        borderRadius: 4, padding: '3px 8px',
-                        cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 4,
-                        color: 'var(--accent)', fontSize: 10, fontFamily: 'inherit',
-                      }}
-                    >
-                      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                        <polygon points="5 3 19 12 5 21 5 3" />
-                      </svg>
-                      Open
-                    </button>
-                  </div>
+
+                  {/* Expanded preview for search result */}
+                  {isExpandedResult && (
+                    <div style={{
+                      margin: '0 16px 8px', padding: '10px 12px',
+                      borderRadius: 8,
+                      background: 'rgba(var(--accent-rgb), 0.04)',
+                      border: '1px solid var(--glass-border)',
+                      maxHeight: 400, overflow: 'auto',
+                    }}>
+                      {sessionMessages.length === 0 ? (
+                        <div style={{ color: 'var(--text-muted)', fontSize: 11, textAlign: 'center', padding: 12 }}>
+                          No messages in this session
+                        </div>
+                      ) : (
+                        sessionMessages.map((msg, i) => (
+                          <div key={i} style={{
+                            marginBottom: i < sessionMessages.length - 1 ? 10 : 0,
+                            paddingBottom: i < sessionMessages.length - 1 ? 10 : 0,
+                            borderBottom: i < sessionMessages.length - 1 ? '1px solid var(--glass-border)' : 'none',
+                          }}>
+                            <div style={{
+                              fontSize: 10, fontWeight: 600,
+                              color: msg.role === 'user' ? 'var(--accent)' : 'var(--text-secondary)',
+                              marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em',
+                            }}>
+                              {msg.role === 'user' ? 'You' : 'Claude'}
+                              {msg.timestamp && (
+                                <span style={{ fontWeight: 400, marginLeft: 8, color: 'var(--text-muted)' }}>
+                                  {timeAgo(msg.timestamp)}
+                                </span>
+                              )}
+                            </div>
+                            <pre style={{
+                              margin: 0, fontSize: 11, lineHeight: 1.5,
+                              color: 'var(--text-primary)', whiteSpace: 'pre-wrap',
+                              wordBreak: 'break-word', fontFamily: 'inherit',
+                            }}>
+                              {msg.content}
+                            </pre>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 

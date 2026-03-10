@@ -48,6 +48,8 @@ export interface ClaudeSearchResult {
   updated_at: string;
   size_mb: number;
   snippet: string;
+  first_message: string;
+  cwd: string;
 }
 
 export const searchClaudeSessions = (q: string) =>
