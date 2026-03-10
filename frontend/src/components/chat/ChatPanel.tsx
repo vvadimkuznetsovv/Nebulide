@@ -227,7 +227,6 @@ export default function ChatPanel(_props: ChatPanelProps) {
       } else {
         list = list.filter(s => s.project === selectedFolder);
       }
-      console.log('[ChatPanel] filter:', selectedFolder, 'includeSubfolders:', includeSubfolders, 'result:', list.length, 'projects:', [...new Set(list.map(s => s.project))]);
     }
 
     if (!searchQuery || searchResults !== null) return list;
@@ -416,6 +415,8 @@ export default function ChatPanel(_props: ChatPanelProps) {
 
   const isEmpty = allSessions.length === 0 && plans.length === 0;
 
+  console.log('[ChatPanel] rendering filteredSessions:', filteredSessions.length, filteredSessions.map(s => s.project), 'plans:', plans.length, 'selectedFolder:', selectedFolder);
+
   return (
     <div style={{
       flex: 1, display: 'flex', flexDirection: 'column', height: '100%',
@@ -593,8 +594,8 @@ export default function ChatPanel(_props: ChatPanelProps) {
           </div>
         )}
 
-        {/* Plans section */}
-        {plans.length > 0 && (
+        {/* Plans section — hidden when a folder is selected (plans are global, not per-folder) */}
+        {plans.length > 0 && !selectedFolder && (
           <div style={{ marginBottom: 8 }}>
             <div style={{
               padding: '6px 16px', fontSize: 10, fontWeight: 700,
