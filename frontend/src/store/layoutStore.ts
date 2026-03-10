@@ -25,7 +25,7 @@ import {
   remapVisibility,
 } from './layoutUtils';
 import { useWorkspaceStore } from './workspaceStore';
-import { destroyTerminalSession } from '../components/terminal/Terminal';
+import { destroyTerminalSession, getActiveTerminalInstanceIds } from '../components/terminal/Terminal';
 import { registerTerminal, resetTerminalRegistry } from '../utils/terminalRegistry';
 
 export type { PanelId };
@@ -541,11 +541,29 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
   restoreLayoutFromSnapshot: (snap, panelIdMapping) => {
     // Clear terminal numbering so restored terminals get fresh 1, 2, 3...
     resetTerminalRegistry();
-    set((state) => {
-      // Don't explicitly destroy terminal sessions here — React's cleanup
-      // effect on unmount handles it. Destroying synchronously before layout
-      // update kills sessions that were just connected (race on page load).
 
+    // Determine which terminal instanceIds the new layout needs
+    let preLayout = cloneTree(snap.layout);
+    if (panelIdMapping && Object.keys(panelIdMapping).length > 0) {
+      preLayout = remapPanelIds(preLayout, panelIdMapping);
+    }
+    const newPanelIds = getAllPanelIds(preLayout);
+    const keepIds = new Set<string>();
+    for (const pid of newPanelIds) {
+      if (pid === 'terminal') keepIds.add('default');
+      else if (isDetachedTerminal(pid)) {
+        const id = getDetachedTerminalId(pid);
+        if (id) keepIds.add(id);
+      }
+    }
+    // Destroy frontend+backend sessions that are NOT in the new layout
+    for (const instanceId of getActiveTerminalInstanceIds()) {
+      if (!keepIds.has(instanceId)) {
+        destroyTerminalSession(instanceId);
+      }
+    }
+
+    set((state) => {
       // Remap panel IDs if mapping provided (detached editors get new tab IDs)
       let layout = cloneTree(snap.layout);
       let visibility = { ...snap.visibility } as PanelVisibility;

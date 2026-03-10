@@ -322,9 +322,17 @@ export const useWorkspaceSessionStore = create<WorkspaceSessionState>((set, get)
   // --- Sync: reload active session snapshot from server ---
 
   reloadActiveSession: async (opts) => {
-    const { activeSessionId } = get();
+    const { activeSessionId, lockStatus } = get();
     if (!activeSessionId) return;
     const soft = opts?.soft ?? false;
+
+    // Don't restore layout on a blocked device — it would reconnect terminals
+    // that belong to the active device. Only sync theme.
+    if (soft && lockStatus[activeSessionId] === 'blocked') {
+      syncThemeFromServer();
+      return;
+    }
+
     try {
       const { data } = await getWorkspaceSessions();
       const fresh = data?.find((s) => s.id === activeSessionId);

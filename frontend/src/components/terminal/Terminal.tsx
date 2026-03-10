@@ -350,8 +350,9 @@ function getOrCreateSession(instanceId: string): TermSession {
   let session = sessions.get(instanceId);
   if (!session) {
     session = createXterm(instanceId);
-    registerTerminal(instanceId);
   }
+  // Always register — idempotent, but needed after resetTerminalRegistry()
+  registerTerminal(instanceId);
   console.log(`[Terminal] getOrCreateSession id=${instanceId} existed=${!!session.ws}`);
   if (!session.ws || session.ws.readyState > WebSocket.OPEN) {
     connectWs(instanceId);
