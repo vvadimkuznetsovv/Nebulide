@@ -208,6 +208,33 @@ export const usePetStore = create<PetStoreState>((set, get) => ({
         break;
       }
 
+      // Sustained terminal output (e.g. Claude CLI streaming in terminal)
+      case 'terminal_streaming_start': {
+        const id = event.instanceId;
+        set({ pets: updatePet(state.pets, id, {
+          task: 'working',
+          claudeStreaming: true,
+          lastActivity: now,
+        }) });
+        break;
+      }
+
+      case 'terminal_streaming_end': {
+        const id = event.instanceId;
+        const pet = state.pets[id];
+        if (pet) {
+          const scores = addEmotion(pet.emotionScores, 'happy', 0.3);
+          set({ pets: updatePet(state.pets, id, {
+            claudeStreaming: false,
+            claudeEndedAt: now,
+            lastActivity: now,
+            emotionScores: scores,
+            emotion: resolveEmotion(scores),
+          }) });
+        }
+        break;
+      }
+
       case 'claude_stream_start':
       case 'claude_stream_delta': {
         // Global: all pets become working + streaming

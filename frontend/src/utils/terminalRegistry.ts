@@ -60,6 +60,29 @@ export function resetTerminalRegistry(): void {
   bump();
 }
 
+/** Get a snapshot of the registry for persistence (instanceId → number). */
+export function getRegistrySnapshot(): Record<string, number> {
+  const snap: Record<string, number> = {};
+  for (const [id, num] of registry) snap[id] = num;
+  return snap;
+}
+
+/** Restore registry from a snapshot. Only restores entries whose instanceId is in `keepIds`. */
+export function restoreRegistryFromSnapshot(
+  snap: Record<string, number>,
+  keepIds: Set<string>,
+): void {
+  registry.clear();
+  usedNumbers.clear();
+  for (const [id, num] of Object.entries(snap)) {
+    if (keepIds.has(id)) {
+      registry.set(id, num);
+      usedNumbers.add(num);
+    }
+  }
+  bump();
+}
+
 /** React hook — re-renders when the registry changes. */
 export function useTerminalRegistryVersion(): number {
   return useRegistryAtom((s) => s.version);

@@ -26,7 +26,7 @@ import {
 } from './layoutUtils';
 import { useWorkspaceStore } from './workspaceStore';
 import { destroyTerminalSession, getActiveTerminalInstanceIds } from '../components/terminal/Terminal';
-import { registerTerminal, resetTerminalRegistry } from '../utils/terminalRegistry';
+import { registerTerminal, resetTerminalRegistry, getRegistrySnapshot, restoreRegistryFromSnapshot } from '../utils/terminalRegistry';
 
 export type { PanelId };
 export type { LayoutNode, PanelNode, GroupNode } from './layoutUtils';
@@ -96,6 +96,8 @@ export interface LayoutSnapshot {
   layout: LayoutNode;
   visibility: Record<string, boolean>;
   mobilePanels: PanelId[];
+  /** Terminal instanceId → number mapping for persistent numbering across reloads. */
+  terminalNumbers?: Record<string, number>;
 }
 
 const STORAGE_KEY = 'nebulide-layout-v7';
@@ -536,13 +538,11 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
       layout: cloneTree(state.layout),
       visibility: { ...state.visibility },
       mobilePanels: [...state.mobilePanels],
+      terminalNumbers: getRegistrySnapshot(),
     };
   },
 
   restoreLayoutFromSnapshot: (snap, panelIdMapping) => {
-    // Clear terminal numbering so restored terminals get fresh 1, 2, 3...
-    resetTerminalRegistry();
-
     // Determine which terminal instanceIds the new layout needs
     let preLayout = cloneTree(snap.layout);
     if (panelIdMapping && Object.keys(panelIdMapping).length > 0) {
@@ -557,6 +557,16 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
         if (id) keepIds.add(id);
       }
     }
+
+    // Restore terminal numbering: use saved numbers from snapshot if available,
+    // otherwise assign fresh 1, 2, 3... to keepIds.
+    if (snap.terminalNumbers && Object.keys(snap.terminalNumbers).length > 0) {
+      restoreRegistryFromSnapshot(snap.terminalNumbers, keepIds);
+    } else {
+      resetTerminalRegistry();
+      for (const id of keepIds) registerTerminal(id);
+    }
+
     // Destroy frontend+backend sessions that are NOT in the new layout
     for (const instanceId of getActiveTerminalInstanceIds()) {
       if (!keepIds.has(instanceId)) {

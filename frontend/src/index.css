@@ -1268,6 +1268,17 @@
     }
   }
 
+  /* Narrow terminal: reduce padding + shrink toolbar buttons */
+  @container (max-width: 200px) {
+    .xterm { padding: 4px 2px; }
+    .terminal-toolbar-btn { min-width: 22px; padding: 0 3px; font-size: 10px; }
+    .terminal-toolbar { gap: 2px; padding: 1px 2px; }
+  }
+  /* Very narrow: hide toolbar entirely (context menu still available) */
+  @container (max-width: 120px) {
+    .terminal-toolbar { display: none; }
+  }
+
   /* ==========================================
      EDITOR — tab bar, tabs, file sidebar
      ========================================== */
@@ -1831,6 +1842,7 @@
 
 @media (max-width: 640px) {
   .terminal-search-bar input { width: 120px; }
+  .xterm { padding: 4px; }
 
   /* Allow native scroll — dnd-kit uses delay-based activation */
   .panel-tab, .file-tree-item { touch-action: manipulation; }

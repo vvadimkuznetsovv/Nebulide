@@ -6,6 +6,8 @@ export type ActivityEvent =
   | { type: 'terminal_input'; instanceId: string }
   | { type: 'terminal_connect'; instanceId: string }
   | { type: 'terminal_disconnect'; instanceId: string }
+  | { type: 'terminal_streaming_start'; instanceId: string }
+  | { type: 'terminal_streaming_end'; instanceId: string }
   | { type: 'claude_stream_start' }
   | { type: 'claude_stream_delta' }
   | { type: 'claude_stream_end' }

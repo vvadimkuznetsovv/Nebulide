@@ -28,6 +28,7 @@ import Sidebar from '../components/layout/Sidebar';
 import LayoutRenderer from '../components/layout/LayoutRenderer';
 import EdgeDropZone from '../components/layout/EdgeDropZone';
 import { panelIcons, getPanelIcon, getPanelTitle } from '../components/layout/PanelContent';
+import { useTerminalRegistryVersion } from '../utils/terminalRegistry';
 
 // Custom collision detection: when dragging file tree items, prioritize
 // file tree drop targets (folder:/filezone:) over large panel zones (merge-/split-).
@@ -71,6 +72,7 @@ export default function Workspace() {
   useAuth();
   useSyncWS();
   useGlobalImagePaste();
+  useTerminalRegistryVersion(); // re-render DragOverlay when terminal numbering changes
 
   // Initialize workspace sessions on mount + auto-save periodically
   const initSession = useWorkspaceSessionStore((s) => s.initSession);

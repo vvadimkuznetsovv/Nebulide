@@ -57,6 +57,12 @@ interface TermSession {
   lastResizeSent: number;
   /** Deferred resize timer — fires after cooldown expires */
   deferredResizeTimer: number;
+  /** Sustained output detection: timestamp when continuous data started flowing */
+  streamStart: number;
+  /** Whether we've already emitted terminal_streaming_start for this burst */
+  streamActive: boolean;
+  /** Timer to detect end of sustained output */
+  streamEndTimer: number;
 }
 
 const sessions = new Map<string, TermSession>();
@@ -150,6 +156,9 @@ function createXterm(instanceId: string): TermSession {
     resizeLocked: false,
     lastResizeSent: 0,
     deferredResizeTimer: 0,
+    streamStart: 0,
+    streamActive: false,
+    streamEndTimer: 0,
   };
 
   const xterm = new XTerm({
@@ -263,7 +272,7 @@ async function connectWs(instanceId: string): Promise<void> {
     try {
       session.fitAddon.fit();
       const dims = session.fitAddon.proposeDimensions();
-      if (dims && dims.cols >= 10 && dims.rows >= 2) {
+      if (dims && dims.cols >= 2 && dims.rows >= 2) {
         session.lastCols = dims.cols;
         session.lastRows = dims.rows;
         session.lastResizeSent = Date.now();
@@ -283,6 +292,26 @@ async function connectWs(instanceId: string): Promise<void> {
       session.xterm.write(event.data);
       emitActivity({ type: 'terminal_data', instanceId, byteCount: event.data.length });
     }
+    // Sustained output detection: if data flows continuously for >3s,
+    // emit terminal_streaming_start (makes pet enter streaming mode).
+    // When data stops for >3s, emit terminal_streaming_end (happy boost).
+    const now = Date.now();
+    if (!session.streamStart || now - session.streamStart > 5000) {
+      // Gap too large — start new burst tracking
+      session.streamStart = now;
+    }
+    if (!session.streamActive && now - session.streamStart >= 3000) {
+      session.streamActive = true;
+      emitActivity({ type: 'terminal_streaming_start', instanceId });
+    }
+    clearTimeout(session.streamEndTimer);
+    session.streamEndTimer = window.setTimeout(() => {
+      if (session.streamActive) {
+        session.streamActive = false;
+        session.streamStart = 0;
+        emitActivity({ type: 'terminal_streaming_end', instanceId });
+      }
+    }, 3000);
   };
 
   ws.onerror = () => {
@@ -423,6 +452,7 @@ export function destroyTerminalSession(instanceId: string): void {
     clearTimeout(session.reconnectTimer);
     session.reconnectTimer = null;
   }
+  clearTimeout(session.streamEndTimer);
   if (session.ws) {
     session.ws.close();
     session.ws = null;
@@ -557,7 +587,7 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
     try {
       s.fitAddon.fit();
       const dims = s.fitAddon.proposeDimensions();
-      if (!dims || dims.cols < 10 || dims.rows < 2) return;
+      if (!dims || dims.cols < 2 || dims.rows < 2) return;
       if (dims.cols !== s.lastCols || dims.rows !== s.lastRows) {
         s.lastCols = dims.cols;
         s.lastRows = dims.rows;
@@ -609,24 +639,17 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
     }
 
     // Delay fit to let DOM settle (especially on mobile tab switches)
-    setTimeout(fit, 400);
+    setTimeout(fit, 600);
+    // Safety re-fit: mobile layout may not have stabilized by 600ms
+    setTimeout(fit, 1500);
 
+    // Debounced ResizeObserver — 150ms absorbs secondary fires from scrollbar
+    // toggle (fit() can change scrollbar visibility → 16px width change →
+    // ResizeObserver fires again). Old RAF-guard was fragile; simple debounce is robust.
     let resizeTimer = 0;
-    // fitAddon.fit() can change scrollbar visibility → container width changes →
-    // ResizeObserver fires → fit() → scrollbar toggles → loop every 300ms.
-    // Each loop iteration sends SIGWINCH → shell redraws prompt → garbled output.
-    // Fix: ignore ResizeObserver fires triggered by our own fit() call.
-    let fitInProgress = false;
-    const guardedFit = () => {
-      fitInProgress = true;
-      fit();
-      // Reset after a frame — any ResizeObserver fires within this window are self-triggered
-      requestAnimationFrame(() => { fitInProgress = false; });
-    };
     const resizeObserver = new ResizeObserver(() => {
-      if (fitInProgress) return; // break the loop
       clearTimeout(resizeTimer);
-      resizeTimer = window.setTimeout(guardedFit, 300);
+      resizeTimer = window.setTimeout(fit, 150);
     });
     resizeObserver.observe(el);
 
@@ -676,10 +699,12 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
       const focusTimer = window.setTimeout(() => {
         sessions.get(instanceId)?.xterm.focus();
       }, 50);
-      const fitTimer = window.setTimeout(fit, 200);
+      const fitTimer = window.setTimeout(fit, 300);
+      const fitTimer2 = window.setTimeout(fit, 1000);
       return () => {
         clearTimeout(focusTimer);
         clearTimeout(fitTimer);
+        clearTimeout(fitTimer2);
       };
     }
   }, [active, fit, instanceId]);
