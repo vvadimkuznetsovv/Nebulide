@@ -320,32 +320,46 @@ export default function UserDetail() {
                   </tr>
                 </thead>
                 <tbody>
-                  {terminals.map((t) => (
-                    <tr key={t.session_key}>
-                      <td style={{ fontFamily: 'monospace', fontSize: '13px' }}>{t.pid || '—'}</td>
-                      <td style={{ fontFamily: 'monospace', fontSize: '13px' }}>{t.instance_id}</td>
-                      <td>
-                        <span className={`badge ${t.alive ? 'active' : 'danger'}`}>{t.alive ? 'Alive' : 'Dead'}</span>
-                      </td>
-                      <td style={{ fontFamily: 'monospace', fontSize: '13px', color: t.cpu_percent > 50 ? 'var(--warning)' : 'var(--text-primary)' }}>
-                        {t.cpu_percent.toFixed(1)}%
-                      </td>
-                      <td style={{ fontFamily: 'monospace', fontSize: '13px' }}>
-                        {t.memory_rss_bytes > 0 ? formatBytes(t.memory_rss_bytes) : '—'}
-                      </td>
-                      <td style={{ color: 'var(--text-muted)', fontSize: '12px', fontFamily: 'monospace', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {t.command || '—'}
-                      </td>
-                      <td>
-                        <button
-                          className="glass-btn danger small"
-                          onClick={() => setConfirm({ type: 'kill-terminal', data: t.instance_id })}
-                        >
-                          Kill
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                  {terminals.map((t) => {
+                    const canKill = t.status === 'offline';
+                    const statusBadge = t.status === 'active'
+                      ? 'active'
+                      : t.status === 'hidden' ? 'warning' : '';
+                    const statusLabel = t.status === 'active'
+                      ? `Active (${t.writer_count})`
+                      : t.status === 'hidden' ? 'Hidden' : 'Offline';
+                    return (
+                      <tr key={t.session_key}>
+                        <td style={{ fontFamily: 'monospace', fontSize: '13px' }}>{t.pid || '—'}</td>
+                        <td style={{ fontFamily: 'monospace', fontSize: '13px' }}>{t.instance_id}</td>
+                        <td>
+                          <span className={`badge ${statusBadge}`} style={t.status === 'offline' ? { color: 'var(--text-muted)' } : undefined}>
+                            {statusLabel}
+                          </span>
+                        </td>
+                        <td style={{ fontFamily: 'monospace', fontSize: '13px', color: t.cpu_percent > 50 ? 'var(--warning)' : 'var(--text-primary)' }}>
+                          {t.cpu_percent.toFixed(1)}%
+                        </td>
+                        <td style={{ fontFamily: 'monospace', fontSize: '13px' }}>
+                          {t.memory_rss_bytes > 0 ? formatBytes(t.memory_rss_bytes) : '—'}
+                        </td>
+                        <td style={{ color: 'var(--text-muted)', fontSize: '12px', fontFamily: 'monospace', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {t.command || '—'}
+                        </td>
+                        <td>
+                          <button
+                            className="glass-btn danger small"
+                            onClick={() => setConfirm({ type: 'kill-terminal', data: t.instance_id })}
+                            disabled={!canKill}
+                            title={canKill ? 'Kill terminal' : 'Cannot kill: user is online'}
+                            style={!canKill ? { opacity: 0.4, cursor: 'not-allowed' } : undefined}
+                          >
+                            Kill
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

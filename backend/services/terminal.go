@@ -141,6 +141,13 @@ func (mw *multiWriter) Remove(w io.Writer) {
 	delete(mw.writers, w)
 }
 
+// Count returns the number of currently connected writers.
+func (mw *multiWriter) Count() int {
+	mw.mu.Lock()
+	defer mw.mu.Unlock()
+	return len(mw.writers)
+}
+
 // Stop stops the flush loop and performs a final flush.
 func (mw *multiWriter) Stop() {
 	select {
@@ -464,6 +471,11 @@ func (ts *TerminalSession) RemoveWriter(w io.Writer) {
 	ts.mw.Remove(w)
 }
 
+// WriterCount returns the number of active WebSocket connections to this session.
+func (ts *TerminalSession) WriterCount() int {
+	return ts.mw.Count()
+}
+
 // Close terminates the session and deletes its scrollback file.
 // Used when user explicitly closes a terminal.
 func (ts *TerminalSession) Close() {
@@ -579,19 +591,25 @@ func (s *TerminalService) KillSessionsByPrefix(prefix string) int {
 
 // AdminKillSessionsByPrefix is like KillSessionsByPrefix but sets the Killed flag
 // so WS handlers send close code 4001 (prevents frontend auto-reconnect).
-func (s *TerminalService) AdminKillSessionsByPrefix(prefix string) int {
+// Sessions with active WebSocket writers (browser open) are skipped.
+// Returns (killed count, blocked count).
+func (s *TerminalService) AdminKillSessionsByPrefix(prefix string) (int, int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	count := 0
+	killed, blocked := 0, 0
 	for key, sess := range s.sessions {
 		if strings.HasPrefix(key, prefix) {
+			if sess.WriterCount() > 0 {
+				blocked++
+				continue
+			}
 			sess.Killed = true
 			sess.Close()
 			delete(s.sessions, key)
-			count++
+			killed++
 		}
 	}
-	return count
+	return killed, blocked
 }
 
 // KillSession terminates a specific terminal session by key.
@@ -639,11 +657,12 @@ func (s *TerminalService) CountUserSessions(userID string) int {
 
 // SessionProcessInfo holds PID + session metadata for monitoring.
 type SessionProcessInfo struct {
-	Key        string `json:"session_key"`
-	UserID     string `json:"user_id"`
-	InstanceID string `json:"instance_id"`
-	Alive      bool   `json:"alive"`
-	PID        int    `json:"pid"`
+	Key         string `json:"session_key"`
+	UserID      string `json:"user_id"`
+	InstanceID  string `json:"instance_id"`
+	Alive       bool   `json:"alive"`
+	PID         int    `json:"pid"`
+	WriterCount int    `json:"writer_count"`
 }
 
 // ListSessionsWithPID returns all sessions with their process PIDs.
@@ -668,11 +687,12 @@ func (s *TerminalService) ListSessionsWithPID() []SessionProcessInfo {
 			pid = sess.Cmd.Process.Pid
 		}
 		result = append(result, SessionProcessInfo{
-			Key:        key,
-			UserID:     uid,
-			InstanceID: iid,
-			Alive:      sess.IsAlive(),
-			PID:        pid,
+			Key:         key,
+			UserID:      uid,
+			InstanceID:  iid,
+			Alive:       sess.IsAlive(),
+			PID:         pid,
+			WriterCount: sess.WriterCount(),
 		})
 	}
 	return result

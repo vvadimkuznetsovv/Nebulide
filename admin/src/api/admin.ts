@@ -22,6 +22,8 @@ export interface TerminalSession {
   memory_rss_bytes: number;
   cpu_percent: number;
   command: string;
+  writer_count: number;
+  status: 'active' | 'hidden' | 'offline';
 }
 
 export interface Invite {

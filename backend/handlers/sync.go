@@ -15,6 +15,7 @@ import (
 
 	"nebulide/config"
 	"nebulide/database"
+	"nebulide/services"
 	"nebulide/utils"
 )
 
@@ -46,12 +47,14 @@ type LockInfo struct {
 
 type SyncHandler struct {
 	cfg      *config.Config
+	presence *services.PresenceService
 	upgrader websocket.Upgrader
 }
 
-func NewSyncHandler(cfg *config.Config) *SyncHandler {
+func NewSyncHandler(cfg *config.Config, presence *services.PresenceService) *SyncHandler {
 	return &SyncHandler{
-		cfg: cfg,
+		cfg:      cfg,
+		presence: presence,
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -91,6 +94,9 @@ func (h *SyncHandler) HandleWebSocket(c *gin.Context) {
 	}
 
 	userID := claims.UserID.String()
+	h.presence.Connect(userID)
+	defer h.presence.Disconnect(userID)
+
 	channel := "ws:user:" + userID
 	log.Printf("[Sync] Subscribing to %s", channel)
 

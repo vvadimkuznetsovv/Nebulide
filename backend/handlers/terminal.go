@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 
 	"nebulide/config"
@@ -213,7 +214,7 @@ func (h *TerminalHandler) KillTerminal(c *gin.Context) {
 		return
 	}
 
-	prefix := "term:" + userID.(string) + ":" + instanceID
+	prefix := "term:" + userID.(uuid.UUID).String() + ":" + instanceID
 	killed := h.terminal.KillSessionsByPrefix(prefix)
 
 	log.Printf("[Terminal] user killed %d sessions prefix=%s", killed, prefix)

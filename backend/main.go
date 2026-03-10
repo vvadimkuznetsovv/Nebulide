@@ -41,6 +41,7 @@ func main() {
 	// Services
 	claudeService := services.NewClaudeService(cfg.ClaudeAllowedTools)
 	terminalService := services.NewTerminalService()
+	presenceService := services.NewPresenceService()
 
 	// Telegram bot (optional — only starts if TELEGRAM_BOT_TOKEN is set)
 	var telegramBot *services.TelegramBot
@@ -63,10 +64,10 @@ func main() {
 	terminalHandler := handlers.NewTerminalHandler(cfg, terminalService)
 	filesHandler := handlers.NewFilesHandler(cfg)
 	inviteHandler := handlers.NewInviteHandler(cfg, lockout)
-	adminHandler := handlers.NewAdminHandler(cfg, terminalService)
+	adminHandler := handlers.NewAdminHandler(cfg, terminalService, presenceService)
 	workspaceSessionsHandler := handlers.NewWorkspaceSessionsHandler(cfg)
 	claudeSessionsHandler := handlers.NewClaudeSessionsHandler(cfg)
-	syncHandler := handlers.NewSyncHandler(cfg)
+	syncHandler := handlers.NewSyncHandler(cfg, presenceService)
 
 	// Router
 	r := gin.Default()

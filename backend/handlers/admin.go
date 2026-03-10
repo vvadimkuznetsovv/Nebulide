@@ -23,10 +23,11 @@ import (
 type AdminHandler struct {
 	cfg      *config.Config
 	terminal *services.TerminalService
+	presence *services.PresenceService
 }
 
-func NewAdminHandler(cfg *config.Config, terminal *services.TerminalService) *AdminHandler {
-	return &AdminHandler{cfg: cfg, terminal: terminal}
+func NewAdminHandler(cfg *config.Config, terminal *services.TerminalService, presence *services.PresenceService) *AdminHandler {
+	return &AdminHandler{cfg: cfg, terminal: terminal, presence: presence}
 }
 
 // requireAdmin checks if the current user is an admin. Returns false and sends 403 if not.
@@ -180,6 +181,8 @@ type terminalDetail struct {
 	MemoryRSS   int64   `json:"memory_rss_bytes"`
 	CPUPercent  float64 `json:"cpu_percent"`
 	Command     string  `json:"command"`
+	WriterCount int     `json:"writer_count"`
+	Status      string  `json:"status"` // "active" | "hidden" | "offline"
 }
 
 func (h *AdminHandler) ListTerminals(c *gin.Context) {
@@ -197,10 +200,11 @@ func (h *AdminHandler) ListTerminals(c *gin.Context) {
 			continue
 		}
 		td := terminalDetail{
-			SessionKey: s.Key,
-			InstanceID: s.InstanceID,
-			Alive:      s.Alive,
-			PID:        s.PID,
+			SessionKey:  s.Key,
+			InstanceID:  s.InstanceID,
+			Alive:       s.Alive,
+			PID:         s.PID,
+			WriterCount: s.WriterCount,
 		}
 		if runtime.GOOS == "linux" && s.PID > 0 {
 			td.MemoryRSS, td.Command = readProcInfo(s.PID)
@@ -217,6 +221,18 @@ func (h *AdminHandler) ListTerminals(c *gin.Context) {
 			}
 		}
 	}
+	// Compute terminal status: active / hidden / offline
+	userOnline := h.presence.IsOnline(id)
+	for i := range result {
+		switch {
+		case result[i].WriterCount > 0:
+			result[i].Status = "active"
+		case userOnline:
+			result[i].Status = "hidden"
+		default:
+			result[i].Status = "offline"
+		}
+	}
 	if result == nil {
 		result = []terminalDetail{}
 	}
@@ -230,9 +246,15 @@ func (h *AdminHandler) KillTerminal(c *gin.Context) {
 
 	userID := c.Param("id")
 	instanceID := c.Param("instanceId")
-	prefix := "term:" + userID + ":" + instanceID
 
-	killed := h.terminal.AdminKillSessionsByPrefix(prefix)
+	// Block kill if user is currently online (browser open)
+	if h.presence.IsOnline(userID) {
+		c.JSON(http.StatusConflict, gin.H{"error": "User is currently online"})
+		return
+	}
+
+	prefix := "term:" + userID + ":" + instanceID
+	killed, _ := h.terminal.AdminKillSessionsByPrefix(prefix)
 	if killed > 0 {
 		c.JSON(http.StatusOK, gin.H{"message": "Terminal killed", "killed": killed})
 	} else {
