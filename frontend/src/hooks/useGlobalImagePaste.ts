@@ -28,18 +28,21 @@ export function useGlobalImagePaste() {
       }
       if (!imageItem) return;
 
-      // Don't intercept if the target is a text input and clipboard has text too
+      // Don't intercept if the target is a text input that handles paste itself
       const target = e.target as HTMLElement;
       const isTextInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA'
         || target.isContentEditable
         || target.closest('.monaco-editor');
       if (isTextInput) {
-        // Check if clipboard also has text — let the text input handle it
+        // Chat textarea handles image paste itself (uploads + inserts path)
+        // Other text inputs: skip if clipboard also has text
         let hasText = false;
         for (let i = 0; i < items.length; i++) {
           if (items[i].type === 'text/plain') { hasText = true; break; }
         }
         if (hasText) return;
+        // Image-only paste in a textarea (e.g. chat) — let the component handle it
+        return;
       }
 
       e.preventDefault();
