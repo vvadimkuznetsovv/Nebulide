@@ -1,6 +1,6 @@
 // Terminal numbering registry.
 // Module-level Map<instanceId, number> assigns sequential numbers to terminals.
-// "default" terminal always gets 1; detached terminals get the next free number.
+// "default" terminal has no number (label "Terminal"); detached terminals get 1, 2, 3...
 
 import { create } from 'zustand';
 
@@ -9,12 +9,8 @@ import { create } from 'zustand';
 const registry = new Map<string, number>();
 const usedNumbers = new Set<number>();
 
-// Reserve 1 for the default terminal immediately
-registry.set('default', 1);
-usedNumbers.add(1);
-
 function nextFreeNumber(): number {
-  let n = 2; // 1 is reserved for default
+  let n = 1;
   while (usedNumbers.has(n)) n++;
   return n;
 }
@@ -28,8 +24,9 @@ function bump() { useRegistryAtom.setState((s) => ({ version: s.version + 1 }));
 // ── Public API ──
 
 export function registerTerminal(instanceId: string): number {
+  if (instanceId === 'default') return 0; // default doesn't get a number
   if (registry.has(instanceId)) return registry.get(instanceId)!;
-  const num = instanceId === 'default' ? 1 : nextFreeNumber();
+  const num = nextFreeNumber();
   registry.set(instanceId, num);
   usedNumbers.add(num);
   bump();
@@ -37,6 +34,7 @@ export function registerTerminal(instanceId: string): number {
 }
 
 export function unregisterTerminal(instanceId: string): void {
+  if (instanceId === 'default') return;
   const num = registry.get(instanceId);
   if (num == null) return;
   registry.delete(instanceId);
@@ -45,10 +43,12 @@ export function unregisterTerminal(instanceId: string): void {
 }
 
 export function getTerminalNumber(instanceId: string): number | null {
+  if (instanceId === 'default') return null;
   return registry.get(instanceId) ?? null;
 }
 
 export function getTerminalLabel(instanceId: string): string {
+  if (instanceId === 'default') return 'Terminal';
   const num = registry.get(instanceId);
   return num != null ? `Terminal-${num}` : 'Terminal';
 }

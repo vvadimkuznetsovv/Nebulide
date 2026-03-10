@@ -415,8 +415,6 @@ export default function ChatPanel(_props: ChatPanelProps) {
 
   const isEmpty = allSessions.length === 0 && plans.length === 0;
 
-  console.log('[ChatPanel] rendering filteredSessions:', filteredSessions.length, filteredSessions.map(s => s.project), 'plans:', plans.length, 'selectedFolder:', selectedFolder);
-
   return (
     <div style={{
       flex: 1, display: 'flex', flexDirection: 'column', height: '100%',

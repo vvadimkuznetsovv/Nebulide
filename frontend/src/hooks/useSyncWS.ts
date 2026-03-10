@@ -73,7 +73,6 @@ export function useSyncWS() {
           switch (msg.type) {
             case 'register_ok':
               if (msg.session_id) {
-                const prevStatus = store.lockStatus[msg.session_id];
                 store.setLockState(msg.session_id, 'owner');
                 // Always reload active session after registration.
                 // On fresh page load, initSession() may have fetched stale data
