@@ -560,11 +560,15 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
 
     // Restore terminal numbering: use saved numbers from snapshot if available,
     // otherwise assign fresh 1, 2, 3... to keepIds.
+    // Always register 'default' first so it gets Terminal-1.
     if (snap.terminalNumbers && Object.keys(snap.terminalNumbers).length > 0) {
       restoreRegistryFromSnapshot(snap.terminalNumbers, keepIds);
     } else {
       resetTerminalRegistry();
-      for (const id of keepIds) registerTerminal(id);
+      if (keepIds.has('default')) registerTerminal('default');
+      for (const id of keepIds) {
+        if (id !== 'default') registerTerminal(id);
+      }
     }
 
     // Destroy frontend+backend sessions that are NOT in the new layout

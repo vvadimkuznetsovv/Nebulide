@@ -67,15 +67,37 @@ export function getRegistrySnapshot(): Record<string, number> {
   return snap;
 }
 
-/** Restore registry from a snapshot. Only restores entries whose instanceId is in `keepIds`. */
+/** Restore registry from a snapshot. Only restores entries whose instanceId is in `keepIds`.
+ *  Numbers are compacted (no gaps): if snapshot had {a:1, b:3} and both survive,
+ *  they become {a:1, b:2}. 'default' always gets the lowest number. */
 export function restoreRegistryFromSnapshot(
   snap: Record<string, number>,
   keepIds: Set<string>,
 ): void {
   registry.clear();
   usedNumbers.clear();
+  // Collect surviving entries sorted by their original number
+  const surviving: [string, number][] = [];
   for (const [id, num] of Object.entries(snap)) {
-    if (keepIds.has(id)) {
+    if (keepIds.has(id)) surviving.push([id, num]);
+  }
+  // Sort: 'default' first, then by original number
+  surviving.sort((a, b) => {
+    if (a[0] === 'default') return -1;
+    if (b[0] === 'default') return 1;
+    return a[1] - b[1];
+  });
+  // Assign compacted numbers 1, 2, 3...
+  let n = 1;
+  for (const [id] of surviving) {
+    registry.set(id, n);
+    usedNumbers.add(n);
+    n++;
+  }
+  // Register any keepIds not in snapshot (new terminals)
+  for (const id of keepIds) {
+    if (!registry.has(id)) {
+      const num = nextFreeNumber();
       registry.set(id, num);
       usedNumbers.add(num);
     }
