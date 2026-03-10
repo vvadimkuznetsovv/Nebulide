@@ -99,6 +99,17 @@ if ! grep -qF "histappend" "$BASHRC" 2>/dev/null; then
     echo "shopt -s histappend" >> "$BASHRC"
 fi
 
+# 8b. Create .bash_profile that sources .bashrc (login shells skip .bashrc)
+#     bash --login reads ~/.bash_profile but NOT ~/.bashrc — without this,
+#     shopt -s histappend never runs and shell exit overwrites shared HISTFILE.
+BASH_PROFILE="$WORKSPACE/.bash_profile"
+if [ ! -f "$BASH_PROFILE" ]; then
+    printf '%s\n' \
+        '[ -f "$HOME/.bashrc" ] && . "$HOME/.bashrc"' \
+        > "$BASH_PROFILE"
+    chown "$USERNAME:nebulide" "$BASH_PROFILE"
+fi
+
 # 9. Write user env vars to temp file to avoid shell injection in su -c.
 #    USERNAME and WORKSPACE are validated (alphanumeric only), safe for unquoted use.
 #    API_KEY and DEV_DB_PASS may contain special chars — escape single quotes AND strip
