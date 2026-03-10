@@ -216,6 +216,13 @@ async function connectWs(instanceId: string): Promise<void> {
   const session = sessions.get(instanceId);
   if (!session) return;
 
+  // Don't connect if this device's workspace session is blocked by another device
+  const wsState = useWorkspaceSessionStore.getState();
+  const activeId = wsState.activeSessionId;
+  if (activeId && wsState.lockStatus[activeId] === 'blocked') {
+    return;
+  }
+
   let token: string;
   try {
     token = await ensureFreshToken();
@@ -634,6 +641,8 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
       if (document.visibilityState === 'visible') {
         const sess = sessions.get(instanceId);
         if (sess && (!sess.ws || sess.ws.readyState > WebSocket.OPEN)) {
+          // Don't reconnect if disconnected intentionally (force_disconnected sets MAX)
+          if (sess.reconnectAttempts >= MAX_RECONNECT) return;
           sess.resizeLocked = true; // Lock before reconnect — connectWs.onopen will extend
           sess.reconnectAttempts = 0; // reset — this is a fresh wake
           connectWs(instanceId);
