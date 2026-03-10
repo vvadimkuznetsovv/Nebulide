@@ -243,13 +243,14 @@ export const usePetStore = create<PetStoreState>((set, get) => ({
       }
 
       case 'terminal_streaming_end': {
+        // Sustained terminal output ended (could be npm install, build, etc.)
+        // Don't set claudeEndedAt — only claude_stream_end should trigger waiting.
         const id = event.instanceId;
         const pet = state.pets[id];
         if (pet) {
-          const scores = addEmotion(pet.emotionScores, 'happy', 0.3);
+          const scores = addEmotion(pet.emotionScores, 'happy', 0.15);
           set({ pets: updatePet(state.pets, id, {
             claudeStreaming: false,
-            claudeEndedAt: now,
             lastActivity: now,
             emotionScores: scores,
             emotion: resolveEmotion(scores),
@@ -412,6 +413,9 @@ function startTimers() {
       }
 
       if (newTask !== pet.task || scoresChanged) {
+        if (newTask !== pet.task) {
+          console.log(`[PetStore] ${id}: ${pet.task} → ${newTask} (elapsed=${Math.round(elapsed/1000)}s, streaming=${pet.claudeStreaming}, endedAt=${pet.claudeEndedAt > 0 ? Math.round((now - pet.claudeEndedAt)/1000) + 's ago' : 'never'})`);
+        }
         next[id] = {
           ...pet,
           task: newTask,
