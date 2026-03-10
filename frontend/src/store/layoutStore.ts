@@ -26,7 +26,7 @@ import {
 } from './layoutUtils';
 import { useWorkspaceStore } from './workspaceStore';
 import { destroyTerminalSession } from '../components/terminal/Terminal';
-import { registerTerminal } from '../utils/terminalRegistry';
+import { registerTerminal, resetTerminalRegistry } from '../utils/terminalRegistry';
 
 export type { PanelId };
 export type { LayoutNode, PanelNode, GroupNode } from './layoutUtils';
@@ -539,6 +539,8 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
   },
 
   restoreLayoutFromSnapshot: (snap, panelIdMapping) => {
+    // Clear terminal numbering so restored terminals get fresh 1, 2, 3...
+    resetTerminalRegistry();
     set((state) => {
       // Don't explicitly destroy terminal sessions here — React's cleanup
       // effect on unmount handles it. Destroying synchronously before layout

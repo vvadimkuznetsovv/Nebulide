@@ -121,14 +121,29 @@ export default function Workspace() {
     };
   }, [saveCurrentSession]);
 
-  // Sync theme/blobs from server when tab becomes visible (cross-device sync)
+  // Cross-device sync: save snapshot when leaving, restore when returning
+  const reloadActiveSession = useWorkspaceSessionStore((s) => s.reloadActiveSession);
   useEffect(() => {
     const handler = () => {
-      if (document.visibilityState === 'visible') syncThemeFromServer();
+      if (document.visibilityState === 'hidden') {
+        // Page going away (mobile switch, tab switch) — save immediately
+        saveCurrentSession();
+      } else if (document.visibilityState === 'visible') {
+        // Page becoming visible — pull latest snapshot from server (cross-device sync)
+        // soft=true: update layout without disconnecting terminals (this device is active)
+        syncThemeFromServer();
+        reloadActiveSession({ soft: true });
+      }
     };
     document.addEventListener('visibilitychange', handler);
-    return () => document.removeEventListener('visibilitychange', handler);
-  }, []);
+    // pagehide is more reliable than beforeunload on mobile
+    const handlePageHide = () => saveCurrentSession();
+    window.addEventListener('pagehide', handlePageHide);
+    return () => {
+      document.removeEventListener('visibilitychange', handler);
+      window.removeEventListener('pagehide', handlePageHide);
+    };
+  }, [saveCurrentSession, reloadActiveSession]);
 
   // Global Ctrl+Shift+C copy (capture phase, respects Developer Mode)
   useEffect(() => {

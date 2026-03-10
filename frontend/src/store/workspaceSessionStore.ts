@@ -61,7 +61,7 @@ interface WorkspaceSessionState {
   updateSessionsList: (sessions: WorkspaceSession[]) => void;
 
   // Sync actions
-  reloadActiveSession: () => Promise<void>;
+  reloadActiveSession: (opts?: { soft?: boolean }) => Promise<void>;
 
   // Lock actions
   setLockState: (sessionId: string, status: LockStatus, info?: LockInfo) => void;
@@ -321,18 +321,20 @@ export const useWorkspaceSessionStore = create<WorkspaceSessionState>((set, get)
 
   // --- Sync: reload active session snapshot from server ---
 
-  reloadActiveSession: async () => {
+  reloadActiveSession: async (opts) => {
     const { activeSessionId } = get();
     if (!activeSessionId) return;
+    const soft = opts?.soft ?? false;
     try {
       const { data } = await getWorkspaceSessions();
       const fresh = data?.find((s) => s.id === activeSessionId);
       if (fresh?.snapshot) {
         const snap = fresh.snapshot as unknown as FullSnapshot;
         if (snap?.layout && snap?.workspace) {
-          // Disconnect (not destroy) terminals — keeps sessions in Map so
-          // reconnectAllTerminalSessions() can find and reconnect them after TakeOver.
-          disconnectAllTerminalSessions();
+          if (!soft) {
+            // Full reload (Take Over): disconnect terminals, restore layout, then caller reconnects
+            disconnectAllTerminalSessions();
+          }
           const panelIdMapping = useWorkspaceStore.getState().restoreFromSnapshot(snap.workspace);
           useLayoutStore.getState().restoreLayoutFromSnapshot(snap.layout, panelIdMapping);
         }

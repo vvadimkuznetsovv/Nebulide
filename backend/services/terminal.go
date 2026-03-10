@@ -184,6 +184,11 @@ type TerminalSession struct {
 	// Killed is set when admin explicitly kills this session.
 	// WS handler checks this to send close code 4001 (prevent frontend reconnect).
 	Killed bool
+
+	// OrphanSince tracks when the session last had zero WebSocket writers.
+	// Sessions with no writers for >orphanTimeout are reaped.
+	// Zero value means at least one writer is connected.
+	OrphanSince time.Time
 }
 
 func NewTerminalService() *TerminalService {
@@ -194,23 +199,41 @@ func NewTerminalService() *TerminalService {
 	return ts
 }
 
-// reapLoop periodically removes dead terminal sessions (shell exited).
+const orphanTimeout = 5 * time.Minute
+
+// reapLoop periodically removes dead terminal sessions (shell exited)
+// and orphaned sessions (alive shell but no WebSocket clients for >5 minutes).
 func (s *TerminalService) reapLoop() {
 	ticker := time.NewTicker(60 * time.Second)
 	defer ticker.Stop()
 	for range ticker.C {
+		now := time.Now()
 		s.mu.Lock()
-		var reaped []string
+		var reaped, orphaned []string
 		for key, sess := range s.sessions {
 			if !sess.IsAlive() {
 				sess.Close()
 				delete(s.sessions, key)
 				reaped = append(reaped, key)
+				continue
+			}
+			// Kill sessions with no WebSocket writers for > orphanTimeout
+			sess.mu.Lock()
+			orphanSince := sess.OrphanSince
+			sess.mu.Unlock()
+			if !orphanSince.IsZero() && now.Sub(orphanSince) > orphanTimeout {
+				log.Printf("[TerminalService] killing orphaned session key=%s (no writers for %v)", key, now.Sub(orphanSince))
+				sess.Close()
+				delete(s.sessions, key)
+				orphaned = append(orphaned, key)
 			}
 		}
 		s.mu.Unlock()
 		if len(reaped) > 0 {
 			log.Printf("[TerminalService] reaped %d dead sessions: %v", len(reaped), reaped)
+		}
+		if len(orphaned) > 0 {
+			log.Printf("[TerminalService] reaped %d orphaned sessions: %v", len(orphaned), orphaned)
 		}
 	}
 }
@@ -364,10 +387,11 @@ func (s *TerminalService) createLocked(sessionKey string, workingDir string, san
 	}
 
 	session := &TerminalSession{
-		Pty:  p,
-		Cmd:  cmd,
-		Done: make(chan struct{}),
-		mw:   newMultiWriter(scrollbackPath(sessionKey)),
+		Pty:         p,
+		Cmd:         cmd,
+		Done:        make(chan struct{}),
+		mw:          newMultiWriter(scrollbackPath(sessionKey)),
+		OrphanSince: time.Now(), // starts orphaned until a WebSocket connects
 	}
 
 	log.Printf("[TerminalService] shell started pid=%d key=%s", cmd.Process.Pid, sessionKey)
@@ -473,12 +497,23 @@ func (ts *TerminalSession) IsAlive() bool {
 func (ts *TerminalSession) AddWriter(w io.Writer, closer io.Closer) {
 	log.Printf("[TerminalService] AddWriter: registering %p", w)
 	ts.mw.Add(w, closer)
+	// Clear orphan timer — a client is connected
+	ts.mu.Lock()
+	ts.OrphanSince = time.Time{}
+	ts.mu.Unlock()
 }
 
 // RemoveWriter unregisters a WS connection (called on disconnect).
 func (ts *TerminalSession) RemoveWriter(w io.Writer) {
 	log.Printf("[TerminalService] RemoveWriter: removing %p", w)
 	ts.mw.Remove(w)
+	// If no writers left, start orphan timer
+	if ts.mw.Count() == 0 {
+		ts.mu.Lock()
+		ts.OrphanSince = time.Now()
+		ts.mu.Unlock()
+		log.Printf("[TerminalService] session orphaned (0 writers)")
+	}
 }
 
 // WriterCount returns the number of active WebSocket connections to this session.

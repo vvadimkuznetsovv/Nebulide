@@ -1,6 +1,8 @@
 import { useEffect, useRef } from 'react';
 import { ensureFreshToken } from '../api/tokenRefresh';
 import { useWorkspaceSessionStore, isRecentSelfSave } from '../store/workspaceSessionStore';
+import { useWorkspaceStore } from '../store/workspaceStore';
+import { useLayoutStore } from '../store/layoutStore';
 import { getWorkspaceSessions } from '../api/workspaceSessions';
 import { getDeviceId, detectDeviceType } from '../utils/deviceId';
 import { setSyncWs } from '../utils/syncBridge';
@@ -74,17 +76,16 @@ export function useSyncWS() {
             case 'register_ok':
               if (msg.session_id) {
                 store.setLockState(msg.session_id, 'owner');
-                // Always reload active session after registration.
+                // Reload active session after registration.
                 // On fresh page load, initSession() may have fetched stale data
                 // (before force_disconnected made the other device save).
-                // 500ms delay lets the displaced device finish saving.
+                // 1500ms delay lets the displaced device finish saving via keepalive fetch.
                 setTimeout(() => {
                   store.reloadActiveSession().then(() => {
-                    // Always reconnect terminals — reloadActiveSession() calls
-                    // disconnectAllTerminalSessions() which kills all WS connections.
+                    // Reconnect terminals — reloadActiveSession() disconnects all WS.
                     reconnectAllTerminalSessions();
                   });
-                }, 500);
+                }, 1500);
               }
               break;
 
@@ -114,8 +115,21 @@ export function useSyncWS() {
             case 'force_disconnected':
               // Another device took over — only react if it's not us
               if (msg.locked_by?.device_id !== getDeviceId() && msg.session_id) {
-                // Save current state so the new device gets our layout
-                store.saveCurrentSession();
+                // Save current state immediately with keepalive fetch (reliable even if page is hiding)
+                {
+                  const activeId = store.activeSessionId;
+                  if (activeId) {
+                    const workspaceSnap = useWorkspaceStore.getState().getWorkspaceSnapshot();
+                    const layoutSnap = useLayoutStore.getState().getLayoutSnapshot();
+                    const authToken = localStorage.getItem('access_token');
+                    fetch(`/api/workspace-sessions/${activeId}`, {
+                      method: 'PUT',
+                      headers: { 'Content-Type': 'application/json', ...(authToken ? { Authorization: `Bearer ${authToken}` } : {}) },
+                      body: JSON.stringify({ snapshot: { workspace: workspaceSnap, layout: layoutSnap } }),
+                      keepalive: true,
+                    });
+                  }
+                }
                 // Disconnect terminal WebSockets (PTY stays alive for new device)
                 disconnectAllTerminalSessions();
                 store.setLockState(msg.session_id, 'blocked', msg.locked_by);

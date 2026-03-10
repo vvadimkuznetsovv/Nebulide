@@ -57,6 +57,13 @@ export function getAllTerminalIds(): string[] {
   return Array.from(registry.keys());
 }
 
+/** Clear the entire registry. Called before layout restore to prevent stale numbering. */
+export function resetTerminalRegistry(): void {
+  registry.clear();
+  usedNumbers.clear();
+  bump();
+}
+
 /** React hook — re-renders when the registry changes. */
 export function useTerminalRegistryVersion(): number {
   return useRegistryAtom((s) => s.version);
