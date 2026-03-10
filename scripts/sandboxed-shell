@@ -88,8 +88,15 @@ if [ ! -f "$BASHRC" ]; then
         '' \
         '# Activate Python venv if exists' \
         '[ -f "$HOME/.venv/bin/activate" ] && . "$HOME/.venv/bin/activate"' \
+        '' \
+        '# Shared history across terminal sessions' \
+        'shopt -s histappend' \
         > "$BASHRC"
     chown "$USERNAME:nebulide" "$BASHRC"
+fi
+# Ensure histappend is in existing bashrc (upgrade path)
+if ! grep -qF "histappend" "$BASHRC" 2>/dev/null; then
+    echo "shopt -s histappend" >> "$BASHRC"
 fi
 
 # 9. Write user env vars to temp file to avoid shell injection in su -c.
@@ -111,6 +118,10 @@ export PGUSER=dev
 export ANTHROPIC_API_KEY='$(escape_sq "$API_KEY")'
 export PGPASSWORD='$(escape_sq "$DEV_DB_PASS")'
 export TG_SEND_TOKEN='$(escape_sq "$TG_TOKEN")'
+export HISTFILE='$WORKSPACE/.nebulide_history'
+export HISTSIZE=10000
+export HISTFILESIZE=20000
+export PROMPT_COMMAND='history -a; history -r'
 ENVEOF
 chmod 600 "$ENV_FILE"
 chown "$USERNAME" "$ENV_FILE"

@@ -431,6 +431,7 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
   },
 
   openTerminalWithId: (instanceId: string) => {
+    registerTerminal(instanceId);
     const panelId = makeDetachedTerminalPanelId(instanceId);
     set((state) => {
       const termNode = findPanelNode(state.layout, 'terminal');

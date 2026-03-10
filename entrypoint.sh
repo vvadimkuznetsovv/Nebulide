@@ -88,6 +88,10 @@ ACTIVATE_LINE="source $VENV_DIR/bin/activate"
 if ! grep -qF "$ACTIVATE_LINE" "$ROOT_BASHRC" 2>/dev/null; then
   echo "$ACTIVATE_LINE" >> "$ROOT_BASHRC"
 fi
+# Enable shared history across terminal sessions (append, don't overwrite on exit)
+if ! grep -qF "histappend" "$ROOT_BASHRC" 2>/dev/null; then
+  echo "shopt -s histappend" >> "$ROOT_BASHRC"
+fi
 # Per-user venv is created by sandboxed-shell on first terminal open.
 
 # Create PostgreSQL dev role for user terminals (idempotent)
