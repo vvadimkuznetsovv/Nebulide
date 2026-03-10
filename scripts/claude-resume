@@ -1,0 +1,47 @@
+#!/bin/sh
+# claude-resume: auto-cd to the correct project directory before resuming a Claude session.
+# Usage: claude-resume <session_id> [extra claude args...]
+#
+# Claude CLI stores sessions per-project (keyed by cwd).
+# --resume only works from the same directory where the session was created.
+# This script finds the JSONL file containing the session ID, extracts the cwd,
+# and runs `claude --resume` from there.
+
+SESSION_ID="$1"
+if [ -z "$SESSION_ID" ]; then
+    echo "Usage: claude-resume <session_id> [extra args...]" >&2
+    exit 1
+fi
+shift
+
+CLAUDE_DIR="${HOME}/.claude/projects"
+if [ ! -d "$CLAUDE_DIR" ]; then
+    echo "Error: $CLAUDE_DIR not found" >&2
+    exit 1
+fi
+
+# Search for the session JSONL file across all project directories
+FOUND=""
+for projdir in "$CLAUDE_DIR"/*/; do
+    for jsonl in "$projdir"*.jsonl; do
+        [ -f "$jsonl" ] || continue
+        # Check first few lines for sessionId match (metadata is at the top)
+        if head -5 "$jsonl" | grep -q "\"sessionId\":\"$SESSION_ID\""; then
+            # Extract cwd from metadata
+            CWD=$(head -5 "$jsonl" | grep -o '"cwd":"[^"]*"' | head -1 | sed 's/"cwd":"//;s/"$//')
+            if [ -n "$CWD" ] && [ -d "$CWD" ]; then
+                FOUND="$CWD"
+                break 2
+            fi
+        fi
+    done
+done
+
+if [ -z "$FOUND" ]; then
+    echo "Error: session $SESSION_ID not found in any project" >&2
+    echo "Searched: $CLAUDE_DIR/*/*.jsonl" >&2
+    exit 1
+fi
+
+echo "Found session in: $FOUND"
+cd "$FOUND" && exec claude --resume "$SESSION_ID" "$@"

@@ -267,7 +267,7 @@ export default function ChatPanel(_props: ChatPanelProps) {
     openTerminalWithId(instanceId);
 
     const resumeCmd = `claude --resume ${session.session_id}`;
-    const cmd = session.cwd ? `cd ${session.cwd} && ${resumeCmd}` : resumeCmd;
+    const cmd = session.cwd ? `cd "${session.cwd}" && ${resumeCmd}` : resumeCmd;
     const ok = await typeCommandInTerminal(instanceId, cmd);
     if (!ok) {
       toast.error('Failed to connect to terminal');

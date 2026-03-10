@@ -40,6 +40,27 @@ func workspaceSlug(wsPath string) string {
 	return strings.ReplaceAll(filepath.ToSlash(wsPath), "/", "-")
 }
 
+// slugToPath tries to convert a Claude project slug back to a filesystem path.
+// The slug is created by replacing "/" with "-", so we reverse the process.
+// Checks if the path exists on disk. Returns empty string if not found.
+func slugToPath(slug string) string {
+	candidate := strings.ReplaceAll(slug, "-", "/")
+	if _, err := os.Stat(candidate); err == nil {
+		return candidate
+	}
+	return ""
+}
+
+// deriveResumeCWD determines the correct directory for `claude --resume`.
+// Priority: 1) project slug → path (most reliable, matches where claude was invoked)
+//           2) cwd from JSONL metadata (fallback)
+func deriveResumeCWD(projectSlug, metadataCWD string) string {
+	if p := slugToPath(projectSlug); p != "" {
+		return p
+	}
+	return metadataCWD
+}
+
 // userWorkspaceSlug returns the slug prefix for the requesting user's workspace.
 func (h *ClaudeSessionsHandler) userWorkspaceSlug(c *gin.Context) string {
 	username, _ := c.Get("username")
@@ -204,8 +225,8 @@ func (h *ClaudeSessionsHandler) List(c *gin.Context) {
 					if meta.Slug != "" {
 						si.Slug = meta.Slug
 					}
-					if meta.CWD != "" {
-						si.CWD = meta.CWD
+					if meta.CWD != "" && si.CWD == "" {
+						si.CWD = meta.CWD // first occurrence = initial invocation dir
 					}
 					if meta.Timestamp != "" && si.CreatedAt == "" {
 						si.CreatedAt = meta.Timestamp
@@ -232,6 +253,9 @@ func (h *ClaudeSessionsHandler) List(c *gin.Context) {
 			if si.CreatedAt == "" {
 				si.CreatedAt = si.UpdatedAt
 			}
+
+			// Override cwd with path derived from project slug (more reliable for --resume)
+			si.CWD = deriveResumeCWD(projEntry.Name(), si.CWD)
 
 			sessions = append(sessions, si)
 		}
