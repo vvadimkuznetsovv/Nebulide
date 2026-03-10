@@ -18,6 +18,14 @@ import toast from 'react-hot-toast';
 
 const ACTIVE_WS_KEY = 'nebulide-active-workspace';
 
+// Track own save timestamps to avoid self-reload loops via workspace_session_changed pub/sub
+let lastSaveTs = 0;
+
+/** Returns true if this device saved the active session within the last 3s. */
+export function isRecentSelfSave(): boolean {
+  return Date.now() - lastSaveTs < 3000;
+}
+
 function detectDeviceTag(): string {
   const w = window.innerWidth;
   if (w <= 640) return 'Phone';
@@ -266,6 +274,7 @@ export const useWorkspaceSessionStore = create<WorkspaceSessionState>((set, get)
         workspace: workspaceSnap,
         layout: layoutSnap,
       };
+      lastSaveTs = Date.now();
       await updateWorkspaceSession(activeSessionId, { snapshot: fullSnapshot as unknown as Record<string, unknown> });
     } catch {
       // Silent fail — background save

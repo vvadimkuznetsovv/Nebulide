@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { ensureFreshToken } from '../api/tokenRefresh';
-import { useWorkspaceSessionStore } from '../store/workspaceSessionStore';
+import { useWorkspaceSessionStore, isRecentSelfSave } from '../store/workspaceSessionStore';
 import { getWorkspaceSessions } from '../api/workspaceSessions';
 import { getDeviceId, detectDeviceType } from '../utils/deviceId';
 import { setSyncWs } from '../utils/syncBridge';
@@ -75,12 +75,17 @@ export function useSyncWS() {
               if (msg.session_id) {
                 const prevStatus = store.lockStatus[msg.session_id];
                 store.setLockState(msg.session_id, 'owner');
-                // Was blocked → now owner again → reload layout + reconnect terminals
-                if (prevStatus === 'blocked') {
+                // Always reload active session after registration.
+                // On fresh page load, initSession() may have fetched stale data
+                // (before force_disconnected made the other device save).
+                // 500ms delay lets the displaced device finish saving.
+                setTimeout(() => {
                   store.reloadActiveSession().then(() => {
-                    reconnectAllTerminalSessions();
+                    if (prevStatus === 'blocked') {
+                      reconnectAllTerminalSessions();
+                    }
                   });
-                }
+                }, 500);
               }
               break;
 
@@ -119,10 +124,14 @@ export function useSyncWS() {
               break;
 
             case 'workspace_session_changed':
-              // Existing behavior: refresh sessions list
-              getWorkspaceSessions().then(({ data }) => {
-                store.updateSessionsList(data || []);
-              }).catch(() => { /* ignore */ });
+              if (msg.action === 'updated' && msg.session_id === store.activeSessionId && !isRecentSelfSave()) {
+                // Active session updated by another device — reload snapshot
+                store.reloadActiveSession();
+              } else {
+                getWorkspaceSessions().then(({ data }) => {
+                  store.updateSessionsList(data || []);
+                }).catch(() => { /* ignore */ });
+              }
               break;
           }
         } catch { /* ignore non-JSON */ }
