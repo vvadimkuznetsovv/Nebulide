@@ -372,11 +372,14 @@ export function destroyAllTerminalSessions(): void {
 }
 
 /** Reconnect all terminal WebSockets (after Take over restores lock).
- *  Resets reconnectAttempts and calls connectWs for each session. */
+ *  Resets reconnectAttempts and calls connectWs for each session.
+ *  Clears xterm to prevent stale replay buffer from duplicating output. */
 export function reconnectAllTerminalSessions(): void {
+  console.log('[Terminal] reconnectAllTerminalSessions:', Array.from(sessions.keys()));
   for (const [instanceId, session] of sessions.entries()) {
     if (!session.ws || session.ws.readyState > WebSocket.OPEN) {
       session.reconnectAttempts = 0;
+      session.xterm.clear();
       connectWs(instanceId);
     }
   }
@@ -386,6 +389,7 @@ export function reconnectAllTerminalSessions(): void {
  *  Used on force_disconnected — PTY stays alive on backend,
  *  new device reconnects to the same shell via GetOrCreate. */
 export function disconnectAllTerminalSessions(): void {
+  console.log('[Terminal] disconnectAllTerminalSessions:', Array.from(sessions.keys()));
   for (const session of sessions.values()) {
     if (session.reconnectTimer) {
       clearTimeout(session.reconnectTimer);

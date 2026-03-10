@@ -262,6 +262,13 @@ func (s *TerminalService) GetOrCreate(sessionKey string, workingDir string, sand
 		existing.Close()
 		delete(s.sessions, sessionKey)
 	} else {
+		// No in-memory session — stale scrollback may exist from a previous
+		// container. Delete it to prevent old prompts mixing with new shell.
+		sbPath := scrollbackPath(sessionKey)
+		if _, err := os.Stat(sbPath); err == nil {
+			log.Printf("[TerminalService] deleting stale scrollback %s key=%s", sbPath, sessionKey)
+			os.Remove(sbPath)
+		}
 		log.Printf("[TerminalService] no existing session, creating new key=%s", sessionKey)
 	}
 

@@ -189,6 +189,7 @@ func main() {
 
 	// Serve frontend static files
 	r.Static("/assets", "./static/assets")
+	r.Static("/sprites", "./static/sprites")
 	r.StaticFile("/favicon.svg", "./static/favicon.svg")
 
 	// SPA index.html — no-cache so browsers always get fresh asset references after deploy

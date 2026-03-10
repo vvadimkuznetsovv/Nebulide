@@ -193,21 +193,6 @@ export default function ChatPanel(_props: ChatPanelProps) {
 
   useEffect(() => { refresh(); }, [refresh]);
 
-  // Build folder tree + auto-expand all on data change
-  const folderTree = useMemo(() => {
-    const tree = buildFolderTree(projects);
-    return tree;
-  }, [projects]);
-
-  // Auto-expand all nodes on first load
-  const initializedRef = useRef(false);
-  useEffect(() => {
-    if (!initializedRef.current && projects.length > 0) {
-      initializedRef.current = true;
-      setExpandedNodes(new Set(collectPaths(folderTree)));
-    }
-  }, [projects, folderTree]);
-
   const allSessions = useMemo(() => {
     const flat = projects.flatMap((p) =>
       p.sessions.map((s) => ({ ...s, project: s.project || p.slug }))
@@ -221,6 +206,33 @@ export default function ChatPanel(_props: ChatPanelProps) {
       return true;
     });
   }, [projects]);
+
+  // Build folder tree — recount using deduped sessions so badges match "All (N)"
+  const folderTree = useMemo(() => {
+    const tree = buildFolderTree(projects);
+    const countByProject = new Map<string, number>();
+    for (const s of allSessions) {
+      countByProject.set(s.project, (countByProject.get(s.project) || 0) + 1);
+    }
+    function patchCounts(node: FolderTreeNode): number {
+      node.directCount = node.projectSlug ? (countByProject.get(node.projectSlug) || 0) : 0;
+      let total = node.directCount;
+      for (const child of node.children) total += patchCounts(child);
+      node.totalCount = total;
+      return total;
+    }
+    patchCounts(tree);
+    return tree;
+  }, [projects, allSessions]);
+
+  // Auto-expand all nodes on first load
+  const initializedRef = useRef(false);
+  useEffect(() => {
+    if (!initializedRef.current && projects.length > 0) {
+      initializedRef.current = true;
+      setExpandedNodes(new Set(collectPaths(folderTree)));
+    }
+  }, [projects, folderTree]);
 
   // Filter sessions by selected folder + toggle + search
   const filteredSessions = useMemo(() => {
