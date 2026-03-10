@@ -15,6 +15,10 @@ type Listener = (event: ActivityEvent) => void;
 const listeners = new Set<Listener>();
 
 export function emitActivity(event: ActivityEvent) {
+  // Log non-data events (data events are too frequent)
+  if (event.type !== 'terminal_data' && event.type !== 'terminal_input') {
+    console.log('[ActivityBus] emit:', event.type, event);
+  }
   for (const fn of listeners) fn(event);
 }
 

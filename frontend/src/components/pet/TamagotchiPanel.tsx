@@ -73,6 +73,8 @@ export default function TamagotchiPanel() {
   const petIds = Object.keys(pets);
   const hasPets = petIds.length > 0;
 
+  console.log('[TamagotchiPanel] render:', { petIds, hasPets, selectedPetId, viewMode });
+
   // Determine which pets to render in the scene
   const visiblePetIds = viewMode === 'single' && selectedPetId && pets[selectedPetId]
     ? [selectedPetId]
