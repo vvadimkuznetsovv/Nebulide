@@ -26,7 +26,7 @@ import {
 } from './layoutUtils';
 import { useWorkspaceStore } from './workspaceStore';
 import { destroyTerminalSession, getActiveTerminalInstanceIds } from '../components/terminal/Terminal';
-import { registerTerminal, resetTerminalRegistry, getRegistrySnapshot, restoreRegistryFromSnapshot } from '../utils/terminalRegistry';
+import { registerTerminal, resetTerminalRegistry, getRegistrySnapshot, setPendingNumbers } from '../utils/terminalRegistry';
 
 export type { PanelId };
 export type { LayoutNode, PanelNode, GroupNode } from './layoutUtils';
@@ -558,17 +558,13 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
       }
     }
 
-    // Restore terminal numbering: use saved numbers from snapshot if available,
-    // otherwise assign fresh 1, 2, 3... to keepIds.
-    // Always register 'default' first so it gets Terminal-1.
+    // Reset terminal numbering. Don't pre-register terminals here —
+    // they register lazily when their component mounts (getOrCreateSession).
+    // This prevents invisible panels (e.g. base 'terminal' hidden on mobile)
+    // from stealing number 1. Snapshot numbers are stored as hints.
+    resetTerminalRegistry();
     if (snap.terminalNumbers && Object.keys(snap.terminalNumbers).length > 0) {
-      restoreRegistryFromSnapshot(snap.terminalNumbers, keepIds);
-    } else {
-      resetTerminalRegistry();
-      if (keepIds.has('default')) registerTerminal('default');
-      for (const id of keepIds) {
-        if (id !== 'default') registerTerminal(id);
-      }
+      setPendingNumbers(snap.terminalNumbers);
     }
 
     // Destroy frontend+backend sessions that are NOT in the new layout

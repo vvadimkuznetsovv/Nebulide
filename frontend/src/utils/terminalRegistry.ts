@@ -1,6 +1,7 @@
 // Terminal numbering registry.
 // Module-level Map<instanceId, number> assigns sequential numbers to terminals.
-// All terminals get numbers: default → 1, next → 2, 3, ...
+// Numbers are assigned lazily on mount (registerTerminal), not eagerly on restore.
+// Snapshot numbers are stored as hints — applied when the terminal actually mounts.
 
 import { create } from 'zustand';
 
@@ -8,6 +9,9 @@ import { create } from 'zustand';
 
 const registry = new Map<string, number>();
 const usedNumbers = new Set<number>();
+
+/** Pending numbers from snapshot — used as hints when terminals register on mount. */
+let pendingNumbers: Record<string, number> = {};
 
 function nextFreeNumber(): number {
   let n = 1;
@@ -25,7 +29,14 @@ function bump() { useRegistryAtom.setState((s) => ({ version: s.version + 1 }));
 
 export function registerTerminal(instanceId: string): number {
   if (registry.has(instanceId)) return registry.get(instanceId)!;
-  const num = nextFreeNumber();
+  // Use pending number from snapshot if available (and not already taken)
+  let num: number | undefined;
+  if (instanceId in pendingNumbers) {
+    const hint = pendingNumbers[instanceId];
+    delete pendingNumbers[instanceId];
+    if (!usedNumbers.has(hint)) num = hint;
+  }
+  if (num == null) num = nextFreeNumber();
   registry.set(instanceId, num);
   usedNumbers.add(num);
   bump();
@@ -66,11 +77,17 @@ export function getAllTerminalIds(): string[] {
   return Array.from(registry.keys());
 }
 
-/** Clear the entire registry. Called before layout restore to prevent stale numbering. */
+/** Clear the entire registry and pending hints. */
 export function resetTerminalRegistry(): void {
   registry.clear();
   usedNumbers.clear();
+  pendingNumbers = {};
   bump();
+}
+
+/** Store number hints from snapshot — applied lazily when terminals mount. */
+export function setPendingNumbers(numbers: Record<string, number>): void {
+  pendingNumbers = { ...numbers };
 }
 
 /** Get a snapshot of the registry for persistence (instanceId → number). */
@@ -78,44 +95,6 @@ export function getRegistrySnapshot(): Record<string, number> {
   const snap: Record<string, number> = {};
   for (const [id, num] of registry) snap[id] = num;
   return snap;
-}
-
-/** Restore registry from a snapshot. Only restores entries whose instanceId is in `keepIds`.
- *  Numbers are compacted (no gaps): if snapshot had {a:1, b:3} and both survive,
- *  they become {a:1, b:2}. 'default' always gets the lowest number. */
-export function restoreRegistryFromSnapshot(
-  snap: Record<string, number>,
-  keepIds: Set<string>,
-): void {
-  registry.clear();
-  usedNumbers.clear();
-  // Collect surviving entries sorted by their original number
-  const surviving: [string, number][] = [];
-  for (const [id, num] of Object.entries(snap)) {
-    if (keepIds.has(id)) surviving.push([id, num]);
-  }
-  // Sort: 'default' first, then by original number
-  surviving.sort((a, b) => {
-    if (a[0] === 'default') return -1;
-    if (b[0] === 'default') return 1;
-    return a[1] - b[1];
-  });
-  // Assign compacted numbers 1, 2, 3...
-  let n = 1;
-  for (const [id] of surviving) {
-    registry.set(id, n);
-    usedNumbers.add(n);
-    n++;
-  }
-  // Register any keepIds not in snapshot (new terminals)
-  for (const id of keepIds) {
-    if (!registry.has(id)) {
-      const num = nextFreeNumber();
-      registry.set(id, num);
-      usedNumbers.add(num);
-    }
-  }
-  bump();
 }
 
 /** React hook — re-renders when the registry changes. */
