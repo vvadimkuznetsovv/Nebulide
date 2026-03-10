@@ -292,26 +292,28 @@ async function connectWs(instanceId: string): Promise<void> {
       session.xterm.write(event.data);
       emitActivity({ type: 'terminal_data', instanceId, byteCount: event.data.length });
     }
-    // Sustained output detection: if data flows continuously for >3s,
-    // emit terminal_streaming_start (makes pet enter streaming mode).
-    // When data stops for >3s, emit terminal_streaming_end (happy boost).
-    const now = Date.now();
-    if (!session.streamStart || now - session.streamStart > 5000) {
-      // Gap too large — start new burst tracking
-      session.streamStart = now;
-    }
-    if (!session.streamActive && now - session.streamStart >= 3000) {
-      session.streamActive = true;
-      emitActivity({ type: 'terminal_streaming_start', instanceId });
-    }
-    clearTimeout(session.streamEndTimer);
-    session.streamEndTimer = window.setTimeout(() => {
-      if (session.streamActive) {
-        session.streamActive = false;
-        session.streamStart = 0;
-        emitActivity({ type: 'terminal_streaming_end', instanceId });
+    // Sustained output detection: only substantial chunks (≥50 bytes) count.
+    // Small data (shell prompt, cursor escape sequences) is ignored to prevent
+    // the pet from getting stuck in "Working" state.
+    const byteCount = event.data instanceof ArrayBuffer ? event.data.byteLength : event.data.length;
+    if (byteCount >= 50) {
+      const now = Date.now();
+      if (!session.streamStart || now - session.streamStart > 5000) {
+        session.streamStart = now;
       }
-    }, 3000);
+      if (!session.streamActive && now - session.streamStart >= 3000) {
+        session.streamActive = true;
+        emitActivity({ type: 'terminal_streaming_start', instanceId });
+      }
+      clearTimeout(session.streamEndTimer);
+      session.streamEndTimer = window.setTimeout(() => {
+        if (session.streamActive) {
+          session.streamActive = false;
+          session.streamStart = 0;
+          emitActivity({ type: 'terminal_streaming_end', instanceId });
+        }
+      }, 3000);
+    }
   };
 
   ws.onerror = () => {
