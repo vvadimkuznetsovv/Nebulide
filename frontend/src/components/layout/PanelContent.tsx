@@ -108,7 +108,7 @@ export default function PanelContent({ panelId }: { panelId: PanelId }) {
   // Handle detached terminal panels
   if (isDetachedTerminal(panelId)) {
     const instanceId = getDetachedTerminalId(panelId)!;
-    return <TerminalComponent instanceId={instanceId} active={visibility[panelId]} />;
+    return <TerminalComponent instanceId={instanceId} persistent active={visibility[panelId]} />;
   }
 
   switch (panelId) {

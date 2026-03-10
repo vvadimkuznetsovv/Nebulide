@@ -60,6 +60,101 @@ function copySessionId(sessionId: string) {
   );
 }
 
+// ── Folder tree ──
+
+interface FolderTreeNode {
+  name: string;
+  pathPrefix: string;
+  children: FolderTreeNode[];
+  projectSlug: string | null;
+  directCount: number;
+  totalCount: number;
+}
+
+function buildFolderTree(projects: ClaudeProject[]): FolderTreeNode {
+  const root: FolderTreeNode = {
+    name: '', pathPrefix: '', children: [],
+    projectSlug: null, directCount: 0, totalCount: 0,
+  };
+
+  for (const proj of projects) {
+    const segments = proj.slug.split('--');
+    let current = root;
+    for (let i = 0; i < segments.length; i++) {
+      const prefix = segments.slice(0, i + 1).join('--');
+      let child = current.children.find(c => c.pathPrefix === prefix);
+      if (!child) {
+        child = {
+          name: segments[i], pathPrefix: prefix, children: [],
+          projectSlug: null, directCount: 0, totalCount: 0,
+        };
+        current.children.push(child);
+      }
+      current = child;
+    }
+    current.projectSlug = proj.slug;
+    current.directCount = proj.sessions.length;
+  }
+
+  // Compute totals bottom-up
+  function computeTotals(node: FolderTreeNode): number {
+    let total = node.directCount;
+    for (const child of node.children) total += computeTotals(child);
+    node.totalCount = total;
+    return total;
+  }
+  computeTotals(root);
+
+  // Compress single-child chains (merge parent→child when parent has no sessions)
+  function compress(node: FolderTreeNode): FolderTreeNode {
+    node.children = node.children.map(compress);
+    while (node.children.length === 1 && node.directCount === 0 && node.pathPrefix !== '') {
+      const child = node.children[0];
+      node.name = node.name ? `${node.name} / ${child.name}` : child.name;
+      node.pathPrefix = child.pathPrefix;
+      node.children = child.children;
+      node.projectSlug = child.projectSlug;
+      node.directCount = child.directCount;
+    }
+    return node;
+  }
+  // Compress root's children
+  root.children = root.children.map(compress);
+
+  return root;
+}
+
+/** Collect all pathPrefixes in the tree (for initial expand). */
+function collectPaths(node: FolderTreeNode): string[] {
+  const paths: string[] = [];
+  if (node.pathPrefix) paths.push(node.pathPrefix);
+  for (const child of node.children) paths.push(...collectPaths(child));
+  return paths;
+}
+
+// ── SVG icons ──
+
+const ChevronIcon = ({ open }: { open: boolean }) => (
+  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+    strokeLinecap="round" strokeLinejoin="round"
+    style={{ flexShrink: 0, transform: open ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }}>
+    <polyline points="9 18 15 12 9 6" />
+  </svg>
+);
+
+const FolderIcon = ({ open }: { open?: boolean }) => (
+  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2"
+    strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, opacity: 0.7 }}>
+    {open ? (
+      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+    ) : (
+      <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+    )}
+  </svg>
+);
+
+// ── Component ──
+
 export default function ChatPanel(_props: ChatPanelProps) {
   const [projects, setProjects] = useState<ClaudeProject[]>([]);
   const [plans, setPlans] = useState<ClaudePlan[]>([]);
@@ -73,8 +168,13 @@ export default function ChatPanel(_props: ChatPanelProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<ClaudeSearchResult[] | null>(null);
   const [searching, setSearching] = useState(false);
-  const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Folder explorer state
+  const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
+  const [includeSubfolders, setIncludeSubfolders] = useState(true);
+  const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
+  const [treeVisible, setTreeVisible] = useState(true);
 
   const openTerminalWithId = useLayoutStore((s) => s.openTerminalWithId);
 
@@ -95,6 +195,52 @@ export default function ChatPanel(_props: ChatPanelProps) {
   }, []);
 
   useEffect(() => { refresh(); }, [refresh]);
+
+  // Build folder tree + auto-expand all on data change
+  const folderTree = useMemo(() => {
+    const tree = buildFolderTree(projects);
+    return tree;
+  }, [projects]);
+
+  // Auto-expand all nodes on first load
+  const initializedRef = useRef(false);
+  useEffect(() => {
+    if (!initializedRef.current && projects.length > 0) {
+      initializedRef.current = true;
+      setExpandedNodes(new Set(collectPaths(folderTree)));
+    }
+  }, [projects, folderTree]);
+
+  const allSessions = useMemo(() => {
+    const flat = projects.flatMap((p) =>
+      p.sessions.map((s) => ({ ...s, project: s.project || p.slug }))
+    );
+    flat.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
+    return flat;
+  }, [projects]);
+
+  // Filter sessions by selected folder + toggle + search
+  const filteredSessions = useMemo(() => {
+    let list = allSessions;
+
+    if (selectedFolder) {
+      if (includeSubfolders) {
+        list = list.filter(s =>
+          s.project === selectedFolder || s.project.startsWith(selectedFolder + '--')
+        );
+      } else {
+        list = list.filter(s => s.project === selectedFolder);
+      }
+    }
+
+    if (!searchQuery || searchResults !== null) return list;
+    const q = searchQuery.toLowerCase();
+    return list.filter(s =>
+      s.first_message?.toLowerCase().includes(q)
+      || s.slug?.toLowerCase().includes(q)
+      || projectDisplayName(s.project).toLowerCase().includes(q)
+    );
+  }, [allSessions, selectedFolder, includeSubfolders, searchQuery, searchResults]);
 
   const handleOpenSession = useCallback(async (session: { session_id: string; cwd?: string }) => {
     if (launching) return;
@@ -120,7 +266,6 @@ export default function ChatPanel(_props: ChatPanelProps) {
     }
     setPreviewLoading(true);
     try {
-      // Try with session_id first (internal ID), fall back to filename
       const { data } = await readClaudeSession(session.project, session.session_id);
       setSessionMessages(data.messages || []);
       setExpandedSession(key);
@@ -157,38 +302,6 @@ export default function ChatPanel(_props: ChatPanelProps) {
     }
   }, [expandedPlan]);
 
-  const allSessions = useMemo(() => {
-    const flat = projects.flatMap((p) =>
-      p.sessions.map((s) => ({ ...s, project: s.project || p.slug }))
-    );
-    flat.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
-    return flat;
-  }, [projects]);
-
-  // Project tabs for subfolder navigation
-  const projectTabs = useMemo(() =>
-    projects.map(p => ({ slug: p.slug, name: projectDisplayName(p.slug), count: p.sessions.length })),
-  [projects]);
-
-  // Client-side quick filter for short queries, server search for full-text
-  const filteredSessions = useMemo(() => {
-    let list = allSessions;
-
-    // Filter by selected project
-    if (selectedProject) {
-      list = list.filter(s => s.project === selectedProject);
-    }
-
-    if (!searchQuery || searchResults !== null) return list;
-    const q = searchQuery.toLowerCase();
-    return list.filter(s =>
-      s.first_message?.toLowerCase().includes(q)
-      || s.slug?.toLowerCase().includes(q)
-      || projectDisplayName(s.project).toLowerCase().includes(q)
-    );
-  }, [allSessions, searchQuery, searchResults, selectedProject]);
-
-  // Debounced server-side full-text search
   const handleSearchChange = useCallback((value: string) => {
     setSearchQuery(value);
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
@@ -212,10 +325,89 @@ export default function ChatPanel(_props: ChatPanelProps) {
     }, 400);
   }, []);
 
-  // Open a search result in terminal (reuses handleOpenSession with cwd)
   const handleOpenSearchResult = useCallback(async (result: ClaudeSearchResult) => {
     handleOpenSession({ session_id: result.session_id, cwd: result.cwd });
   }, [handleOpenSession]);
+
+  const toggleExpanded = useCallback((pathPrefix: string) => {
+    setExpandedNodes(prev => {
+      const next = new Set(prev);
+      if (next.has(pathPrefix)) next.delete(pathPrefix);
+      else next.add(pathPrefix);
+      return next;
+    });
+  }, []);
+
+  const handleFolderSelect = useCallback((pathPrefix: string | null) => {
+    setSelectedFolder(prev => prev === pathPrefix ? null : pathPrefix);
+  }, []);
+
+  // ── Render helpers ──
+
+  const renderFolderNode = (node: FolderTreeNode, depth: number): ReactNode => {
+    const hasChildren = node.children.length > 0;
+    const isExpanded = expandedNodes.has(node.pathPrefix);
+    const isSelected = selectedFolder === node.pathPrefix;
+    const isLeaf = !hasChildren && node.projectSlug !== null;
+
+    return (
+      <div key={node.pathPrefix}>
+        <div
+          onClick={() => {
+            handleFolderSelect(node.pathPrefix);
+            if (hasChildren) toggleExpanded(node.pathPrefix);
+          }}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 6,
+            paddingLeft: 12 + depth * 14, paddingRight: 12,
+            paddingTop: 4, paddingBottom: 4,
+            cursor: 'pointer',
+            background: isSelected ? 'rgba(var(--accent-rgb), 0.12)' : 'transparent',
+            borderLeft: isSelected ? '2px solid var(--accent)' : '2px solid transparent',
+            transition: 'all 0.15s',
+            fontSize: 11,
+          }}
+          onMouseEnter={(e) => { if (!isSelected) e.currentTarget.style.background = 'rgba(var(--accent-rgb), 0.06)'; }}
+          onMouseLeave={(e) => { if (!isSelected) e.currentTarget.style.background = 'transparent'; }}
+        >
+          {/* Chevron or spacer */}
+          {hasChildren ? (
+            <span
+              onClick={(e) => { e.stopPropagation(); toggleExpanded(node.pathPrefix); }}
+              style={{ display: 'flex', cursor: 'pointer', padding: 2 }}
+            >
+              <ChevronIcon open={isExpanded} />
+            </span>
+          ) : (
+            <span style={{ width: 14 }} />
+          )}
+
+          <FolderIcon open={isExpanded && hasChildren} />
+
+          <span style={{
+            flex: 1, minWidth: 0,
+            overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+            color: isSelected ? 'var(--accent)' : 'var(--text-primary)',
+            fontWeight: isSelected ? 600 : 400,
+          }}>
+            {node.name}
+          </span>
+
+          <span style={{
+            fontSize: 9, color: 'var(--text-muted)',
+            background: 'rgba(var(--accent-rgb), 0.08)',
+            padding: '1px 5px', borderRadius: 8,
+            flexShrink: 0,
+          }}>
+            {isLeaf ? node.directCount : node.totalCount}
+          </span>
+        </div>
+
+        {/* Children */}
+        {hasChildren && isExpanded && node.children.map(child => renderFolderNode(child, depth + 1))}
+      </div>
+    );
+  };
 
   if (loading) {
     return (
@@ -299,46 +491,91 @@ export default function ChatPanel(_props: ChatPanelProps) {
         </div>
       )}
 
-      {/* Project tabs */}
-      {projectTabs.length > 1 && !searchQuery && (
+      {/* Folder explorer */}
+      {!isEmpty && !searchQuery && folderTree.children.length > 0 && (
         <div style={{
-          padding: '4px 12px 4px', flexShrink: 0,
-          display: 'flex', gap: 4, overflowX: 'auto',
-          scrollbarWidth: 'none',
+          flexShrink: 0,
+          borderBottom: '1px solid var(--glass-border)',
         }}>
-          <button
-            type="button"
-            onClick={() => setSelectedProject(null)}
-            style={{
-              flexShrink: 0, padding: '3px 10px', borderRadius: 12,
-              border: '1px solid var(--glass-border)', cursor: 'pointer',
-              fontSize: 10, fontFamily: 'inherit', whiteSpace: 'nowrap',
-              background: !selectedProject ? 'rgba(var(--accent-rgb), 0.15)' : 'rgba(var(--accent-rgb), 0.04)',
-              color: !selectedProject ? 'var(--accent)' : 'var(--text-muted)',
-              fontWeight: !selectedProject ? 600 : 400,
-              transition: 'all 0.15s',
-            }}
-          >
-            All ({allSessions.length})
-          </button>
-          {projectTabs.map(tab => (
+          {/* Explorer header: title + toggle + collapse */}
+          <div style={{
+            padding: '6px 12px', display: 'flex', alignItems: 'center', gap: 6,
+          }}>
+            {/* Collapse tree toggle */}
             <button
-              key={tab.slug}
               type="button"
-              onClick={() => setSelectedProject(selectedProject === tab.slug ? null : tab.slug)}
+              onClick={() => setTreeVisible(v => !v)}
+              title={treeVisible ? 'Hide folder tree' : 'Show folder tree'}
               style={{
-                flexShrink: 0, padding: '3px 10px', borderRadius: 12,
+                background: 'none', border: 'none', cursor: 'pointer', padding: 2,
+                color: 'var(--text-muted)', display: 'flex',
+              }}
+            >
+              <ChevronIcon open={treeVisible} />
+            </button>
+
+            <span style={{
+              fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
+              letterSpacing: '0.08em', color: 'var(--text-muted)', flex: 1,
+            }}>
+              Folders
+            </span>
+
+            {/* "All" button to clear selection */}
+            <button
+              type="button"
+              onClick={() => setSelectedFolder(null)}
+              title="Show all sessions"
+              style={{
+                padding: '2px 8px', borderRadius: 10,
                 border: '1px solid var(--glass-border)', cursor: 'pointer',
-                fontSize: 10, fontFamily: 'inherit', whiteSpace: 'nowrap',
-                background: selectedProject === tab.slug ? 'rgba(var(--accent-rgb), 0.15)' : 'rgba(var(--accent-rgb), 0.04)',
-                color: selectedProject === tab.slug ? 'var(--accent)' : 'var(--text-muted)',
-                fontWeight: selectedProject === tab.slug ? 600 : 400,
+                fontSize: 9, fontFamily: 'inherit',
+                background: !selectedFolder ? 'rgba(var(--accent-rgb), 0.15)' : 'rgba(var(--accent-rgb), 0.04)',
+                color: !selectedFolder ? 'var(--accent)' : 'var(--text-muted)',
+                fontWeight: !selectedFolder ? 600 : 400,
                 transition: 'all 0.15s',
               }}
             >
-              {tab.name} ({tab.count})
+              All ({allSessions.length})
             </button>
-          ))}
+
+            {/* Subfolder toggle */}
+            <button
+              type="button"
+              onClick={() => setIncludeSubfolders(v => !v)}
+              title={includeSubfolders ? 'Showing: folder + subfolders (click for only this folder)' : 'Showing: only this folder (click to include subfolders)'}
+              style={{
+                padding: '2px 6px', borderRadius: 10,
+                border: '1px solid var(--glass-border)', cursor: 'pointer',
+                fontSize: 9, fontFamily: 'inherit',
+                background: includeSubfolders ? 'rgba(var(--accent-rgb), 0.12)' : 'rgba(var(--accent-rgb), 0.04)',
+                color: includeSubfolders ? 'var(--accent)' : 'var(--text-muted)',
+                transition: 'all 0.15s',
+                display: 'flex', alignItems: 'center', gap: 3,
+                opacity: selectedFolder ? 1 : 0.4,
+              }}
+            >
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+                strokeLinecap="round" strokeLinejoin="round">
+                {includeSubfolders ? (
+                  <>
+                    <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                    <path d="M12 11v6" /><path d="M9 14h6" />
+                  </>
+                ) : (
+                  <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+                )}
+              </svg>
+              {includeSubfolders ? '+subs' : 'only'}
+            </button>
+          </div>
+
+          {/* Tree */}
+          {treeVisible && (
+            <div style={{ paddingBottom: 6, maxHeight: 200, overflow: 'auto' }}>
+              {folderTree.children.map(child => renderFolderNode(child, 0))}
+            </div>
+          )}
         </div>
       )}
 
@@ -435,7 +672,7 @@ export default function ChatPanel(_props: ChatPanelProps) {
               textTransform: 'uppercase', letterSpacing: '0.08em',
               color: 'var(--text-muted)',
             }}>
-              Sessions{searchQuery ? ` (${filteredSessions.length})` : ''}
+              Sessions ({filteredSessions.length})
             </div>
             {filteredSessions.map((session) => {
               const isLaunching = launching === session.session_id;
@@ -822,7 +1059,34 @@ export default function ChatPanel(_props: ChatPanelProps) {
             padding: '20px 16px', textAlign: 'center',
             color: 'var(--text-muted)', fontSize: 12,
           }}>
-            No sessions matching "{searchQuery}"
+            No sessions matching &quot;{searchQuery}&quot;
+          </div>
+        )}
+
+        {/* No sessions for selected folder */}
+        {!searchQuery && !isEmpty && filteredSessions.length === 0 && selectedFolder && (
+          <div style={{
+            padding: '20px 16px', textAlign: 'center',
+            color: 'var(--text-muted)', fontSize: 12,
+          }}>
+            No sessions in this folder
+            {!includeSubfolders && (
+              <div style={{ marginTop: 6 }}>
+                <button
+                  type="button"
+                  onClick={() => setIncludeSubfolders(true)}
+                  style={{
+                    background: 'rgba(var(--accent-rgb), 0.1)',
+                    border: '1px solid var(--glass-border)',
+                    borderRadius: 6, padding: '4px 12px',
+                    cursor: 'pointer', color: 'var(--accent)',
+                    fontSize: 11, fontFamily: 'inherit',
+                  }}
+                >
+                  Include subfolders
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>
