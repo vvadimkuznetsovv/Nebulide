@@ -37,6 +37,19 @@ export function unregisterTerminal(instanceId: string): void {
   if (num == null) return;
   registry.delete(instanceId);
   usedNumbers.delete(num);
+  // Compact: close gaps so remaining terminals are 1, 2, 3...
+  // e.g. if Terminal-1 removed and Terminal-2 remains → becomes Terminal-1
+  if (registry.size > 0) {
+    const entries = [...registry.entries()].sort((a, b) => a[1] - b[1]);
+    registry.clear();
+    usedNumbers.clear();
+    let n = 1;
+    for (const [id] of entries) {
+      registry.set(id, n);
+      usedNumbers.add(n);
+      n++;
+    }
+  }
   bump();
 }
 
