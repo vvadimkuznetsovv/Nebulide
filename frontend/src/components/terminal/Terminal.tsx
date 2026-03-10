@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useCallback, useState } from 'react';
 import { Terminal as XTerm } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { SearchAddon } from '@xterm/addon-search';
@@ -691,12 +691,14 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [instanceId]);
 
-  // Re-register after resetTerminalRegistry() clears the registry
-  // (e.g. on session switch / snapshot restore). The main mount effect
-  // won't re-run because instanceId hasn't changed.
+  // Register terminal numbering synchronously before paint.
+  // useLayoutEffect ensures the number is available when tab headers render,
+  // preventing a flash of "Terminal" without a number.
+  // Also re-registers after resetTerminalRegistry() (session switch / snapshot restore)
+  // since registryVersion changes trigger this effect.
   const registryVersion = useTerminalRegistryVersion();
-  useEffect(() => {
-    if (sessions.has(instanceId) && getTerminalNumber(instanceId) == null) {
+  useLayoutEffect(() => {
+    if (getTerminalNumber(instanceId) == null) {
       registerTerminal(instanceId);
     }
   }, [instanceId, registryVersion]);

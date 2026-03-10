@@ -11,6 +11,7 @@ export type ActivityEvent =
   | { type: 'claude_stream_start' }
   | { type: 'claude_stream_delta' }
   | { type: 'claude_stream_end' }
+  | { type: 'claude_error' }
   | { type: 'file_save'; filePath: string };
 
 type Listener = (event: ActivityEvent) => void;

@@ -55,6 +55,8 @@ export function getSpriteSheet(task: PetTask, emotion: PetEmotion): string {
 const IDLE_TIMEOUT = 10_000;     // 10s no activity → idle
 const SLEEP_TIMEOUT = 300_000;   // 5min no activity → sleeping
 const WAITING_TIMEOUT = 30_000;  // 30s after claude ends → waiting
+const LONELY_START = 60_000;     // 1min idle → start getting sad
+const LONELY_DEEP = 180_000;     // 3min idle → sadder faster
 
 const HAPPY_THRESHOLD = 0.6;
 const SAD_THRESHOLD = 0.45;
@@ -116,11 +118,17 @@ function addEmotion(
 }
 
 const SPEECH_PHRASES: Record<PetTask, string[]> = {
-  idle: ['...', 'Hey!', ':)'],
-  working: ['Coding!', 'Busy...', 'Almost done!'],
+  idle: ['...', 'Hey!', ':)', 'Bored...'],
+  working: ['Coding!', 'Busy...', 'Almost done!', 'On it!'],
   sleeping: ['Zzz...', '*yawn*', '5 more minutes...'],
-  compacting: ['Compacting!', 'Cleaning up...'],
-  waiting: ['Waiting...', 'Your turn!', 'Ready?'],
+  compacting: ['Compacting!', 'Cleaning up...', 'Tidying...'],
+  waiting: ['Waiting...', 'Your turn!', 'Ready?', 'Hello?'],
+};
+
+// Emotion-specific speech overrides
+const EMOTION_PHRASES: Partial<Record<PetEmotion, string[]>> = {
+  sad: ['Miss you...', '*sigh*', 'Lonely...', 'Come back?'],
+  sob: ['*crying*', 'So alone...', 'Please...', 'Where are you?'],
 };
 
 // Speech bubble timers per pet (module-level to survive re-renders)
@@ -201,10 +209,25 @@ export const usePetStore = create<PetStoreState>((set, get) => ({
         break;
       }
 
-      case 'terminal_data':
       case 'terminal_input': {
+        // User typing — small happy boost (they're engaging!), update lastActivity.
+        // Don't change task — 'working' only on sustained streaming.
         const id = event.instanceId;
-        set({ pets: updatePet(state.pets, id, { task: 'working', lastActivity: now }) });
+        const pet = state.pets[id];
+        if (pet) {
+          const scores = addEmotion(pet.emotionScores, 'happy', 0.08);
+          set({ pets: updatePet(state.pets, id, {
+            lastActivity: now,
+            emotionScores: scores,
+            emotion: resolveEmotion(scores),
+          }) });
+        }
+        break;
+      }
+      case 'terminal_data': {
+        // Terminal output — just update lastActivity (prevents sleeping).
+        const id = event.instanceId;
+        set({ pets: updatePet(state.pets, id, { lastActivity: now }) });
         break;
       }
 
@@ -262,6 +285,20 @@ export const usePetStore = create<PetStoreState>((set, get) => ({
         break;
       }
 
+      case 'claude_error': {
+        // Claude errored — all pets get a sadness boost
+        const newPets = updateAllPets(state.pets, (pet) => {
+          const scores = addEmotion(pet.emotionScores, 'sad', 0.3);
+          return {
+            lastActivity: now,
+            emotionScores: scores,
+            emotion: resolveEmotion(scores),
+          };
+        });
+        set({ pets: newPets });
+        break;
+      }
+
       case 'file_save': {
         const newPets = updateAllPets(state.pets, (pet) => {
           const scores = addEmotion(pet.emotionScores, 'happy', 0.4);
@@ -282,7 +319,9 @@ export const usePetStore = create<PetStoreState>((set, get) => ({
     const pet = state.pets[instanceId];
     if (!pet) return;
     const scores = addEmotion(pet.emotionScores, 'happy', 0.2);
-    const list = SPEECH_PHRASES[pet.task];
+    // Pick speech: emotion-specific phrases take priority
+    const emotionList = EMOTION_PHRASES[pet.emotion];
+    const list = emotionList || SPEECH_PHRASES[pet.task];
     const bubble = list[Math.floor(Math.random() * list.length)];
     set({ pets: updatePet(state.pets, instanceId, {
       emotionScores: scores,
@@ -326,7 +365,7 @@ const timers: {
 function startTimers() {
   if (timers.task) return; // already running
 
-  // Task state transitions (every 2s)
+  // Task state transitions + loneliness (every 2s)
   timers.task = setInterval(() => {
     const { pets } = usePetStore.getState();
     const now = Date.now();
@@ -336,8 +375,11 @@ function startTimers() {
     for (const [id, pet] of Object.entries(pets)) {
       const elapsed = now - pet.lastActivity;
       let newTask = pet.task;
+      let newScores = pet.emotionScores;
+      let scoresChanged = false;
 
       if (!pet.claudeStreaming) {
+        // ── Task transitions ──
         if (elapsed >= SLEEP_TIMEOUT) {
           if (pet.task !== 'sleeping') newTask = 'sleeping';
         } else if (pet.claudeEndedAt > 0) {
@@ -350,10 +392,33 @@ function startTimers() {
         } else if (elapsed >= IDLE_TIMEOUT && pet.task === 'working') {
           newTask = 'idle';
         }
+
+        // ── Loneliness: build sadness when inactive ──
+        // After LONELY_START (1min): slow sadness (+0.015/2s → sad in ~60s)
+        // After LONELY_DEEP (3min): faster sadness (+0.03/2s → sob in ~30s)
+        if (elapsed >= LONELY_DEEP) {
+          newScores = {
+            happy: newScores.happy * 0.95,
+            sad: Math.min(1, newScores.sad + 0.03),
+          };
+          scoresChanged = true;
+        } else if (elapsed >= LONELY_START) {
+          newScores = {
+            happy: newScores.happy * 0.97,
+            sad: Math.min(1, newScores.sad + 0.015),
+          };
+          scoresChanged = true;
+        }
       }
 
-      if (newTask !== pet.task) {
-        next[id] = { ...pet, task: newTask };
+      if (newTask !== pet.task || scoresChanged) {
+        next[id] = {
+          ...pet,
+          task: newTask,
+          ...(scoresChanged
+            ? { emotionScores: newScores, emotion: resolveEmotion(newScores) }
+            : {}),
+        };
         changed = true;
       } else {
         next[id] = pet;

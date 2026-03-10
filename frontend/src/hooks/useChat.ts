@@ -15,6 +15,8 @@ export function useChat(sessionId: string | null) {
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamContent, setStreamContent] = useState('');
   const streamContentRef = useRef('');
+  // Track whether claude_stream_start was emitted for current stream
+  const streamStartedRef = useRef(false);
   // Batch stream delta updates to avoid re-rendering on every WebSocket chunk
   const pendingDeltaRef = useRef('');
   const flushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -48,6 +50,10 @@ export function useChat(sessionId: string | null) {
     switch (event.type) {
       case 'stream': {
         setIsStreaming(true);
+        if (!streamStartedRef.current) {
+          streamStartedRef.current = true;
+          emitActivity({ type: 'claude_stream_start' });
+        }
         emitActivity({ type: 'claude_stream_delta' });
         // Accumulate streamed content
         const line = typeof event.data === 'string' ? event.data : JSON.stringify(event.data);
@@ -74,6 +80,7 @@ export function useChat(sessionId: string | null) {
       }
       case 'complete': {
         cancelFlush();
+        streamStartedRef.current = false;
         setIsStreaming(false);
         emitActivity({ type: 'claude_stream_end' });
         if (streamContentRef.current) {
@@ -93,7 +100,10 @@ export function useChat(sessionId: string | null) {
       }
       case 'error': {
         cancelFlush();
+        streamStartedRef.current = false;
         setIsStreaming(false);
+        emitActivity({ type: 'claude_stream_end' });
+        emitActivity({ type: 'claude_error' });
         setStreamContent('');
         streamContentRef.current = '';
         console.error('Chat error:', event.message);
