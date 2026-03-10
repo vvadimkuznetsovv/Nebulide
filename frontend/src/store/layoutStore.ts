@@ -549,12 +549,25 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
       // Remap panel IDs if mapping provided (detached editors get new tab IDs)
       let layout = cloneTree(snap.layout);
       let visibility = { ...snap.visibility } as PanelVisibility;
-      let mobilePanels = [...snap.mobilePanels];
+      let mobilePanels = [...(snap.mobilePanels || [])];
 
       if (panelIdMapping && Object.keys(panelIdMapping).length > 0) {
         layout = remapPanelIds(layout, panelIdMapping);
         visibility = remapVisibility(visibility, panelIdMapping) as PanelVisibility;
         mobilePanels = mobilePanels.map((p) => (panelIdMapping[p] || p) as PanelId);
+      }
+
+      // Cross-device: if restoring on mobile from a desktop snapshot (or vice versa),
+      // the mobilePanels may not reflect which panels are actually visible.
+      // Derive mobilePanels from visibility so the user sees the same panels.
+      const isMobile = window.innerWidth <= 640;
+      if (isMobile) {
+        // Priority order for mobile: show the most relevant visible panels (max 2)
+        const mobileOrder: PanelId[] = ['terminal', 'chat', 'files', 'editor', 'pet', 'preview'];
+        const visibleBase = mobileOrder.filter((p) => visibility[p]);
+        if (visibleBase.length > 0 && (mobilePanels.length === 0 || !mobilePanels.some((p) => visibility[p]))) {
+          mobilePanels = visibleBase.slice(0, 2);
+        }
       }
 
       const next = { ...state, layout, visibility, mobilePanels };
