@@ -279,19 +279,14 @@ func (s *TerminalService) GetOrCreate(sessionKey string, workingDir string, sand
 		if alive {
 			return existing, nil
 		}
-		// Shell is dead — clean up and delete stale scrollback to prevent
-		// old output (e.g. from previous container) mixing with new shell.
+		// Shell is dead — clean up but keep scrollback for replay into new session.
 		log.Printf("[TerminalService] dead session, recreating key=%s", sessionKey)
-		existing.Close()
+		existing.CloseKeepScrollback()
 		delete(s.sessions, sessionKey)
 	} else {
-		// No in-memory session — stale scrollback may exist from a previous
-		// container. Delete it to prevent old prompts mixing with new shell.
-		sbPath := scrollbackPath(sessionKey)
-		if _, err := os.Stat(sbPath); err == nil {
-			log.Printf("[TerminalService] deleting stale scrollback %s key=%s", sbPath, sessionKey)
-			os.Remove(sbPath)
-		}
+		// No in-memory session — scrollback file may exist from a previous
+		// container. Keep it so terminal output survives deploys/restarts.
+		// newMultiWriter will load and replay the scrollback to new connections.
 		log.Printf("[TerminalService] no existing session, creating new key=%s", sessionKey)
 	}
 
@@ -456,7 +451,7 @@ func (s *TerminalService) Remove(sessionKey string) {
 func (s *TerminalService) Resize(sessionKey string, rows, cols uint16) error {
 	// Reject invalid dimensions — FitAddon can propose 0×0 or tiny values
 	// during panel transitions / hide, which causes garbled prompt output.
-	if rows < 2 || cols < 10 {
+	if rows < 2 || cols < 2 {
 		log.Printf("[TerminalService] Resize IGNORED invalid dims rows=%d cols=%d key=%s", rows, cols, sessionKey)
 		return nil
 	}
