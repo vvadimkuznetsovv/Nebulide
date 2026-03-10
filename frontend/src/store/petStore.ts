@@ -225,9 +225,9 @@ export const usePetStore = create<PetStoreState>((set, get) => ({
         break;
       }
       case 'terminal_data': {
-        // Terminal output — just update lastActivity (prevents sleeping).
-        const id = event.instanceId;
-        set({ pets: updatePet(state.pets, id, { lastActivity: now }) });
+        // Terminal output (shell prompt, cursor, etc.) — ignore for pet state.
+        // Only meaningful events (input, streaming, claude, file_save) update lastActivity.
+        // This prevents background terminal noise from keeping pet stuck in "working".
         break;
       }
 
