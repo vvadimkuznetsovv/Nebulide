@@ -165,6 +165,7 @@ export default function ChatPanel(_props: ChatPanelProps) {
   const [searchResults, setSearchResults] = useState<ClaudeSearchResult[] | null>(null);
   const [searching, setSearching] = useState(false);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchVersionRef = useRef(0); // Guards against stale API responses
 
   // Folder explorer state
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
@@ -212,7 +213,13 @@ export default function ChatPanel(_props: ChatPanelProps) {
       p.sessions.map((s) => ({ ...s, project: s.project || p.slug }))
     );
     flat.sort((a, b) => b.updated_at.localeCompare(a.updated_at));
-    return flat;
+    // Deduplicate by session_id (Claude CLI can write same session to multiple project dirs)
+    const seen = new Set<string>();
+    return flat.filter((s) => {
+      if (seen.has(s.session_id)) return false;
+      seen.add(s.session_id);
+      return true;
+    });
   }, [projects]);
 
   // Filter sessions by selected folder + toggle + search
@@ -228,6 +235,8 @@ export default function ChatPanel(_props: ChatPanelProps) {
         list = list.filter(s => s.project === selectedFolder);
       }
     }
+
+    console.log('[ChatPanel] filter:', { selectedFolder, includeSubfolders, total: allSessions.length, filtered: list.length, searchResults: searchResults?.length ?? null });
 
     if (!searchQuery || searchResults !== null) return list;
     const q = searchQuery.toLowerCase();
@@ -303,20 +312,29 @@ export default function ChatPanel(_props: ChatPanelProps) {
     if (searchTimerRef.current) clearTimeout(searchTimerRef.current);
 
     if (!value.trim() || value.trim().length < 2) {
+      searchVersionRef.current++; // Invalidate any in-flight request
       setSearchResults(null);
       setSearching(false);
       return;
     }
 
     setSearching(true);
+    const version = ++searchVersionRef.current;
     searchTimerRef.current = setTimeout(async () => {
       try {
         const { data } = await searchClaudeSessions(value.trim());
-        setSearchResults(data.results || []);
+        // Only apply if this is still the latest search
+        if (version === searchVersionRef.current) {
+          setSearchResults(data.results || []);
+        }
       } catch {
-        setSearchResults(null);
+        if (version === searchVersionRef.current) {
+          setSearchResults(null);
+        }
       } finally {
-        setSearching(false);
+        if (version === searchVersionRef.current) {
+          setSearching(false);
+        }
       }
     }, 400);
   }, []);
