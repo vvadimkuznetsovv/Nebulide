@@ -26,9 +26,11 @@ function formatSize(mb: number): string {
   return `${mb.toFixed(1)}MB`;
 }
 
-// Friendly name from project slug: "c--Users-evgen--projects-Clauder" → "Clauder"
+// Friendly name: "-home-nebulide-workspace" → "workspace", keep short
 function projectDisplayName(slug: string): string {
-  const parts = slug.split('--');
+  // Strip leading dash, split by last dash group to get last segment
+  const clean = slug.replace(/^-+/, '');
+  const parts = clean.split('-');
   return parts[parts.length - 1] || slug;
 }
 
@@ -71,29 +73,42 @@ interface FolderTreeNode {
   totalCount: number;
 }
 
+/** Build tree using prefix-based hierarchy (same logic as backend matchesWorkspace).
+ *  Project A is parent of B if B.slug.startsWith(A.slug + '-'). */
 function buildFolderTree(projects: ClaudeProject[]): FolderTreeNode {
   const root: FolderTreeNode = {
     name: '', pathPrefix: '', children: [],
     projectSlug: null, directCount: 0, totalCount: 0,
   };
 
-  for (const proj of projects) {
-    const segments = proj.slug.split('--');
-    let current = root;
-    for (let i = 0; i < segments.length; i++) {
-      const prefix = segments.slice(0, i + 1).join('--');
-      let child = current.children.find(c => c.pathPrefix === prefix);
-      if (!child) {
-        child = {
-          name: segments[i], pathPrefix: prefix, children: [],
-          projectSlug: null, directCount: 0, totalCount: 0,
-        };
-        current.children.push(child);
+  // Sort by slug length so shorter (parent) slugs come first
+  const sorted = [...projects].sort((a, b) => a.slug.length - b.slug.length || a.slug.localeCompare(b.slug));
+
+  for (const proj of sorted) {
+    // Find deepest existing parent node
+    function findParent(node: FolderTreeNode): FolderTreeNode {
+      for (const child of node.children) {
+        if (proj.slug.startsWith(child.pathPrefix + '-')) {
+          return findParent(child);
+        }
       }
-      current = child;
+      return node;
     }
-    current.projectSlug = proj.slug;
-    current.directCount = proj.sessions.length;
+
+    const parent = findParent(root);
+    // Display name: relative part after parent prefix
+    const displayName = parent === root
+      ? proj.slug
+      : proj.slug.slice(parent.pathPrefix.length + 1);
+
+    parent.children.push({
+      name: displayName,
+      pathPrefix: proj.slug,
+      children: [],
+      projectSlug: proj.slug,
+      directCount: proj.sessions.length,
+      totalCount: proj.sessions.length,
+    });
   }
 
   // Compute totals bottom-up
@@ -104,22 +119,6 @@ function buildFolderTree(projects: ClaudeProject[]): FolderTreeNode {
     return total;
   }
   computeTotals(root);
-
-  // Compress single-child chains (merge parent→child when parent has no sessions)
-  function compress(node: FolderTreeNode): FolderTreeNode {
-    node.children = node.children.map(compress);
-    while (node.children.length === 1 && node.directCount === 0 && node.pathPrefix !== '') {
-      const child = node.children[0];
-      node.name = node.name ? `${node.name} / ${child.name}` : child.name;
-      node.pathPrefix = child.pathPrefix;
-      node.children = child.children;
-      node.projectSlug = child.projectSlug;
-      node.directCount = child.directCount;
-    }
-    return node;
-  }
-  // Compress root's children
-  root.children = root.children.map(compress);
 
   return root;
 }
@@ -225,8 +224,9 @@ export default function ChatPanel(_props: ChatPanelProps) {
 
     if (selectedFolder) {
       if (includeSubfolders) {
+        // Same logic as backend matchesWorkspace: exact match or prefix + '-'
         list = list.filter(s =>
-          s.project === selectedFolder || s.project.startsWith(selectedFolder + '--')
+          s.project === selectedFolder || s.project.startsWith(selectedFolder + '-')
         );
       } else {
         list = list.filter(s => s.project === selectedFolder);
