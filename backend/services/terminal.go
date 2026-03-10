@@ -341,6 +341,9 @@ func (s *TerminalService) createLocked(sessionKey string, workingDir string, san
 	// All terminals of the same user share one history file.
 	histFile := filepath.Join(workingDir, ".nebulide_history")
 	env = append(env, "HISTFILE="+histFile, "HISTSIZE=10000", "HISTFILESIZE=20000")
+	// Flush history after every command so arrow-up works across sessions/reconnects.
+	// PROMPT_COMMAND runs after each interactive command in bash.
+	env = append(env, "PROMPT_COMMAND=history -a; history -r")
 
 	for k, v := range extraEnv {
 		env = append(env, k+"="+v)
