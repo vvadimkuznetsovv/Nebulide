@@ -4,6 +4,7 @@ import type { PanelId, PanelNode } from '../../store/layoutStore';
 import { useLayoutStore } from '../../store/layoutStore';
 import { isDetachedEditor, getDetachedTabId, isDetachedTerminal } from '../../store/layoutUtils';
 import { useWorkspaceStore } from '../../store/workspaceStore';
+import { useTerminalRegistryVersion } from '../../utils/terminalRegistry';
 import PanelContent, { getPanelIcon, getPanelTitle } from './PanelContent';
 import ContextMenu from '../files/ContextMenu';
 import { useLongPress, mergeEventHandlers } from '../../hooks/useLongPress';
@@ -256,6 +257,7 @@ function DropZone({ id, position }: { id: string; position: string }) {
 function DragHeader({ panelId, nodeId, showSidebarBtn }: { panelId: PanelId; nodeId: string; showSidebarBtn?: boolean }) {
   const { toggleVisibility, removeDetachedPanel, reattachEditor, splitPanel, resetLayout } = useLayoutStore();
   const { attributes, listeners, setNodeRef } = useDraggable({ id: panelId });
+  useTerminalRegistryVersion(); // re-render when terminal numbering changes
 
   const title = getPanelTitle(panelId);
   const handleClose = () => {
@@ -376,6 +378,7 @@ function DraggableTab({
 }) {
   const { toggleVisibility, removeDetachedPanel, reattachEditor, splitPanel, resetLayout } = useLayoutStore();
   const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: panelId });
+  useTerminalRegistryVersion(); // re-render when terminal numbering changes
 
   const title = getPanelTitle(panelId);
   const handleClose = () => {
