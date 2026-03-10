@@ -1,6 +1,7 @@
 import { useState, useCallback, useRef } from 'react';
 import { useWebSocket } from './useWebSocket';
 import type { Message } from '../api/sessions';
+import { emitActivity } from '../utils/activityBus';
 
 interface StreamEvent {
   type: string;
@@ -47,6 +48,7 @@ export function useChat(sessionId: string | null) {
     switch (event.type) {
       case 'stream': {
         setIsStreaming(true);
+        emitActivity({ type: 'claude_stream_delta' });
         // Accumulate streamed content
         const line = typeof event.data === 'string' ? event.data : JSON.stringify(event.data);
         streamContentRef.current += line + '\n';
@@ -73,6 +75,7 @@ export function useChat(sessionId: string | null) {
       case 'complete': {
         cancelFlush();
         setIsStreaming(false);
+        emitActivity({ type: 'claude_stream_end' });
         if (streamContentRef.current) {
           const assistantMsg: Message = {
             id: crypto.randomUUID(),

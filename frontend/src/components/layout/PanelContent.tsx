@@ -1,5 +1,6 @@
 import type { PanelId, BasePanelId } from '../../store/layoutUtils';
 import { isDetachedEditor, getDetachedTabId, isDetachedTerminal, getDetachedTerminalId } from '../../store/layoutUtils';
+import { getTerminalLabel } from '../../utils/terminalRegistry';
 import { useLayoutStore } from '../../store/layoutStore';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 import ChatPanel from '../chat/ChatPanel';
@@ -7,6 +8,7 @@ import EditorPanel from '../editor/EditorPanel';
 import CodeEditor from '../editor/CodeEditor';
 import PreviewPanel from '../preview/PreviewPanel';
 import TerminalComponent from '../terminal/Terminal';
+import TamagotchiPanel from '../pet/TamagotchiPanel';
 
 const basePanelIcons: Record<BasePanelId, React.ReactNode> = {
   chat: (
@@ -37,6 +39,16 @@ const basePanelIcons: Record<BasePanelId, React.ReactNode> = {
       <line x1="12" y1="19" x2="20" y2="19" />
     </svg>
   ),
+  pet: (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="10" r="6" />
+      <path d="M6 10c-1.5-2-3-2.5-3-4.5a2.5 2.5 0 0 1 5 0" />
+      <path d="M18 10c1.5-2 3-2.5 3-4.5a2.5 2.5 0 0 0-5 0" />
+      <circle cx="10" cy="9" r="1" fill="currentColor" />
+      <circle cx="14" cy="9" r="1" fill="currentColor" />
+      <path d="M10 13a2 2 0 0 0 4 0" />
+    </svg>
+  ),
 };
 
 const basePanelTitles: Record<BasePanelId, string> = {
@@ -45,6 +57,7 @@ const basePanelTitles: Record<BasePanelId, string> = {
   editor: 'Editor',
   preview: 'Preview',
   terminal: 'Terminal',
+  pet: 'Pet',
 };
 
 // Dynamic icon lookup — detached editors use the code icon, detached terminals use the terminal icon
@@ -64,7 +77,11 @@ export function getPanelTitle(panelId: PanelId): string {
     }
     return 'Editor';
   }
-  if (isDetachedTerminal(panelId)) return 'Terminal';
+  if (isDetachedTerminal(panelId)) {
+    const instanceId = getDetachedTerminalId(panelId);
+    return instanceId ? getTerminalLabel(instanceId) : 'Terminal';
+  }
+  if (panelId === 'terminal') return getTerminalLabel('default');
   return basePanelTitles[panelId as BasePanelId] ?? 'Panel';
 }
 
@@ -116,6 +133,9 @@ export default function PanelContent({ panelId }: { panelId: PanelId }) {
 
     case 'terminal':
       return <TerminalComponent instanceId="default" persistent active={visibility.terminal} />;
+
+    case 'pet':
+      return <TamagotchiPanel />;
 
     default:
       return null;

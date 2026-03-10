@@ -8,6 +8,8 @@ import ContextMenu, { type ContextMenuItem } from '../files/ContextMenu';
 import { useLongPress } from '../../hooks/useLongPress';
 import { ensureFreshToken, refreshTokenOnce } from '../../api/tokenRefresh';
 import { useWorkspaceSessionStore } from '../../store/workspaceSessionStore';
+import { emitActivity } from '../../utils/activityBus';
+import { registerTerminal, unregisterTerminal } from '../../utils/terminalRegistry';
 import api from '../../api/client';
 import toast from 'react-hot-toast';
 
@@ -193,6 +195,7 @@ function createXterm(instanceId: string): TermSession {
   xterm.onData((data) => {
     if (session.ws?.readyState === WebSocket.OPEN) {
       session.ws.send(new TextEncoder().encode(data));
+      emitActivity({ type: 'terminal_input', instanceId });
     }
   });
 
@@ -245,6 +248,7 @@ async function connectWs(instanceId: string): Promise<void> {
     opened = true;
     session.xterm.write(_green('[WS] Connected!') + '\r\n');
     session.reconnectAttempts = 0;
+    emitActivity({ type: 'terminal_connect', instanceId });
     // Suppress external resize events briefly — the single resize below is enough.
     // Without this, ResizeObserver / fit() / active-effect fire extra resizes
     // that cause duplicate prompt lines on mobile.
@@ -267,8 +271,10 @@ async function connectWs(instanceId: string): Promise<void> {
   ws.onmessage = (event) => {
     if (event.data instanceof ArrayBuffer) {
       session.xterm.write(new Uint8Array(event.data));
+      emitActivity({ type: 'terminal_data', instanceId, byteCount: event.data.byteLength });
     } else {
       session.xterm.write(event.data);
+      emitActivity({ type: 'terminal_data', instanceId, byteCount: event.data.length });
     }
   };
 
@@ -290,6 +296,7 @@ async function connectWs(instanceId: string): Promise<void> {
     if (e.code === 4001) {
       session.xterm.write(_red('[Terminal killed by admin]') + '\r\n');
       session.reconnectAttempts = MAX_RECONNECT;
+      emitActivity({ type: 'terminal_disconnect', instanceId });
       session.notifyRerender?.();
       return;
     }
@@ -343,6 +350,7 @@ function getOrCreateSession(instanceId: string): TermSession {
   let session = sessions.get(instanceId);
   if (!session) {
     session = createXterm(instanceId);
+    registerTerminal(instanceId);
   }
   console.log(`[Terminal] getOrCreateSession id=${instanceId} existed=${!!session.ws}`);
   if (!session.ws || session.ws.readyState > WebSocket.OPEN) {
@@ -409,6 +417,8 @@ export function destroyTerminalSession(instanceId: string): void {
   }
   session.xterm.dispose();
   sessions.delete(instanceId);
+  emitActivity({ type: 'terminal_disconnect', instanceId });
+  unregisterTerminal(instanceId);
 
   // Kill backend PTY session (fire-and-forget)
   api.delete(`/terminals/${encodeURIComponent(instanceId)}`).catch(() => {});

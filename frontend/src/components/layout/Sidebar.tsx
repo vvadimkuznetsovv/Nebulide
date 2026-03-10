@@ -56,7 +56,7 @@ function CopyRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-const allPanels: BasePanelId[] = ['chat', 'files', 'editor', 'preview', 'terminal'];
+const allPanels: BasePanelId[] = ['chat', 'files', 'editor', 'preview', 'terminal', 'pet'];
 
 /* ─────────────────────── Settings Modal ─────────────────────── */
 

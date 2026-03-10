@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import '../../monacoConfig'; // must run before <Editor> mounts — configures local loader
 import Editor, { type OnMount } from '@monaco-editor/react';
 import { readFile, writeFile } from '../../api/files';
+import { emitActivity } from '../../utils/activityBus';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 import ContextMenu, { type ContextMenuItem } from '../files/ContextMenu';
 import toast from 'react-hot-toast';
@@ -177,6 +178,7 @@ export default function CodeEditor({ filePath, tabId }: CodeEditorProps) {
     if (!filePath || !modified || !tabId) return;
     try {
       await writeFile(filePath, content);
+      emitActivity({ type: 'file_save', filePath });
       setOriginalContent(content);
       setModified(false);
       setTabModified(tabId, false);

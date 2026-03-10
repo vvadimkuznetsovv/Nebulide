@@ -1,7 +1,7 @@
 // Pure functions for layout tree manipulation
 
 // Base panel types (one instance each)
-export type BasePanelId = 'chat' | 'files' | 'editor' | 'preview' | 'terminal';
+export type BasePanelId = 'chat' | 'files' | 'editor' | 'preview' | 'terminal' | 'pet';
 // Dynamic detached editors: 'editor:tab-123'
 // Dynamic detached terminals: 'terminal:term-123'
 export type PanelId = BasePanelId | `editor:${string}` | `terminal:${string}`;

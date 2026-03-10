@@ -26,6 +26,7 @@ import {
 } from './layoutUtils';
 import { useWorkspaceStore } from './workspaceStore';
 import { destroyTerminalSession } from '../components/terminal/Terminal';
+import { registerTerminal, unregisterTerminal } from '../utils/terminalRegistry';
 
 export type { PanelId };
 export type { LayoutNode, PanelNode, GroupNode } from './layoutUtils';
@@ -37,6 +38,7 @@ interface PanelVisibility {
   editor: boolean;
   preview: boolean;
   terminal: boolean;
+  pet: boolean;
 }
 
 interface DndState {
@@ -96,7 +98,7 @@ export interface LayoutSnapshot {
   mobilePanels: PanelId[];
 }
 
-const STORAGE_KEY = 'nebulide-layout-v6';
+const STORAGE_KEY = 'nebulide-layout-v7';
 
 function loadFromStorage(): { layout?: LayoutNode; visibility?: PanelVisibility; mobilePanels?: PanelId[] } {
   try {
@@ -131,6 +133,7 @@ const defaultVisibility: PanelVisibility = {
   editor: false,
   preview: false,
   terminal: true,
+  pet: false,
 };
 
 const stored = loadFromStorage();
@@ -226,6 +229,14 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
       }
 
       let newLayout = state.layout;
+
+      // Auto-insert pet panel into layout if not present
+      if (!wasVisible && panelId === 'pet' && !findPanelNode(state.layout, 'pet')) {
+        const termNode = findPanelNode(state.layout, 'terminal');
+        newLayout = termNode
+          ? insertPanelIntoNode(state.layout, 'pet', termNode.id)
+          : insertPanelAtEdge(state.layout, 'pet', 'bottom');
+      }
 
       if (wasVisible) {
         // If hiding the currently active tab in a multi-tab node → switch to next visible tab
@@ -404,6 +415,7 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
   // Open a new terminal instance as a separate panel
   openNewTerminal: () => {
     const instanceId = `term-${Date.now()}`;
+    registerTerminal(instanceId);
     const panelId = makeDetachedTerminalPanelId(instanceId);
     set((state) => {
       // Place next to the existing terminal node if possible, otherwise at bottom edge
@@ -499,7 +511,7 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
 
       // If we closed the last panel, pick the first remaining visible panel
       if (newPanels.length === 0) {
-        const allPanels: PanelId[] = ['chat', 'files', 'editor', 'preview', 'terminal'];
+        const allPanels: PanelId[] = ['chat', 'files', 'editor', 'preview', 'terminal', 'pet'];
         const firstVisible = allPanels.find((p) => newVis[p]);
         newPanels = firstVisible ? [firstVisible] : ['chat'];
         // Ensure at least chat is visible
