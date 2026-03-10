@@ -81,9 +81,9 @@ export function useSyncWS() {
                 // 500ms delay lets the displaced device finish saving.
                 setTimeout(() => {
                   store.reloadActiveSession().then(() => {
-                    if (prevStatus === 'blocked') {
-                      reconnectAllTerminalSessions();
-                    }
+                    // Always reconnect terminals — reloadActiveSession() calls
+                    // disconnectAllTerminalSessions() which kills all WS connections.
+                    reconnectAllTerminalSessions();
                   });
                 }, 500);
               }
@@ -126,7 +126,9 @@ export function useSyncWS() {
             case 'workspace_session_changed':
               if (msg.action === 'updated' && msg.session_id === store.activeSessionId && !isRecentSelfSave()) {
                 // Active session updated by another device — reload snapshot
-                store.reloadActiveSession();
+                store.reloadActiveSession().then(() => {
+                  reconnectAllTerminalSessions();
+                });
               } else {
                 getWorkspaceSessions().then(({ data }) => {
                   store.updateSessionsList(data || []);
