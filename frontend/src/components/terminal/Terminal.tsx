@@ -9,7 +9,7 @@ import { useLongPress } from '../../hooks/useLongPress';
 import { ensureFreshToken, refreshTokenOnce } from '../../api/tokenRefresh';
 import { useWorkspaceSessionStore } from '../../store/workspaceSessionStore';
 import { emitActivity } from '../../utils/activityBus';
-import { registerTerminal, unregisterTerminal } from '../../utils/terminalRegistry';
+import { registerTerminal, unregisterTerminal, getTerminalNumber, useTerminalRegistryVersion } from '../../utils/terminalRegistry';
 import api from '../../api/client';
 import toast from 'react-hot-toast';
 
@@ -690,6 +690,16 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
   // fit intentionally excluded: instanceId change re-runs the effect, fit is stable
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [instanceId]);
+
+  // Re-register after resetTerminalRegistry() clears the registry
+  // (e.g. on session switch / snapshot restore). The main mount effect
+  // won't re-run because instanceId hasn't changed.
+  const registryVersion = useTerminalRegistryVersion();
+  useEffect(() => {
+    if (sessions.has(instanceId) && getTerminalNumber(instanceId) == null) {
+      registerTerminal(instanceId);
+    }
+  }, [instanceId, registryVersion]);
 
   useEffect(() => {
     if (active) {
