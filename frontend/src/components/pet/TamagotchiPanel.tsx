@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
-import { usePetStore, getSpriteSheet, TASK_CONFIGS, EMOTION_SWAY, type PetTask, type PetEmotion, type IndividualPetState } from '../../store/petStore';
+import { usePetStore, getSpriteSheet, TASK_CONFIGS, EMOTION_SWAY, type PetTask, type PetEmotion } from '../../store/petStore';
 import { getTerminalLabel, useTerminalRegistryVersion } from '../../utils/terminalRegistry';
 
 // ── Animation constants ──

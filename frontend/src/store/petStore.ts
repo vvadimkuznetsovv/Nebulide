@@ -287,15 +287,17 @@ export const usePetStore = create<PetStoreState>((set, get) => ({
 
 // ── Module-level timers (survive component unmounts) ──
 
-let taskTimer: ReturnType<typeof setInterval> | null = null;
-let emotionTimer: ReturnType<typeof setInterval> | null = null;
-let walkTimer: ReturnType<typeof setTimeout> | null = null;
+const timers: {
+  task: ReturnType<typeof setInterval> | null;
+  emotion: ReturnType<typeof setInterval> | null;
+  walk: ReturnType<typeof setTimeout> | null;
+} = { task: null, emotion: null, walk: null };
 
 function startTimers() {
-  if (taskTimer) return; // already running
+  if (timers.task) return; // already running
 
   // Task state transitions (every 2s)
-  taskTimer = setInterval(() => {
+  timers.task = setInterval(() => {
     const { pets } = usePetStore.getState();
     const now = Date.now();
     let changed = false;
@@ -332,7 +334,7 @@ function startTimers() {
   }, 2000);
 
   // Emotion decay (every 60s)
-  emotionTimer = setInterval(() => {
+  timers.emotion = setInterval(() => {
     const { pets } = usePetStore.getState();
     const next: Record<string, IndividualPetState> = {};
     for (const [id, pet] of Object.entries(pets)) {
@@ -348,7 +350,7 @@ function startTimers() {
   // Random walk (every 8-15s)
   function scheduleWalk() {
     const delay = 8000 + Math.random() * 7000;
-    walkTimer = setTimeout(() => {
+    timers.walk = setTimeout(() => {
       const { pets } = usePetStore.getState();
       const ids = Object.keys(pets);
       if (ids.length === 0) { scheduleWalk(); return; }

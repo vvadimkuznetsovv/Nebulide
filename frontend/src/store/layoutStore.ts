@@ -26,7 +26,7 @@ import {
 } from './layoutUtils';
 import { useWorkspaceStore } from './workspaceStore';
 import { destroyTerminalSession } from '../components/terminal/Terminal';
-import { registerTerminal, unregisterTerminal } from '../utils/terminalRegistry';
+import { registerTerminal } from '../utils/terminalRegistry';
 
 export type { PanelId };
 export type { LayoutNode, PanelNode, GroupNode } from './layoutUtils';
