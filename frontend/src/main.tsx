@@ -4,6 +4,9 @@ import SwipeableToaster from './components/SwipeableToaster'
 import './index.css'
 import App from './App'
 import { loadTheme } from './utils/theme'
+// Eagerly import petStore so it subscribes to activity bus before any terminal connects.
+// Without this, terminal_connect events fired before the Pet panel is first shown are missed.
+import './store/petStore'
 
 loadTheme();
 

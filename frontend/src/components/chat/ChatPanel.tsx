@@ -26,12 +26,9 @@ function formatSize(mb: number): string {
   return `${mb.toFixed(1)}MB`;
 }
 
-// Friendly name: "-home-nebulide-workspace" → "workspace", keep short
+// Display name: show full slug (tree already shows hierarchy)
 function projectDisplayName(slug: string): string {
-  // Strip leading dash, split by last dash group to get last segment
-  const clean = slug.replace(/^-+/, '');
-  const parts = clean.split('-');
-  return parts[parts.length - 1] || slug;
+  return slug;
 }
 
 function sessionDisplayName(session: { first_message?: string; slug?: string; session_id: string }): string {
@@ -224,13 +221,13 @@ export default function ChatPanel(_props: ChatPanelProps) {
 
     if (selectedFolder) {
       if (includeSubfolders) {
-        // Same logic as backend matchesWorkspace: exact match or prefix + '-'
         list = list.filter(s =>
           s.project === selectedFolder || s.project.startsWith(selectedFolder + '-')
         );
       } else {
         list = list.filter(s => s.project === selectedFolder);
       }
+      console.log('[ChatPanel] filter:', selectedFolder, 'includeSubfolders:', includeSubfolders, 'result:', list.length, 'projects:', [...new Set(list.map(s => s.project))]);
     }
 
     if (!searchQuery || searchResults !== null) return list;

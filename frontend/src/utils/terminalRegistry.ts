@@ -9,8 +9,12 @@ import { create } from 'zustand';
 const registry = new Map<string, number>();
 const usedNumbers = new Set<number>();
 
+// Reserve 1 for the default terminal immediately
+registry.set('default', 1);
+usedNumbers.add(1);
+
 function nextFreeNumber(): number {
-  let n = 1;
+  let n = 2; // 1 is reserved for default
   while (usedNumbers.has(n)) n++;
   return n;
 }
