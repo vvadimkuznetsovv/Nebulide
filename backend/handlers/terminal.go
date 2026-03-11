@@ -113,6 +113,14 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 		extraEnv["TG_SEND_TOKEN"] = tgToken
 	}
 
+	// Generate NEBULIDE_HOOK_TOKEN — scoped JWT for Claude Code hooks
+	hookToken, hookErr := utils.GenerateScopedToken(h.cfg.JWTSecret, claims.UserID, claims.Username, "claude-hook", 30*24*time.Hour)
+	if hookErr == nil {
+		extraEnv["NEBULIDE_HOOK_TOKEN"] = hookToken
+	}
+	extraEnv["NEBULIDE_INSTANCE_ID"] = instanceID
+	extraEnv["NEBULIDE_HOOK_URL"] = "http://localhost:" + h.cfg.Port + "/api/hooks/claude"
+
 	// Reuse existing shell or create new one.
 	// Shell lives independently of WebSocket — survives reconnections.
 	log.Printf("[Terminal] calling GetOrCreate key=%s dir=%s sandboxed=%v user=%s", sessionKey, workDir, sandboxed, claims.Username)

@@ -63,7 +63,6 @@ export default function TamagotchiPanel() {
   const setViewMode = usePetStore((s) => s.setViewMode);
   const tapPet = usePetStore((s) => s.tap);
 
-  // Subscribe to registry version for re-renders when terminal labels change
   useTerminalRegistryVersion();
 
   const sceneRef = useRef<HTMLDivElement>(null);
@@ -273,7 +272,7 @@ export default function TamagotchiPanel() {
         <div className="tamagotchi-grass" />
 
         {!hasPets && (
-          <div className="tamagotchi-empty">Open a terminal</div>
+          <div className="tamagotchi-empty">Start Claude session</div>
         )}
 
         {visiblePetIds.map((id) => {

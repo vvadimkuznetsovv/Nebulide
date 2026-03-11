@@ -68,6 +68,7 @@ func main() {
 	workspaceSessionsHandler := handlers.NewWorkspaceSessionsHandler(cfg)
 	claudeSessionsHandler := handlers.NewClaudeSessionsHandler(cfg)
 	syncHandler := handlers.NewSyncHandler(cfg, presenceService)
+	hookHandler := handlers.NewHookHandler(cfg)
 
 	// Router
 	r := gin.Default()
@@ -176,6 +177,9 @@ func main() {
 		telegramHandler := handlers.NewTelegramHandler(cfg, telegramBot)
 		r.POST("/api/telegram/send", telegramHandler.Send)
 	}
+
+	// Claude Code hooks (own auth — scoped claude-hook tokens)
+	r.POST("/api/hooks/claude", hookHandler.HandleClaudeHook)
 
 	// WebSocket routes (auth via query param)
 	r.GET("/ws/chat/:id", chatHandler.HandleWebSocket)

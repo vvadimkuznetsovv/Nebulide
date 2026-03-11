@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { onActivity, type ActivityEvent } from '../utils/activityBus';
+import { analyzeSentiment } from '../utils/sentimentAnalyzer';
 
 // ── Task & Emotion types (from notchi) ──
 
@@ -42,7 +43,6 @@ const SPRITE_SHEETS: Record<string, boolean> = {
 export function getSpriteSheet(task: PetTask, emotion: PetEmotion): string {
   const exact = `${task}_${emotion}`;
   if (SPRITE_SHEETS[exact]) return `/sprites/${exact}.png`;
-  // Fallback: sob → sad → neutral
   if (emotion === 'sob') {
     const sad = `${task}_sad`;
     if (SPRITE_SHEETS[sad]) return `/sprites/${sad}.png`;
@@ -66,6 +66,13 @@ const INTER_EMOTION_DECAY = 0.9;
 const EMOTION_DECAY_RATE = 0.92;
 const EMOTION_DECAY_INTERVAL = 60_000; // 60s
 
+// ── Helpers: is this a Claude terminal? ──
+
+/** Claude terminals launched from ChatPanel have instanceId starting with "claude-" */
+function isClaudeTerminal(instanceId: string): boolean {
+  return instanceId.startsWith('claude-');
+}
+
 // ── Individual pet state ──
 
 export interface IndividualPetState {
@@ -77,7 +84,6 @@ export interface IndividualPetState {
   walkDirection: 1 | -1;
   lastActivity: number;
   claudeStreaming: boolean;
-  claudeEndedAt: number;
   speechBubble: string | null;
 }
 
@@ -91,7 +97,6 @@ function createDefaultPetState(): IndividualPetState {
     walkDirection: 1,
     lastActivity: Date.now(),
     claudeStreaming: false,
-    claudeEndedAt: 0,
     speechBubble: null,
   };
 }
@@ -125,29 +130,27 @@ const SPEECH_PHRASES: Record<PetTask, string[]> = {
   waiting: ['Waiting...', 'Your turn!', 'Ready?', 'Hello?'],
 };
 
-// Emotion-specific speech overrides
 const EMOTION_PHRASES: Partial<Record<PetEmotion, string[]>> = {
   sad: ['Miss you...', '*sigh*', 'Lonely...', 'Come back?'],
   sob: ['*crying*', 'So alone...', 'Please...', 'Where are you?'],
 };
 
-// Speech bubble timers per pet (module-level to survive re-renders)
 const speechTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 // ── Store ──
 
 interface PetStoreState {
+  // Pets keyed by terminal instanceId (only Claude terminals: "claude-*")
   pets: Record<string, IndividualPetState>;
   selectedPetId: string | null;
   viewMode: 'single' | 'all';
 
   processEvent: (event: ActivityEvent) => void;
-  tap: (instanceId: string) => void;
-  selectPet: (instanceId: string) => void;
+  tap: (id: string) => void;
+  selectPet: (id: string) => void;
   setViewMode: (mode: 'single' | 'all') => void;
 }
 
-/** Update a single pet inside the pets Record, return new pets object. */
 function updatePet(
   pets: Record<string, IndividualPetState>,
   id: string,
@@ -158,7 +161,6 @@ function updatePet(
   return { ...pets, [id]: { ...pet, ...patch } };
 }
 
-/** Apply a patch to ALL pets. */
 function updateAllPets(
   pets: Record<string, IndividualPetState>,
   patchFn: (pet: IndividualPetState) => Partial<IndividualPetState>,
@@ -181,59 +183,72 @@ export const usePetStore = create<PetStoreState>((set, get) => ({
     const state = get();
 
     switch (event.type) {
+      // ── Terminal lifecycle — only create pets for Claude terminals ──
+
       case 'terminal_connect': {
         const id = event.instanceId;
-        console.log('[PetStore] terminal_connect:', id, 'existing:', !!state.pets[id], 'totalPets:', Object.keys(state.pets).length);
+        if (!isClaudeTerminal(id)) return; // skip non-Claude terminals
         if (state.pets[id]) return; // already exists
         const newPet = createDefaultPetState();
         const newPets = { ...state.pets, [id]: newPet };
         const selected = state.selectedPetId ?? id;
         set({ pets: newPets, selectedPetId: selected });
-        console.log('[PetStore] pet created:', id, 'totalPets:', Object.keys(newPets).length);
+        console.log('[PetStore] Claude terminal connected, pet created:', id);
         break;
       }
 
       case 'terminal_disconnect': {
         const id = event.instanceId;
-        console.log('[PetStore] terminal_disconnect:', id, 'existing:', !!state.pets[id]);
-        if (!state.pets[id]) return;
+        if (!state.pets[id]) return; // not a pet terminal
         const { [id]: _, ...rest } = state.pets;
-        // Clear speech timer
         const timer = speechTimers.get(id);
         if (timer) { clearTimeout(timer); speechTimers.delete(id); }
-        // Fix selection
-        const ids = Object.keys(rest);
+        // Remaining pets get sad when a companion leaves
+        const sadRest: Record<string, IndividualPetState> = {};
+        for (const [rid, rpet] of Object.entries(rest)) {
+          const scores = addEmotion(rpet.emotionScores, 'sad', 0.2);
+          sadRest[rid] = { ...rpet, emotionScores: scores, emotion: resolveEmotion(scores) };
+        }
+        const ids = Object.keys(sadRest);
         let selected = state.selectedPetId;
         if (selected === id) selected = ids[0] ?? null;
-        set({ pets: rest, selectedPetId: selected });
+        set({ pets: sadRest, selectedPetId: selected });
+        console.log('[PetStore] Claude terminal disconnected, pet removed:', id);
         break;
       }
 
+      // ── Terminal activity — only affects existing pets (Claude terminals) ──
+
       case 'terminal_input': {
-        // User typing — small happy boost (they're engaging!), update lastActivity.
-        // Don't change task — 'working' only on sustained streaming.
         const id = event.instanceId;
         const pet = state.pets[id];
-        if (pet) {
-          const scores = addEmotion(pet.emotionScores, 'happy', 0.08);
-          set({ pets: updatePet(state.pets, id, {
-            lastActivity: now,
-            emotionScores: scores,
-            emotion: resolveEmotion(scores),
-          }) });
+        if (!pet) return;
+        // No emotion boost here — emotions come from terminal_prompt_submit (sentiment)
+        const patch: Partial<IndividualPetState> = { lastActivity: now };
+        if (pet.task === 'sleeping' || pet.task === 'waiting') {
+          patch.task = 'idle';
+        }
+        set({ pets: updatePet(state.pets, id, patch) });
+        break;
+      }
+
+      case 'terminal_data': {
+        const id = event.instanceId;
+        const pet = state.pets[id];
+        if (!pet || event.byteCount < 50) break;
+        // Task change → always update
+        if (pet.task === 'idle' || pet.task === 'waiting' || pet.task === 'sleeping') {
+          set({ pets: updatePet(state.pets, id, { task: 'working', lastActivity: now }) });
+        } else if (now - pet.lastActivity > 2000) {
+          // Already working — throttle lastActivity updates (timer runs every 2s)
+          set({ pets: updatePet(state.pets, id, { lastActivity: now }) });
         }
         break;
       }
-      case 'terminal_data': {
-        // Terminal output (shell prompt, cursor, etc.) — ignore for pet state.
-        // Only meaningful events (input, streaming, claude, file_save) update lastActivity.
-        // This prevents background terminal noise from keeping pet stuck in "working".
-        break;
-      }
 
-      // Sustained terminal output (e.g. Claude CLI streaming in terminal)
       case 'terminal_streaming_start': {
         const id = event.instanceId;
+        if (!state.pets[id]) return;
         set({ pets: updatePet(state.pets, id, {
           task: 'working',
           claudeStreaming: true,
@@ -243,25 +258,58 @@ export const usePetStore = create<PetStoreState>((set, get) => ({
       }
 
       case 'terminal_streaming_end': {
-        // Sustained terminal output ended (could be npm install, build, etc.)
-        // Don't set claudeEndedAt — only claude_stream_end should trigger waiting.
         const id = event.instanceId;
         const pet = state.pets[id];
-        if (pet) {
-          const scores = addEmotion(pet.emotionScores, 'happy', 0.15);
-          set({ pets: updatePet(state.pets, id, {
-            claudeStreaming: false,
-            lastActivity: now,
-            emotionScores: scores,
-            emotion: resolveEmotion(scores),
-          }) });
-        }
+        if (!pet) return;
+        const scores = addEmotion(pet.emotionScores, 'happy', 0.15);
+        set({ pets: updatePet(state.pets, id, {
+          task: 'idle',
+          claudeStreaming: false,
+          lastActivity: now,
+          emotionScores: scores,
+          emotion: resolveEmotion(scores),
+        }) });
         break;
       }
 
+      // ── User prompt sentiment → emotion (like notchi UserPromptSubmit) ──
+
+      case 'terminal_prompt_submit': {
+        const id = event.instanceId;
+        const pet = state.pets[id];
+        if (!pet) break;
+
+        const result = analyzeSentiment(event.text);
+        console.log(`[PetStore] sentiment: "${event.text.slice(0, 40)}" → ${result.emotion} (${result.intensity.toFixed(2)})`);
+
+        let newScores: { happy: number; sad: number };
+        if (result.emotion === 'neutral') {
+          // Neutral counter-decay (notchi: neutralCounterDecay = 0.85)
+          newScores = {
+            happy: pet.emotionScores.happy * 0.85,
+            sad: pet.emotionScores.sad * 0.85,
+          };
+        } else {
+          newScores = addEmotion(pet.emotionScores, result.emotion, result.intensity);
+        }
+
+        // User submitted prompt → working (before Claude even responds)
+        set({ pets: updatePet(state.pets, id, {
+          task: 'working',
+          lastActivity: now,
+          emotionScores: newScores,
+          emotion: resolveEmotion(newScores),
+        }) });
+        break;
+      }
+
+      // ── Claude WebSocket chat events (DEAD CODE) ──
+      // ChatPanel запускает Claude в терминалах, не через WebSocket chat API.
+      // Оставлено на случай перехода на WS chat. Влияет на ALL pets.
+
       case 'claude_stream_start':
       case 'claude_stream_delta': {
-        // Global: all pets become working + streaming
+        if (Object.keys(state.pets).length === 0) break;
         const newPets = updateAllPets(state.pets, () => ({
           task: 'working' as PetTask,
           claudeStreaming: true,
@@ -272,11 +320,11 @@ export const usePetStore = create<PetStoreState>((set, get) => ({
       }
 
       case 'claude_stream_end': {
+        if (Object.keys(state.pets).length === 0) break;
         const newPets = updateAllPets(state.pets, (pet) => {
           const scores = addEmotion(pet.emotionScores, 'happy', 0.3);
           return {
             claudeStreaming: false,
-            claudeEndedAt: now,
             lastActivity: now,
             emotionScores: scores,
             emotion: resolveEmotion(scores),
@@ -287,7 +335,7 @@ export const usePetStore = create<PetStoreState>((set, get) => ({
       }
 
       case 'claude_error': {
-        // Claude errored — all pets get a sadness boost
+        if (Object.keys(state.pets).length === 0) break;
         const newPets = updateAllPets(state.pets, (pet) => {
           const scores = addEmotion(pet.emotionScores, 'sad', 0.3);
           return {
@@ -300,7 +348,98 @@ export const usePetStore = create<PetStoreState>((set, get) => ({
         break;
       }
 
+      // ── Claude Code hooks (via backend → Redis → sync WS) ──
+      // Maps real Claude Code events to pet task/emotion transitions (like notchi).
+
+      case 'claude_hook': {
+        const id = event.instanceId;
+        const pet = state.pets[id];
+
+        switch (event.event) {
+          case 'UserPromptSubmit': {
+            // User submitted prompt → working + sentiment analysis
+            if (pet) {
+              const result = analyzeSentiment(event.userPrompt || '');
+              let newScores: { happy: number; sad: number };
+              if (result.emotion === 'neutral') {
+                newScores = { happy: pet.emotionScores.happy * 0.85, sad: pet.emotionScores.sad * 0.85 };
+              } else {
+                newScores = addEmotion(pet.emotionScores, result.emotion, result.intensity);
+              }
+              set({ pets: updatePet(state.pets, id, {
+                task: 'working', lastActivity: now,
+                emotionScores: newScores, emotion: resolveEmotion(newScores),
+              }) });
+            }
+            break;
+          }
+          case 'PreCompact': {
+            // Claude auto-compacting context → compacting task
+            if (pet) {
+              set({ pets: updatePet(state.pets, id, { task: 'compacting', lastActivity: now }) });
+            }
+            break;
+          }
+          case 'PreToolUse': {
+            // Claude about to use a tool
+            if (pet) {
+              if (event.tool === 'AskUserQuestion') {
+                // Waiting for user input
+                set({ pets: updatePet(state.pets, id, { task: 'waiting', lastActivity: now }) });
+              } else {
+                set({ pets: updatePet(state.pets, id, { task: 'working', lastActivity: now }) });
+              }
+            }
+            break;
+          }
+          case 'PermissionRequest': {
+            // Claude waiting for permission → waiting
+            if (pet) {
+              set({ pets: updatePet(state.pets, id, { task: 'waiting', lastActivity: now }) });
+            }
+            break;
+          }
+          case 'PostToolUse': {
+            // Tool finished → back to working
+            if (pet) {
+              set({ pets: updatePet(state.pets, id, { task: 'working', lastActivity: now }) });
+            }
+            break;
+          }
+          case 'Stop':
+          case 'SubagentStop': {
+            // Claude finished → idle
+            if (pet) {
+              const scores = addEmotion(pet.emotionScores, 'happy', 0.15);
+              set({ pets: updatePet(state.pets, id, {
+                task: 'idle', claudeStreaming: false, lastActivity: now,
+                emotionScores: scores, emotion: resolveEmotion(scores),
+              }) });
+            }
+            break;
+          }
+          case 'SessionStart': {
+            // New Claude session started
+            if (pet) {
+              set({ pets: updatePet(state.pets, id, { task: 'idle', lastActivity: now }) });
+            }
+            break;
+          }
+          case 'SessionEnd': {
+            // Claude session ended → idle
+            if (pet) {
+              set({ pets: updatePet(state.pets, id, { task: 'idle', claudeStreaming: false, lastActivity: now }) });
+            }
+            break;
+          }
+        }
+        break;
+      }
+
+      // ── Global events ──
+
       case 'file_save': {
+        if (Object.keys(state.pets).length === 0) break;
         const newPets = updateAllPets(state.pets, (pet) => {
           const scores = addEmotion(pet.emotionScores, 'happy', 0.4);
           return {
@@ -315,37 +454,34 @@ export const usePetStore = create<PetStoreState>((set, get) => ({
     }
   },
 
-  tap: (instanceId: string) => {
+  tap: (id: string) => {
     const state = get();
-    const pet = state.pets[instanceId];
+    const pet = state.pets[id];
     if (!pet) return;
     const scores = addEmotion(pet.emotionScores, 'happy', 0.2);
-    // Pick speech: emotion-specific phrases take priority
     const emotionList = EMOTION_PHRASES[pet.emotion];
     const list = emotionList || SPEECH_PHRASES[pet.task];
     const bubble = list[Math.floor(Math.random() * list.length)];
-    set({ pets: updatePet(state.pets, instanceId, {
+    set({ pets: updatePet(state.pets, id, {
       emotionScores: scores,
       emotion: resolveEmotion(scores),
       speechBubble: bubble,
     }) });
-    // Clear previous timer for this pet
-    const prev = speechTimers.get(instanceId);
+    const prev = speechTimers.get(id);
     if (prev) clearTimeout(prev);
-    speechTimers.set(instanceId, setTimeout(() => {
-      speechTimers.delete(instanceId);
+    speechTimers.set(id, setTimeout(() => {
+      speechTimers.delete(id);
       const s = usePetStore.getState();
-      usePetStore.setState({ pets: updatePet(s.pets, instanceId, { speechBubble: null }) });
+      usePetStore.setState({ pets: updatePet(s.pets, id, { speechBubble: null }) });
     }, 2000));
   },
 
-  selectPet: (instanceId: string) => {
-    set({ selectedPetId: instanceId });
+  selectPet: (id: string) => {
+    set({ selectedPetId: id });
   },
 
   setViewMode: (mode: 'single' | 'all') => {
     const state = get();
-    // When switching to single and nothing selected, pick first
     if (mode === 'single' && !state.selectedPetId) {
       const ids = Object.keys(state.pets);
       set({ viewMode: mode, selectedPetId: ids[0] ?? null });
@@ -355,7 +491,7 @@ export const usePetStore = create<PetStoreState>((set, get) => ({
   },
 }));
 
-// ── Module-level timers (survive component unmounts) ──
+// ── Module-level timers ──
 
 const timers: {
   task: ReturnType<typeof setInterval> | null;
@@ -364,7 +500,7 @@ const timers: {
 } = { task: null, emotion: null, walk: null };
 
 function startTimers() {
-  if (timers.task) return; // already running
+  if (timers.task) return;
 
   // Task state transitions + loneliness (every 2s)
   timers.task = setInterval(() => {
@@ -380,48 +516,33 @@ function startTimers() {
       let scoresChanged = false;
 
       if (!pet.claudeStreaming) {
-        // ── Task transitions ──
+        // Task transitions: working → idle (10s) → waiting (30s) → sleeping (5min)
         if (elapsed >= SLEEP_TIMEOUT) {
           if (pet.task !== 'sleeping') newTask = 'sleeping';
-        } else if (pet.claudeEndedAt > 0) {
-          const sinceEnd = now - pet.claudeEndedAt;
-          if (sinceEnd >= WAITING_TIMEOUT && elapsed >= IDLE_TIMEOUT && pet.task !== 'waiting') {
-            newTask = 'waiting';
-          } else if (elapsed >= IDLE_TIMEOUT && pet.task === 'working') {
-            newTask = 'idle';
-          }
+        } else if (elapsed >= WAITING_TIMEOUT && pet.task === 'idle') {
+          newTask = 'waiting';
         } else if (elapsed >= IDLE_TIMEOUT && pet.task === 'working') {
           newTask = 'idle';
         }
 
-        // ── Loneliness: build sadness when inactive ──
-        // After LONELY_START (1min): slow sadness (+0.015/2s → sad in ~60s)
-        // After LONELY_DEEP (3min): faster sadness (+0.03/2s → sob in ~30s)
+        // Loneliness
         if (elapsed >= LONELY_DEEP) {
-          newScores = {
-            happy: newScores.happy * 0.95,
-            sad: Math.min(1, newScores.sad + 0.03),
-          };
+          newScores = { happy: newScores.happy * 0.95, sad: Math.min(1, newScores.sad + 0.03) };
           scoresChanged = true;
         } else if (elapsed >= LONELY_START) {
-          newScores = {
-            happy: newScores.happy * 0.97,
-            sad: Math.min(1, newScores.sad + 0.015),
-          };
+          newScores = { happy: newScores.happy * 0.97, sad: Math.min(1, newScores.sad + 0.015) };
           scoresChanged = true;
         }
       }
 
       if (newTask !== pet.task || scoresChanged) {
         if (newTask !== pet.task) {
-          console.log(`[PetStore] ${id}: ${pet.task} → ${newTask} (elapsed=${Math.round(elapsed/1000)}s, streaming=${pet.claudeStreaming}, endedAt=${pet.claudeEndedAt > 0 ? Math.round((now - pet.claudeEndedAt)/1000) + 's ago' : 'never'})`);
+          console.log(`[PetStore] ${id}: ${pet.task} → ${newTask} (elapsed=${Math.round(elapsed / 1000)}s)`);
         }
         next[id] = {
           ...pet,
           task: newTask,
-          ...(scoresChanged
-            ? { emotionScores: newScores, emotion: resolveEmotion(newScores) }
-            : {}),
+          ...(scoresChanged ? { emotionScores: newScores, emotion: resolveEmotion(newScores) } : {}),
         };
         changed = true;
       } else {
@@ -453,11 +574,9 @@ function startTimers() {
       const { pets } = usePetStore.getState();
       const ids = Object.keys(pets);
       if (ids.length === 0) { scheduleWalk(); return; }
-
-      // Pick a random pet to walk
       const id = ids[Math.floor(Math.random() * ids.length)];
       const pet = pets[id];
-      if (pet && pet.task !== 'sleeping' && pet.emotion !== 'sob') {
+      if (pet && pet.task !== 'sleeping' && pet.task !== 'waiting' && pet.emotion !== 'sob') {
         const target = Math.random();
         const dir = target > pet.walkX ? 1 : -1;
         usePetStore.setState({

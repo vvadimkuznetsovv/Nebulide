@@ -7,6 +7,7 @@ import { getWorkspaceSessions } from '../api/workspaceSessions';
 import { getDeviceId, detectDeviceType } from '../utils/deviceId';
 import { setSyncWs } from '../utils/syncBridge';
 import { disconnectAllTerminalSessions, reconnectAllTerminalSessions } from '../components/terminal/Terminal';
+import { emitActivity } from '../utils/activityBus';
 
 // Re-export for backwards compat (store imports from syncBridge directly now)
 export { sendSyncMessage } from '../utils/syncBridge';
@@ -133,6 +134,20 @@ export function useSyncWS() {
                 // Disconnect terminal WebSockets (PTY stays alive for new device)
                 disconnectAllTerminalSessions();
                 store.setLockState(msg.session_id, 'blocked', msg.locked_by);
+              }
+              break;
+
+            case 'claude_hook':
+              // Forward Claude Code hook events to activityBus → petStore
+              if (msg.event && msg.instance_id) {
+                emitActivity({
+                  type: 'claude_hook',
+                  event: msg.event,
+                  instanceId: msg.instance_id,
+                  tool: msg.tool,
+                  userPrompt: msg.user_prompt,
+                  status: msg.status,
+                });
               }
               break;
 

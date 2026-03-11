@@ -52,9 +52,9 @@ export function useChat(sessionId: string | null) {
         setIsStreaming(true);
         if (!streamStartedRef.current) {
           streamStartedRef.current = true;
-          emitActivity({ type: 'claude_stream_start' });
+          emitActivity({ type: 'claude_stream_start', sessionId: sessionId || '' });
         }
-        emitActivity({ type: 'claude_stream_delta' });
+        emitActivity({ type: 'claude_stream_delta', sessionId: sessionId || '' });
         // Accumulate streamed content
         const line = typeof event.data === 'string' ? event.data : JSON.stringify(event.data);
         streamContentRef.current += line + '\n';
@@ -82,7 +82,7 @@ export function useChat(sessionId: string | null) {
         cancelFlush();
         streamStartedRef.current = false;
         setIsStreaming(false);
-        emitActivity({ type: 'claude_stream_end' });
+        emitActivity({ type: 'claude_stream_end', sessionId: sessionId || '' });
         if (streamContentRef.current) {
           const assistantMsg: Message = {
             id: crypto.randomUUID(),
@@ -102,8 +102,8 @@ export function useChat(sessionId: string | null) {
         cancelFlush();
         streamStartedRef.current = false;
         setIsStreaming(false);
-        emitActivity({ type: 'claude_stream_end' });
-        emitActivity({ type: 'claude_error' });
+        emitActivity({ type: 'claude_stream_end', sessionId: sessionId || '' });
+        emitActivity({ type: 'claude_error', sessionId: sessionId || '' });
         setStreamContent('');
         streamContentRef.current = '';
         console.error('Chat error:', event.message);

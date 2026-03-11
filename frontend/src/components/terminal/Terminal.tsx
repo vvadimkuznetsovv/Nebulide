@@ -63,6 +63,8 @@ interface TermSession {
   streamActive: boolean;
   /** Timer to detect end of sustained output */
   streamEndTimer: number;
+  /** Accumulated user input for Claude terminals (prompt sentiment analysis) */
+  inputBuffer: string;
 }
 
 const sessions = new Map<string, TermSession>();
@@ -159,6 +161,7 @@ function createXterm(instanceId: string): TermSession {
     streamStart: 0,
     streamActive: false,
     streamEndTimer: 0,
+    inputBuffer: '',
   };
 
   const xterm = new XTerm({
@@ -205,6 +208,25 @@ function createXterm(instanceId: string): TermSession {
     if (session.ws?.readyState === WebSocket.OPEN) {
       session.ws.send(new TextEncoder().encode(data));
       emitActivity({ type: 'terminal_input', instanceId });
+
+      // Accumulate input for Claude terminals → sentiment analysis on prompt submit
+      if (instanceId.startsWith('claude-')) {
+        for (const ch of data) {
+          if (ch === '\r' || ch === '\n') {
+            const text = session.inputBuffer.trim();
+            if (text.length > 2) {
+              emitActivity({ type: 'terminal_prompt_submit', instanceId, text });
+            }
+            session.inputBuffer = '';
+          } else if (ch === '\x7f' || ch === '\b') {
+            session.inputBuffer = session.inputBuffer.slice(0, -1);
+          } else if (ch === '\x03') {
+            session.inputBuffer = '';
+          } else if (ch.charCodeAt(0) >= 32) {
+            session.inputBuffer += ch;
+          }
+        }
+      }
     }
   });
 
