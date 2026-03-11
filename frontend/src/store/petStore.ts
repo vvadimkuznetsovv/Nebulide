@@ -186,14 +186,8 @@ export const usePetStore = create<PetStoreState>((set, get) => ({
       // ── Terminal lifecycle — only create pets for Claude terminals ──
 
       case 'terminal_connect': {
-        const id = event.instanceId;
-        if (!isClaudeTerminal(id)) return; // skip non-Claude terminals
-        if (state.pets[id]) return; // already exists
-        const newPet = createDefaultPetState();
-        const newPets = { ...state.pets, [id]: newPet };
-        const selected = state.selectedPetId ?? id;
-        set({ pets: newPets, selectedPetId: selected });
-        console.log('[PetStore] Claude terminal connected, pet created:', id);
+        // Pet is NOT created here — it's created lazily on first terminal_data ≥50 bytes.
+        // This avoids ghost pets when terminal reconnects to an empty bash (Claude not running).
         break;
       }
 
@@ -234,8 +228,19 @@ export const usePetStore = create<PetStoreState>((set, get) => ({
 
       case 'terminal_data': {
         const id = event.instanceId;
+        if (event.byteCount < 50) break;
+        // Lazy pet creation — only when Claude is actually producing output
+        if (!state.pets[id]) {
+          if (!isClaudeTerminal(id)) break;
+          const newPet = createDefaultPetState();
+          newPet.task = 'working';
+          newPet.lastActivity = now;
+          const selected = state.selectedPetId ?? id;
+          set({ pets: { ...state.pets, [id]: newPet }, selectedPetId: selected });
+          console.log('[PetStore] Claude active, pet created:', id);
+          break;
+        }
         const pet = state.pets[id];
-        if (!pet || event.byteCount < 50) break;
         // Task change → always update
         if (pet.task === 'idle' || pet.task === 'waiting' || pet.task === 'sleeping') {
           set({ pets: updatePet(state.pets, id, { task: 'working', lastActivity: now }) });
@@ -276,7 +281,17 @@ export const usePetStore = create<PetStoreState>((set, get) => ({
 
       case 'terminal_prompt_submit': {
         const id = event.instanceId;
-        const pet = state.pets[id];
+        // Lazy pet creation — user typed a prompt in Claude terminal
+        if (!state.pets[id]) {
+          if (!isClaudeTerminal(id)) break;
+          const newPet = createDefaultPetState();
+          newPet.task = 'working';
+          newPet.lastActivity = now;
+          const selected = state.selectedPetId ?? id;
+          set({ pets: { ...state.pets, [id]: newPet }, selectedPetId: selected });
+          console.log('[PetStore] Claude prompt submitted, pet created:', id);
+        }
+        const pet = state.pets[id] ?? get().pets[id];
         if (!pet) break;
 
         const result = analyzeSentiment(event.text);

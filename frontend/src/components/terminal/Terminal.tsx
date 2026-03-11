@@ -381,6 +381,7 @@ async function connectWs(instanceId: string): Promise<void> {
     } else {
       session.xterm.write(_red('[Disconnected — max retries reached]') + '\r\n');
       session.reconnectAttempts = 0;
+      emitActivity({ type: 'terminal_disconnect', instanceId });
     }
     session.notifyRerender?.();
   };
