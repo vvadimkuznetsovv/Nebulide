@@ -308,7 +308,12 @@ func (h *AuthHandler) Me(c *gin.Context) {
 		"is_admin":      user.IsAdmin,
 		"telegram_id":   user.TelegramID,
 		"shared_dir":    h.cfg.SharedDir,
-		"workspace_dir": h.cfg.GetUserWorkspaceDir(user.Username),
+		"workspace_dir": func() string {
+			if user.IsAdmin {
+				return h.cfg.ClaudeWorkingDir
+			}
+			return h.cfg.GetUserWorkspaceDir(user.Username)
+		}(),
 	})
 }
 
