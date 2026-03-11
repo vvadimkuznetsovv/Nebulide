@@ -26,7 +26,7 @@ import {
 } from './layoutUtils';
 import { useWorkspaceStore } from './workspaceStore';
 import { destroyTerminalSession, getActiveTerminalInstanceIds } from '../components/terminal/Terminal';
-import { registerTerminal, resetTerminalRegistry, getRegistrySnapshot, setPendingNumbers } from '../utils/terminalRegistry';
+import { registerTerminal, resetTerminalRegistry, getRegistrySnapshot, setPendingNumbers, isTerminalRecentlyClosed } from '../utils/terminalRegistry';
 
 export type { PanelId };
 export type { LayoutNode, PanelNode, GroupNode } from './layoutUtils';
@@ -596,6 +596,19 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
         const visibleBase = mobileOrder.filter((p) => visibility[p]);
         if (visibleBase.length > 0 && (mobilePanels.length === 0 || !mobilePanels.some((p) => visibility[p]))) {
           mobilePanels = visibleBase.slice(0, 2);
+        }
+      }
+
+      // Don't resurrect recently-closed terminals from stale snapshots
+      for (const pid of getAllPanelIds(layout)) {
+        let instanceId: string | null = null;
+        if (pid === 'terminal') instanceId = 'default';
+        else if (isDetachedTerminal(pid)) instanceId = getDetachedTerminalId(pid);
+        if (instanceId && isTerminalRecentlyClosed(instanceId)) {
+          visibility[pid as keyof typeof visibility] = false;
+          // Remove from layout tree entirely
+          const pruned = removePanelFromTree(layout, pid);
+          if (pruned) layout = pruned;
         }
       }
 

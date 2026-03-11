@@ -13,6 +13,11 @@ const usedNumbers = new Set<number>();
 /** Pending numbers from snapshot — used as hints when terminals register on mount. */
 let pendingNumbers: Record<string, number> = {};
 
+/** Recently closed terminals — prevents stale snapshot restore from resurrecting them.
+ *  Map<instanceId, closeTimestamp>. Entries expire after CLOSED_EXPIRY_MS. */
+const closedTerminals = new Map<string, number>();
+const CLOSED_EXPIRY_MS = 10_000;
+
 function nextFreeNumber(): number {
   let n = 1;
   while (usedNumbers.has(n)) n++;
@@ -88,6 +93,27 @@ export function resetTerminalRegistry(): void {
 /** Store number hints from snapshot — applied lazily when terminals mount. */
 export function setPendingNumbers(numbers: Record<string, number>): void {
   pendingNumbers = { ...numbers };
+}
+
+/** Mark a terminal as recently closed — survives resetTerminalRegistry(). */
+export function markTerminalClosed(instanceId: string): void {
+  closedTerminals.set(instanceId, Date.now());
+}
+
+/** Check if a terminal was closed within the last CLOSED_EXPIRY_MS. */
+export function isTerminalRecentlyClosed(instanceId: string): boolean {
+  const ts = closedTerminals.get(instanceId);
+  if (!ts) return false;
+  if (Date.now() - ts > CLOSED_EXPIRY_MS) {
+    closedTerminals.delete(instanceId);
+    return false;
+  }
+  return true;
+}
+
+/** Clear closed-terminal tracking (on workspace switch). */
+export function clearClosedTerminals(): void {
+  closedTerminals.clear();
 }
 
 /** Get a snapshot of the registry for persistence (instanceId → number). */

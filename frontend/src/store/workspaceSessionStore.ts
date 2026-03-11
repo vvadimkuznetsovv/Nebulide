@@ -13,6 +13,7 @@ import { sendSyncMessage } from '../utils/syncBridge';
 import { useWorkspaceStore, type WorkspaceSnapshot } from './workspaceStore';
 import { useLayoutStore, type LayoutSnapshot } from './layoutStore';
 import { destroyAllTerminalSessions, disconnectAllTerminalSessions } from '../components/terminal/Terminal';
+import { clearClosedTerminals } from '../utils/terminalRegistry';
 import { syncThemeFromServer } from '../utils/theme';
 import toast from 'react-hot-toast';
 
@@ -215,6 +216,7 @@ export const useWorkspaceSessionStore = create<WorkspaceSessionState>((set, get)
 
       // Destroy all terminals
       destroyAllTerminalSessions();
+      clearClosedTerminals();
 
       // Load target session
       const { sessions } = get();
@@ -334,6 +336,10 @@ export const useWorkspaceSessionStore = create<WorkspaceSessionState>((set, get)
     }
 
     try {
+      // Save current state before fetching — prevents stale snapshot from
+      // overwriting recent changes (e.g. just-closed terminals)
+      try { await get().saveCurrentSession(); } catch { /* ignore */ }
+
       const { data } = await getWorkspaceSessions();
       const fresh = data?.find((s) => s.id === activeSessionId);
       if (fresh?.snapshot) {

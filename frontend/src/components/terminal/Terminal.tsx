@@ -10,7 +10,7 @@ import { ensureFreshToken, refreshTokenOnce } from '../../api/tokenRefresh';
 import { useWorkspaceSessionStore } from '../../store/workspaceSessionStore';
 import { emitActivity } from '../../utils/activityBus';
 import { sendSyncMessage } from '../../utils/syncBridge';
-import { registerTerminal, unregisterTerminal, getTerminalNumber, useTerminalRegistryVersion } from '../../utils/terminalRegistry';
+import { registerTerminal, unregisterTerminal, getTerminalNumber, useTerminalRegistryVersion, markTerminalClosed } from '../../utils/terminalRegistry';
 import api from '../../api/client';
 import toast from 'react-hot-toast';
 
@@ -142,7 +142,7 @@ function getWorkspaceSessionId(): string {
 
 /** Emit terminal_disconnect locally + broadcast to other devices for Claude terminals */
 function emitDisconnect(instanceId: string) {
-  emitDisconnect(instanceId);
+  emitActivity({ type: 'terminal_disconnect', instanceId });
   if (instanceId.startsWith('claude-')) {
     sendSyncMessage({ type: 'pet_event', pet_action: 'disconnected', instance_id: instanceId });
   }
@@ -495,6 +495,7 @@ export function destroyTerminalSession(instanceId: string): void {
   sessions.delete(instanceId);
   emitDisconnect(instanceId);
   unregisterTerminal(instanceId);
+  markTerminalClosed(instanceId);
 
   // Kill backend PTY session (fire-and-forget)
   api.delete(`/terminals/${encodeURIComponent(instanceId)}`).catch(() => {});
@@ -732,7 +733,7 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
   // since registryVersion changes trigger this effect.
   const registryVersion = useTerminalRegistryVersion();
   useLayoutEffect(() => {
-    if (getTerminalNumber(instanceId) == null) {
+    if (getTerminalNumber(instanceId) == null && sessions.has(instanceId)) {
       registerTerminal(instanceId);
     }
   }, [instanceId, registryVersion]);
