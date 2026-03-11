@@ -43,6 +43,11 @@ func collectDescendants(pid int) []int {
 	return result
 }
 
+// hasChildProcesses returns true if the given PID has any child processes.
+func hasChildProcesses(pid int) bool {
+	return len(getChildPids(pid)) > 0
+}
+
 // getChildPids reads /proc to find direct children of a PID.
 func getChildPids(pid int) []int {
 	childrenFile := filepath.Join("/proc", strconv.Itoa(pid), "task", strconv.Itoa(pid), "children")

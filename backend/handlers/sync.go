@@ -80,7 +80,7 @@ func (h *SyncHandler) activeClaudeTerminals(userID, workspaceSessionID string) [
 	suffix := "@ws:" + workspaceSessionID
 	var result []string
 	for _, s := range sessions {
-		if strings.Contains(s.InstanceID, "claude-") && s.Alive {
+		if strings.Contains(s.InstanceID, "claude-") && s.Alive && s.HasChildren {
 			// Filter by workspace session if specified
 			if workspaceSessionID != "" && !strings.HasSuffix(s.InstanceID, suffix) {
 				continue

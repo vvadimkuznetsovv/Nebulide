@@ -478,6 +478,15 @@ func (s *TerminalService) Resize(sessionKey string, rows, cols uint16) error {
 	return session.Pty.Resize(int(cols), int(rows))
 }
 
+// HasChildProcesses returns true if the shell has child processes running
+// (e.g. claude CLI). Uses platform-specific /proc check on Linux.
+func (ts *TerminalSession) HasChildProcesses() bool {
+	if ts.Cmd == nil || ts.Cmd.Process == nil {
+		return false
+	}
+	return hasChildProcesses(ts.Cmd.Process.Pid)
+}
+
 // IsAlive returns true if the shell process is still running.
 func (ts *TerminalSession) IsAlive() bool {
 	select {
@@ -552,10 +561,11 @@ func (ts *TerminalSession) CloseKeepScrollback() {
 
 // SessionInfo holds metadata about a terminal session for admin listing.
 type SessionInfo struct {
-	Key        string `json:"session_key"`
-	UserID     string `json:"user_id"`
-	InstanceID string `json:"instance_id"`
-	Alive      bool   `json:"alive"`
+	Key         string `json:"session_key"`
+	UserID      string `json:"user_id"`
+	InstanceID  string `json:"instance_id"`
+	Alive       bool   `json:"alive"`
+	HasChildren bool   `json:"has_children"` // shell has child processes (e.g. claude running inside)
 }
 
 // parseSessionKey splits "term:{userID}:{instanceId}" into parts.
@@ -604,10 +614,11 @@ func (s *TerminalService) ListUserSessions(userID string) []SessionInfo {
 		if strings.HasPrefix(key, prefix) {
 			_, iid := parseSessionKey(key)
 			result = append(result, SessionInfo{
-				Key:        key,
-				UserID:     userID,
-				InstanceID: iid,
-				Alive:      sess.IsAlive(),
+				Key:         key,
+				UserID:      userID,
+				InstanceID:  iid,
+				Alive:       sess.IsAlive(),
+				HasChildren: sess.HasChildProcesses(),
 			})
 		}
 	}
