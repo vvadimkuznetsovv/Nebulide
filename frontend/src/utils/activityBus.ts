@@ -9,6 +9,7 @@ export type ActivityEvent =
   | { type: 'terminal_streaming_start'; instanceId: string }
   | { type: 'terminal_streaming_end'; instanceId: string }
   | { type: 'terminal_prompt_submit'; instanceId: string; text: string }
+  | { type: 'claude_launched'; instanceId: string }
   | { type: 'claude_stream_start'; sessionId: string; sessionTitle?: string }
   | { type: 'claude_stream_delta'; sessionId: string }
   | { type: 'claude_stream_end'; sessionId: string }

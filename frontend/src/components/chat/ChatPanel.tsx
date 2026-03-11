@@ -3,6 +3,7 @@ import { listClaudeSessions, listClaudePlans, readClaudePlan, readClaudeSession,
 import type { ClaudeProject, ClaudeSession, ClaudePlan, ClaudeSessionMessage, ClaudeSearchResult } from '../../api/claudeSessions';
 import { useLayoutStore } from '../../store/layoutStore';
 import { typeCommandInTerminal } from '../terminal/Terminal';
+import { emitActivity } from '../../utils/activityBus';
 import toast from 'react-hot-toast';
 
 interface ChatPanelProps {
@@ -269,7 +270,9 @@ export default function ChatPanel(_props: ChatPanelProps) {
     const resumeCmd = `claude --resume ${session.session_id}`;
     const cmd = session.cwd ? `cd "${session.cwd}" && ${resumeCmd}` : resumeCmd;
     const ok = await typeCommandInTerminal(instanceId, cmd);
-    if (!ok) {
+    if (ok) {
+      emitActivity({ type: 'claude_launched', instanceId });
+    } else {
       toast.error('Failed to connect to terminal');
     }
     setLaunching(null);
