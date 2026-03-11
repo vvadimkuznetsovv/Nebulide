@@ -6,7 +6,7 @@ import { useLayoutStore } from '../store/layoutStore';
 import { getWorkspaceSessions } from '../api/workspaceSessions';
 import { getDeviceId, detectDeviceType } from '../utils/deviceId';
 import { setSyncWs } from '../utils/syncBridge';
-import { disconnectAllTerminalSessions, reconnectAllTerminalSessions } from '../components/terminal/Terminal';
+import { disconnectAllTerminalSessions, reconnectAllTerminalSessions, getActiveTerminalInstanceIds } from '../components/terminal/Terminal';
 import { emitActivity } from '../utils/activityBus';
 import { usePetStore } from '../store/petStore';
 
@@ -86,6 +86,15 @@ export function useSyncWS() {
                   store.reloadActiveSession().then(() => {
                     // Reconnect terminals — reloadActiveSession() disconnects all WS.
                     reconnectAllTerminalSessions();
+                    // Clean up phantom pets — terminals that exist in petStore but not
+                    // in the module-level sessions Map (e.g. zombie PTY from crashed destroy)
+                    const petIds = Object.keys(usePetStore.getState().pets);
+                    const activeIds = getActiveTerminalInstanceIds();
+                    for (const id of petIds) {
+                      if (!activeIds.includes(id)) {
+                        usePetStore.getState().processEvent({ type: 'terminal_disconnect', instanceId: id });
+                      }
+                    }
                   });
                 }, 1500);
               }

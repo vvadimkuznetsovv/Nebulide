@@ -58,12 +58,12 @@ const WAITING_TIMEOUT = 30_000;  // 30s after claude ends → waiting
 const LONELY_START = 60_000;     // 1min idle → start getting sad
 const LONELY_DEEP = 180_000;     // 3min idle → sadder faster
 
-const HAPPY_THRESHOLD = 0.6;
-const SAD_THRESHOLD = 0.45;
-const SOB_THRESHOLD = 0.9;
-const EMOTION_DAMPENING = 0.5;
-const INTER_EMOTION_DECAY = 0.9;
-const EMOTION_DECAY_RATE = 0.92;
+const HAPPY_THRESHOLD = 0.4;
+const SAD_THRESHOLD = 0.3;
+const SOB_THRESHOLD = 0.7;
+const EMOTION_DAMPENING = 0.75;
+const INTER_EMOTION_DECAY = 0.7;
+const EMOTION_DECAY_RATE = 0.85;
 const EMOTION_DECAY_INTERVAL = 60_000; // 60s
 
 // ── Individual pet state ──
@@ -258,7 +258,7 @@ export const usePetStore = create<PetStoreState>((set, get) => ({
         const id = event.instanceId;
         const pet = state.pets[id];
         if (!pet) return;
-        const scores = addEmotion(pet.emotionScores, 'happy', 0.15);
+        const scores = addEmotion(pet.emotionScores, 'happy', 0.3);
         set({ pets: updatePet(state.pets, id, {
           task: 'idle',
           claudeStreaming: false,

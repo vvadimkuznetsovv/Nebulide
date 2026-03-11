@@ -69,16 +69,28 @@ func NewSyncHandler(cfg *config.Config, presence *services.PresenceService, term
 	}
 }
 
-// activeClaudeTerminals returns instanceIds of alive claude-* terminal sessions for a user.
-func (h *SyncHandler) activeClaudeTerminals(userID string) []string {
+// activeClaudeTerminals returns instanceIds of alive claude-* terminal sessions
+// for a user within a specific workspace session. The workspaceSessionID filter
+// prevents zombie terminals from other workspaces from creating phantom pets.
+func (h *SyncHandler) activeClaudeTerminals(userID, workspaceSessionID string) []string {
 	if h.terminal == nil {
 		return nil
 	}
 	sessions := h.terminal.ListUserSessions(userID)
+	suffix := "@ws:" + workspaceSessionID
 	var result []string
 	for _, s := range sessions {
 		if strings.Contains(s.InstanceID, "claude-") && s.Alive {
-			result = append(result, s.InstanceID)
+			// Filter by workspace session if specified
+			if workspaceSessionID != "" && !strings.HasSuffix(s.InstanceID, suffix) {
+				continue
+			}
+			// Return clean instanceId (strip @ws: suffix)
+			iid := s.InstanceID
+			if idx := strings.Index(iid, "@ws:"); idx >= 0 {
+				iid = iid[:idx]
+			}
+			result = append(result, iid)
 		}
 	}
 	return result
@@ -245,7 +257,7 @@ func (h *SyncHandler) HandleWebSocket(c *gin.Context) {
 
 			if msg.SessionID == "" {
 				log.Printf("[Sync] device_register: no sessionID, skipping lock")
-				sendJSON(syncServerMsg{Type: "register_ok", ActiveClaudeTerminals: h.activeClaudeTerminals(userID)})
+				sendJSON(syncServerMsg{Type: "register_ok", ActiveClaudeTerminals: h.activeClaudeTerminals(userID, msg.SessionID)})
 				continue
 			}
 
@@ -277,13 +289,13 @@ func (h *SyncHandler) HandleWebSocket(c *gin.Context) {
 					log.Printf("[Sync] desktop holder: auto-takeover by %s", deviceID)
 					info := h.forceTakeover(ctx, msg.SessionID, userID, deviceID, deviceType)
 					activeSessionID = msg.SessionID
-					sendJSON(syncServerMsg{Type: "register_ok", SessionID: msg.SessionID, ActiveClaudeTerminals: h.activeClaudeTerminals(userID)})
+					sendJSON(syncServerMsg{Type: "register_ok", SessionID: msg.SessionID, ActiveClaudeTerminals: h.activeClaudeTerminals(userID, msg.SessionID)})
 					h.publishLockEvent(userID, "force_disconnected", msg.SessionID, info)
 				}
 			} else {
 				activeSessionID = msg.SessionID
 				log.Printf("[Sync] lock acquired: sessionID=%s deviceID=%s", msg.SessionID, deviceID)
-				sendJSON(syncServerMsg{Type: "register_ok", SessionID: msg.SessionID, ActiveClaudeTerminals: h.activeClaudeTerminals(userID)})
+				sendJSON(syncServerMsg{Type: "register_ok", SessionID: msg.SessionID, ActiveClaudeTerminals: h.activeClaudeTerminals(userID, msg.SessionID)})
 				h.publishLockEvent(userID, "workspace_locked", msg.SessionID, existing)
 			}
 
@@ -306,7 +318,7 @@ func (h *SyncHandler) HandleWebSocket(c *gin.Context) {
 			if msg.SessionID != "" && deviceID != "" {
 				info := h.forceTakeover(ctx, msg.SessionID, userID, deviceID, deviceType)
 				activeSessionID = msg.SessionID
-				sendJSON(syncServerMsg{Type: "register_ok", SessionID: msg.SessionID, ActiveClaudeTerminals: h.activeClaudeTerminals(userID)})
+				sendJSON(syncServerMsg{Type: "register_ok", SessionID: msg.SessionID, ActiveClaudeTerminals: h.activeClaudeTerminals(userID, msg.SessionID)})
 				h.publishLockEvent(userID, "force_disconnected", msg.SessionID, info)
 			}
 
