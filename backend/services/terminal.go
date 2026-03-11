@@ -1,6 +1,7 @@
 package services
 
 import (
+	"fmt"
 	"io"
 	"log"
 	"os"
@@ -199,41 +200,41 @@ func NewTerminalService() *TerminalService {
 	return ts
 }
 
-const orphanTimeout = 5 * time.Minute
-
-// reapLoop periodically removes dead terminal sessions (shell exited)
-// and orphaned sessions (alive shell but no WebSocket clients for >5 minutes).
+// reapLoop periodically removes dead terminal sessions and logs status.
+// Live sessions are NEVER killed — they persist until the shell process exits.
 func (s *TerminalService) reapLoop() {
 	ticker := time.NewTicker(60 * time.Second)
 	defer ticker.Stop()
 	for range ticker.C {
 		now := time.Now()
 		s.mu.Lock()
-		var reaped, orphaned []string
+		var reaped []string
+		var status []string
 		for key, sess := range s.sessions {
 			if !sess.IsAlive() {
-				sess.Close()
+				sess.CloseKeepScrollback()
 				delete(s.sessions, key)
 				reaped = append(reaped, key)
+				status = append(status, fmt.Sprintf("  %s [dead, reaped]", key))
 				continue
 			}
-			// Kill sessions with no WebSocket writers for > orphanTimeout
+			// Log status of live sessions
+			writers := sess.WriterCount()
 			sess.mu.Lock()
 			orphanSince := sess.OrphanSince
 			sess.mu.Unlock()
-			if !orphanSince.IsZero() && now.Sub(orphanSince) > orphanTimeout {
-				log.Printf("[TerminalService] killing orphaned session key=%s (no writers for %v)", key, now.Sub(orphanSince))
-				sess.Close()
-				delete(s.sessions, key)
-				orphaned = append(orphaned, key)
+			if !orphanSince.IsZero() {
+				status = append(status, fmt.Sprintf("  %s [alive, 0 writers, orphaned %v ago]", key, now.Sub(orphanSince).Round(time.Second)))
+			} else {
+				status = append(status, fmt.Sprintf("  %s [alive, %d writer(s)]", key, writers))
 			}
 		}
 		s.mu.Unlock()
 		if len(reaped) > 0 {
 			log.Printf("[TerminalService] reaped %d dead sessions: %v", len(reaped), reaped)
 		}
-		if len(orphaned) > 0 {
-			log.Printf("[TerminalService] reaped %d orphaned sessions: %v", len(orphaned), orphaned)
+		if len(status) > 0 {
+			log.Printf("[TerminalService] status: %d sessions\n%s", len(status), strings.Join(status, "\n"))
 		}
 	}
 }
