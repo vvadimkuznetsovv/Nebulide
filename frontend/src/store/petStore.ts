@@ -66,13 +66,6 @@ const INTER_EMOTION_DECAY = 0.9;
 const EMOTION_DECAY_RATE = 0.92;
 const EMOTION_DECAY_INTERVAL = 60_000; // 60s
 
-// ── Helpers: is this a Claude terminal? ──
-
-/** Claude terminals launched from ChatPanel have instanceId starting with "claude-" */
-function isClaudeTerminal(instanceId: string): boolean {
-  return instanceId.startsWith('claude-');
-}
-
 // ── Individual pet state ──
 
 export interface IndividualPetState {
