@@ -37,6 +37,7 @@ export default function EditorPanel() {
   const { showPanel } = useLayoutStore();
 
   const sharedDir = useAuthStore((s) => s.user?.shared_dir);
+  const rootPath = useAuthStore((s) => s.user?.workspace_dir) || '';
   const isMobile = useSyncExternalStore(subscribeToMedia, getIsMobile);
   const fileTreePanelRef = usePanelRef();
   const editorCodePanelRef = usePanelRef();
@@ -44,7 +45,6 @@ export default function EditorPanel() {
   const fileTreeRef = useRef<FileTreeHandle>(null);
   const activeTab = openTabs.find((t) => t.id === activeTabId) || null;
   const [fileMode, setFileMode] = useState<'tree' | 'search'>('tree');
-  const [rootPath, setRootPath] = useState('');
   const [currentTreePath, setCurrentTreePath] = useState('');
   const [savedSplit] = useState(getEditorSplit);
   const saveSplitTimer = useRef<number>(0);
@@ -75,18 +75,6 @@ export default function EditorPanel() {
     id: sharedDir ? `folder:${sharedDir}` : 'folder:__shared__',
     disabled: !sharedDir,
   });
-
-  // Capture workspace root from FileTree after first load
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const root = fileTreeRef.current?.workspaceRoot;
-      if (root && root !== rootPath) {
-        setRootPath(root);
-        clearInterval(interval);
-      }
-    }, 500);
-    return () => clearInterval(interval);
-  }, [rootPath]);
 
   // Ref callback for path breadcrumb — scrolls to end to show filename
   const scrollEndRef = useCallback((el: HTMLDivElement | null) => {
@@ -195,8 +183,7 @@ export default function EditorPanel() {
                   className={`editor-toggle-files${fileMode === 'tree' && activeFolder === 'root' ? ' active' : ''}`}
                   onClick={() => {
                     if (fileMode === 'tree') {
-                      const root = fileTreeRef.current?.workspaceRoot;
-                      if (root) fileTreeRef.current?.navigateTo(root);
+                      if (rootPath) fileTreeRef.current?.navigateTo(rootPath);
                     } else {
                       setFileMode('tree');
                     }
@@ -239,8 +226,7 @@ export default function EditorPanel() {
                   type="button"
                   className={`editor-toggle-files${fileMode === 'tree' && activeFolder === 'uploads' ? ' active' : ''}`}
                   onClick={() => {
-                    const root = fileTreeRef.current?.workspaceRoot;
-                    if (root) { setFileMode('tree'); fileTreeRef.current?.navigateTo(root + '/uploads'); }
+                    if (rootPath) { setFileMode('tree'); fileTreeRef.current?.navigateTo(rootPath + '/uploads'); }
                   }}
                   title="Uploads (Telegram)"
                   style={{

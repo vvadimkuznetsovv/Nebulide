@@ -154,6 +154,7 @@ function loadCurrentPath(): string | null {
 
 const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree({ rootPath, onFileSelect, onFileDoubleClick, onFileOpenNewTab, onPathChange }, ref) {
   const telegramId = useAuthStore(s => s.user?.telegram_id);
+  const userWorkspaceDir = useAuthStore(s => s.user?.workspace_dir);
   const hasTelegram = !!telegramId;
   const { clipboardFiles, setClipboardFiles } = useWorkspaceStore();
   const [files, setFiles] = useState<FileEntry[]>([]);
@@ -170,7 +171,7 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree({ r
   const [childrenCache, setChildrenCache] = useState<Map<string, FileEntry[]>>(new Map());
   const [loadingFolders, setLoadingFolders] = useState<Set<string>>(new Set());
   const [creatingInFolder, setCreatingInFolder] = useState<string | null>(null);
-  const [workspaceRoot, setWorkspaceRoot] = useState<string>('');
+  const workspaceRoot = userWorkspaceDir || '';
   const [movingFile, setMovingFile] = useState<FileEntry | null>(null);
   const [moveFolders, setMoveFolders] = useState<FileEntry[]>([]);
   const [moveCurrentPath, setMoveCurrentPath] = useState<string>('');
@@ -262,9 +263,6 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree({ r
         setCurrentPath(data.path);
         saveCurrentPath(data.path);
         onPathChange?.(data.path);
-        // Capture workspace root: if rootPath prop is set, it's the real workspace root
-        if (rootPath) setWorkspaceRoot(data.path);
-        else if (!workspaceRoot) setWorkspaceRoot(data.path);
         // Fetch children for each expanded folder in parallel
         if (saved.size > 0) {
           const fetches = [...saved].map((fp) =>

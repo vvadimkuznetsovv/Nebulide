@@ -302,12 +302,13 @@ func (h *AuthHandler) Me(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, gin.H{
-		"id":           user.ID,
-		"username":     user.Username,
-		"totp_enabled": user.TOTPEnabled,
-		"is_admin":     user.IsAdmin,
-		"telegram_id":  user.TelegramID,
-		"shared_dir":   h.cfg.SharedDir,
+		"id":            user.ID,
+		"username":      user.Username,
+		"totp_enabled":  user.TOTPEnabled,
+		"is_admin":      user.IsAdmin,
+		"telegram_id":   user.TelegramID,
+		"shared_dir":    h.cfg.SharedDir,
+		"workspace_dir": h.cfg.GetUserWorkspaceDir(user.Username),
 	})
 }
 

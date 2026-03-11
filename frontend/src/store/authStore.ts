@@ -7,6 +7,7 @@ interface User {
   is_admin?: boolean;
   telegram_id?: number;
   shared_dir?: string;
+  workspace_dir?: string;
 }
 
 interface AuthState {
