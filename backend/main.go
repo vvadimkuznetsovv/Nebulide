@@ -67,7 +67,7 @@ func main() {
 	adminHandler := handlers.NewAdminHandler(cfg, terminalService, presenceService)
 	workspaceSessionsHandler := handlers.NewWorkspaceSessionsHandler(cfg)
 	claudeSessionsHandler := handlers.NewClaudeSessionsHandler(cfg)
-	syncHandler := handlers.NewSyncHandler(cfg, presenceService)
+	syncHandler := handlers.NewSyncHandler(cfg, presenceService, terminalService)
 	hookHandler := handlers.NewHookHandler(cfg)
 
 	// Router

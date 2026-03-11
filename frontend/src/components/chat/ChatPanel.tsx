@@ -4,6 +4,7 @@ import type { ClaudeProject, ClaudeSession, ClaudePlan, ClaudeSessionMessage, Cl
 import { useLayoutStore } from '../../store/layoutStore';
 import { typeCommandInTerminal } from '../terminal/Terminal';
 import { emitActivity } from '../../utils/activityBus';
+import { sendSyncMessage } from '../../utils/syncBridge';
 import toast from 'react-hot-toast';
 
 interface ChatPanelProps {
@@ -272,6 +273,7 @@ export default function ChatPanel(_props: ChatPanelProps) {
     const ok = await typeCommandInTerminal(instanceId, cmd);
     if (ok) {
       emitActivity({ type: 'claude_launched', instanceId });
+      sendSyncMessage({ type: 'pet_event', pet_action: 'launched', instance_id: instanceId });
     } else {
       toast.error('Failed to connect to terminal');
     }

@@ -37,3 +37,6 @@ workspace/
 md
 last
 _ssh_check.js
+
+# Claude Code (contains credentials)
+CLAUDE.md

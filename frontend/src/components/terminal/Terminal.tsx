@@ -9,6 +9,7 @@ import { useLongPress } from '../../hooks/useLongPress';
 import { ensureFreshToken, refreshTokenOnce } from '../../api/tokenRefresh';
 import { useWorkspaceSessionStore } from '../../store/workspaceSessionStore';
 import { emitActivity } from '../../utils/activityBus';
+import { sendSyncMessage } from '../../utils/syncBridge';
 import { registerTerminal, unregisterTerminal, getTerminalNumber, useTerminalRegistryVersion } from '../../utils/terminalRegistry';
 import api from '../../api/client';
 import toast from 'react-hot-toast';
@@ -137,6 +138,14 @@ function getWorkspaceSessionId(): string {
   return useWorkspaceSessionStore.getState().activeSessionId
     || localStorage.getItem('nebulide-active-workspace')
     || 'default';
+}
+
+/** Emit terminal_disconnect locally + broadcast to other devices for Claude terminals */
+function emitDisconnect(instanceId: string) {
+  emitDisconnect(instanceId);
+  if (instanceId.startsWith('claude-')) {
+    sendSyncMessage({ type: 'pet_event', pet_action: 'disconnected', instance_id: instanceId });
+  }
 }
 
 function createXterm(instanceId: string): TermSession {
@@ -356,7 +365,7 @@ async function connectWs(instanceId: string): Promise<void> {
     if (e.code === 4001) {
       session.xterm.write(_red('[Terminal killed by admin]') + '\r\n');
       session.reconnectAttempts = MAX_RECONNECT;
-      emitActivity({ type: 'terminal_disconnect', instanceId });
+      emitDisconnect(instanceId);
       session.notifyRerender?.();
       return;
     }
@@ -381,7 +390,7 @@ async function connectWs(instanceId: string): Promise<void> {
     } else {
       session.xterm.write(_red('[Disconnected — max retries reached]') + '\r\n');
       session.reconnectAttempts = 0;
-      emitActivity({ type: 'terminal_disconnect', instanceId });
+      emitDisconnect(instanceId);
     }
     session.notifyRerender?.();
   };
@@ -484,7 +493,7 @@ export function destroyTerminalSession(instanceId: string): void {
   }
   session.xterm.dispose();
   sessions.delete(instanceId);
-  emitActivity({ type: 'terminal_disconnect', instanceId });
+  emitDisconnect(instanceId);
   unregisterTerminal(instanceId);
 
   // Kill backend PTY session (fire-and-forget)

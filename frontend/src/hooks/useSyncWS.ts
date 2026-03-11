@@ -8,6 +8,7 @@ import { getDeviceId, detectDeviceType } from '../utils/deviceId';
 import { setSyncWs } from '../utils/syncBridge';
 import { disconnectAllTerminalSessions, reconnectAllTerminalSessions } from '../components/terminal/Terminal';
 import { emitActivity } from '../utils/activityBus';
+import { usePetStore } from '../store/petStore';
 
 // Re-export for backwards compat (store imports from syncBridge directly now)
 export { sendSyncMessage } from '../utils/syncBridge';
@@ -88,6 +89,12 @@ export function useSyncWS() {
                   });
                 }, 1500);
               }
+              // Create pets for active Claude terminals (cross-device sync)
+              if (Array.isArray(msg.active_claude_terminals)) {
+                for (const instanceId of msg.active_claude_terminals) {
+                  emitActivity({ type: 'claude_launched', instanceId });
+                }
+              }
               break;
 
             case 'workspace_locked':
@@ -148,6 +155,16 @@ export function useSyncWS() {
                   userPrompt: msg.user_prompt,
                   status: msg.status,
                 });
+              }
+              break;
+
+            case 'pet_event':
+              // Cross-device pet sync — another device launched/disconnected Claude
+              if (msg.device_id === getDeviceId()) break; // ignore own events (already handled locally)
+              if (msg.pet_action === 'launched' && msg.instance_id) {
+                emitActivity({ type: 'claude_launched', instanceId: msg.instance_id });
+              } else if (msg.pet_action === 'disconnected' && msg.instance_id) {
+                usePetStore.getState().processEvent({ type: 'terminal_disconnect', instanceId: msg.instance_id });
               }
               break;
 
