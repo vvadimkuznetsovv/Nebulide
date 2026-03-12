@@ -1,12 +1,14 @@
 package services
 
 import (
+	"bytes"
 	"fmt"
 	"io"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"runtime"
 	"strings"
 	"sync"
@@ -121,15 +123,27 @@ func (mw *multiWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
+// daQueryRe matches Device Attributes queries (\e[c, \e[0c, \e[>c, etc.)
+// that bash/readline sends on startup. If replayed to xterm on reconnect,
+// xterm responds with \e[?1;2c which goes to PTY stdin → bash displays "1;2c".
+var daQueryRe = regexp.MustCompile(`\x1b\[[\d>]*c`)
+
 // Add registers a new writer. Flushes the replay buffer to it so the client
 // sees the current terminal state (prompt, recent output).
 func (mw *multiWriter) Add(w io.Writer, closer io.Closer) {
 	mw.mu.Lock()
 	defer mw.mu.Unlock()
 
-	// Replay recent output to the new connection
+	// Replay recent output to the new connection, stripping DA queries
+	// to prevent xterm from auto-responding with \e[?1;2c → "1;2c" in terminal
 	if len(mw.replayBuf) > 0 {
-		w.Write(mw.replayBuf)
+		cleaned := daQueryRe.ReplaceAll(mw.replayBuf, nil)
+		// Also strip any literal "1;2c" remnants from previous DA responses
+		cleaned = bytes.ReplaceAll(cleaned, []byte("1;2c"), nil)
+		if len(cleaned) > 0 {
+			w.Write(cleaned)
+		}
+		log.Printf("[TerminalService] replay %d bytes (cleaned %d DA/remnant bytes)", len(mw.replayBuf), len(mw.replayBuf)-len(cleaned))
 	}
 
 	mw.writers[w] = closer
