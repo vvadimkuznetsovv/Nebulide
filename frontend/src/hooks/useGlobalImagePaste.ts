@@ -2,17 +2,16 @@ import { useEffect } from 'react';
 import { uploadFile } from '../api/files';
 import { sendToActiveTerminal } from '../components/terminal/Terminal';
 import toast from 'react-hot-toast';
+import { log } from '../utils/logger';
 
 /**
  * Global image paste interceptor.
  * Captures Ctrl+V with image data anywhere on the page.
- * If a terminal is connected, sends the uploaded file path to it.
- * Otherwise shows a toast with the path.
+ * Uploads image to ~/uploads/, sends path to active terminal or shows toast.
  */
 export function useGlobalImagePaste() {
   useEffect(() => {
     const handler = async (e: ClipboardEvent) => {
-      // Skip if already handled (e.g. by Terminal.tsx capture handler)
       if (e.defaultPrevented) return;
 
       const items = e.clipboardData?.items;
@@ -28,43 +27,53 @@ export function useGlobalImagePaste() {
       }
       if (!imageItem) return;
 
-      // Don't intercept if the target is a text input that handles paste itself
       const target = e.target as HTMLElement;
-      const isTextInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA'
-        || target.isContentEditable
-        || target.closest('.monaco-editor');
-      if (isTextInput) {
-        // Chat textarea handles image paste itself (uploads + inserts path)
-        // Other text inputs: skip if clipboard also has text
-        let hasText = false;
-        for (let i = 0; i < items.length; i++) {
-          if (items[i].type === 'text/plain') { hasText = true; break; }
+
+      // xterm's hidden textarea — ALWAYS intercept (terminal has no clipboard access)
+      const isXtermTextarea = target.classList?.contains('xterm-helper-textarea');
+
+      if (!isXtermTextarea) {
+        // Don't intercept if the target is a real text input that handles paste itself
+        const isTextInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA'
+          || target.isContentEditable
+          || target.closest('.monaco-editor');
+        if (isTextInput) {
+          // If clipboard also has text, let the input handle it (text paste)
+          let hasText = false;
+          for (let i = 0; i < items.length; i++) {
+            if (items[i].type === 'text/plain') { hasText = true; break; }
+          }
+          if (hasText) return;
+          // Image-only paste in a real textarea (e.g. chat) — let component handle
+          return;
         }
-        if (hasText) return;
-        // Image-only paste in a textarea (e.g. chat) — let the component handle it
-        return;
       }
 
       e.preventDefault();
       e.stopPropagation();
 
       const blob = imageItem.getAsFile();
-      if (!blob) return;
+      if (!blob) {
+        log('[ImagePaste] getAsFile() returned null');
+        return;
+      }
 
       const ext = imageItem.type.split('/')[1]?.replace('jpeg', 'jpg') || 'png';
       const name = `clipboard_${Date.now()}.${ext}`;
+      log('[ImagePaste] uploading', { name, type: imageItem.type, size: blob.size, isXterm: isXtermTextarea });
 
       try {
         const { data } = await uploadFile(blob, undefined, name);
+        log('[ImagePaste] uploaded:', data.path);
         const sent = sendToActiveTerminal(data.path);
         if (sent) {
           toast.success('Image uploaded & sent to terminal');
         } else {
-          // Copy path to clipboard for convenience
           try { await navigator.clipboard.writeText(data.path); } catch { /* noop */ }
           toast.success(`Image uploaded: ${data.path}`, { duration: 4000 });
         }
-      } catch {
+      } catch (err) {
+        console.error('[ImagePaste] upload failed:', err);
         toast.error('Failed to upload image');
       }
     };

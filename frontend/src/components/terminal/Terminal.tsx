@@ -829,40 +829,7 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
     };
   }, [instanceId]);
 
-  // ── Image paste: intercept clipboard images, upload, insert path ──
-  useEffect(() => {
-    const el = termRef.current;
-    if (!el) return;
-    const handlePaste = async (e: ClipboardEvent) => {
-      const items = e.clipboardData?.items;
-      if (!items) return;
-      for (let i = 0; i < items.length; i++) {
-        const item = items[i];
-        if (item.type.startsWith('image/')) {
-          e.preventDefault();
-          e.stopPropagation();
-          const blob = item.getAsFile();
-          if (!blob) continue;
-          const ext = item.type.split('/')[1]?.replace('jpeg', 'jpg') || 'png';
-          const name = `clipboard_${Date.now()}.${ext}`;
-          try {
-            const { uploadFile } = await import('../../api/files');
-            const { data } = await uploadFile(blob, undefined, name);
-            const s = sessions.get(instanceId);
-            if (s?.ws?.readyState === WebSocket.OPEN) {
-              s.ws.send(new TextEncoder().encode(data.path));
-            }
-            toast.success('Image uploaded');
-          } catch {
-            toast.error('Failed to upload image');
-          }
-          return;
-        }
-      }
-    };
-    el.addEventListener('paste', handlePaste, true);
-    return () => el.removeEventListener('paste', handlePaste, true);
-  }, [instanceId]);
+  // Image paste handled globally by useGlobalImagePaste (intercepts xterm-helper-textarea)
 
   // ── Context menu ──
 
