@@ -6,6 +6,7 @@ import { typeCommandInTerminal } from '../terminal/Terminal';
 import { emitActivity } from '../../utils/activityBus';
 import { sendSyncMessage } from '../../utils/syncBridge';
 import toast from 'react-hot-toast';
+import { log } from '../../utils/logger';
 
 interface ChatPanelProps {
   sessionId: string | null;
@@ -250,7 +251,7 @@ export default function ChatPanel(_props: ChatPanelProps) {
       }
     }
 
-    console.log('[ChatPanel] filter:', { selectedFolder, includeSubfolders, total: allSessions.length, filtered: list.length, searchResults: searchResults?.length ?? null });
+    log('[ChatPanel] filter:', { selectedFolder, includeSubfolders, total: allSessions.length, filtered: list.length, searchResults: searchResults?.length ?? null });
 
     if (!searchQuery || searchResults !== null) return list;
     const q = searchQuery.toLowerCase();

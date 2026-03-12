@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { useAuthStore } from '../store/authStore';
+import { log } from '../utils/logger';
 
 // ── Deduplicating refresh: only one in-flight refresh at a time ──
 // Prevents race condition when multiple callers (axios interceptor +
@@ -12,11 +13,11 @@ async function doRefresh(): Promise<string | null> {
   const refreshTok = localStorage.getItem('refresh_token');
   if (!refreshTok) return null;
 
-  console.log('[tokenRefresh] doRefresh — calling /api/auth/refresh');
+  log('[tokenRefresh] doRefresh — calling /api/auth/refresh');
   const { data } = await axios.post('/api/auth/refresh', {
     refresh_token: refreshTok,
   });
-  console.log('[tokenRefresh] doRefresh SUCCESS');
+  log('[tokenRefresh] doRefresh SUCCESS');
   localStorage.setItem('access_token', data.access_token);
   localStorage.setItem('refresh_token', data.refresh_token);
   useAuthStore.getState().loadFromStorage();

@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { onActivity, type ActivityEvent } from '../utils/activityBus';
 import { analyzeSentiment } from '../utils/sentimentAnalyzer';
+import { log } from '../utils/logger';
 
 // ── Task & Emotion types (from notchi) ──
 
@@ -62,7 +63,7 @@ const HAPPY_THRESHOLD = 0.4;
 const SAD_THRESHOLD = 0.3;
 const SOB_THRESHOLD = 0.7;
 const EMOTION_DAMPENING = 0.75;
-const INTER_EMOTION_DECAY = 0.7;
+const INTER_EMOTION_DECAY = 0.5;
 const EMOTION_DECAY_RATE = 0.85;
 const EMOTION_DECAY_INTERVAL = 60_000; // 60s
 
@@ -97,7 +98,10 @@ function createDefaultPetState(): IndividualPetState {
 // ── Helpers ──
 
 function resolveEmotion(scores: { happy: number; sad: number }): PetEmotion {
-  if (scores.sad >= SOB_THRESHOLD) return 'sob';
+  // Sob only if sad is dominant AND above sob threshold
+  if (scores.sad >= SOB_THRESHOLD && scores.sad > scores.happy) return 'sob';
+  // When both emotions are above their thresholds, the higher score wins
+  if (scores.happy >= HAPPY_THRESHOLD && scores.happy >= scores.sad) return 'happy';
   if (scores.sad >= SAD_THRESHOLD) return 'sad';
   if (scores.happy >= HAPPY_THRESHOLD) return 'happy';
   return 'neutral';
@@ -189,7 +193,7 @@ export const usePetStore = create<PetStoreState>((set, get) => ({
         const newPet = createDefaultPetState();
         const selected = state.selectedPetId ?? id;
         set({ pets: { ...state.pets, [id]: newPet }, selectedPetId: selected });
-        console.log('[PetStore] Claude launched, pet created:', id);
+        log('[PetStore] Claude launched, pet created:', id);
         break;
       }
 
@@ -209,7 +213,7 @@ export const usePetStore = create<PetStoreState>((set, get) => ({
         let selected = state.selectedPetId;
         if (selected === id) selected = ids[0] ?? null;
         set({ pets: sadRest, selectedPetId: selected });
-        console.log('[PetStore] Claude terminal disconnected, pet removed:', id);
+        log('[PetStore] Claude terminal disconnected, pet removed:', id);
         break;
       }
 
@@ -277,7 +281,7 @@ export const usePetStore = create<PetStoreState>((set, get) => ({
         if (!pet) break;
 
         const result = analyzeSentiment(event.text);
-        console.log(`[PetStore] sentiment: "${event.text.slice(0, 40)}" → ${result.emotion} (${result.intensity.toFixed(2)})`);
+        log(`[PetStore] sentiment: "${event.text.slice(0, 40)}" → ${result.emotion} (${result.intensity.toFixed(2)})`);
 
         let newScores: { happy: number; sad: number };
         if (result.emotion === 'neutral') {
@@ -534,7 +538,7 @@ function startTimers() {
 
       if (newTask !== pet.task || scoresChanged) {
         if (newTask !== pet.task) {
-          console.log(`[PetStore] ${id}: ${pet.task} → ${newTask} (elapsed=${Math.round(elapsed / 1000)}s)`);
+          log(`[PetStore] ${id}: ${pet.task} → ${newTask} (elapsed=${Math.round(elapsed / 1000)}s)`);
         }
         next[id] = {
           ...pet,

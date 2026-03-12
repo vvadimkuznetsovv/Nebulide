@@ -10,6 +10,7 @@ import { disconnectAllTerminalSessions, reconnectAllTerminalSessions, getActiveT
 import { emitActivity } from '../utils/activityBus';
 import { usePetStore } from '../store/petStore';
 import { setTerminalName } from '../utils/terminalRegistry';
+import { log } from '../utils/logger';
 
 // Re-export for backwards compat (store imports from syncBridge directly now)
 export { sendSyncMessage } from '../utils/syncBridge';
@@ -31,7 +32,7 @@ export function useSyncWS() {
         device_type: detectDeviceType(),
         session_id: activeSessionId,
       };
-      console.log('[SyncWS] re-register (session changed):', reRegMsg);
+      log('[SyncWS] re-register (session changed):', reRegMsg);
       wsRef.current.send(JSON.stringify(reRegMsg));
     }
   }, [activeSessionId]);
@@ -46,6 +47,7 @@ export function useSyncWS() {
       try {
         token = await ensureFreshToken();
       } catch {
+        log('[SyncWS] token refresh failed, retrying in 5s');
         reconnectTimerRef.current = window.setTimeout(connect, 5000);
         return;
       }
@@ -65,24 +67,24 @@ export function useSyncWS() {
           device_type: detectDeviceType(),
           session_id: sessionId || '',
         };
-        console.log('[SyncWS] register sent:', regMsg);
+        log('[SyncWS] register sent:', regMsg);
         ws.send(JSON.stringify(regMsg));
       };
 
       ws.onmessage = (event) => {
         try {
           const msg = JSON.parse(event.data);
-          console.log('[SyncWS] received:', msg);
+          log('[SyncWS] received:', msg);
           const store = useWorkspaceSessionStore.getState();
 
           switch (msg.type) {
             case 'register_ok':
-              console.log('[SyncWS] register_ok', { session_id: msg.session_id, active_claude_terminals: msg.active_claude_terminals, activeTerminals: getActiveTerminalInstanceIds() });
+              log('[SyncWS] register_ok', { session_id: msg.session_id, active_claude_terminals: msg.active_claude_terminals, activeTerminals: getActiveTerminalInstanceIds() });
               if (msg.session_id) {
                 store.setLockState(msg.session_id, 'owner');
                 // Reconnect terminals that were disconnected by workspace_locked/force_disconnected.
                 // Soft reload — don't disconnect terminals again (they're already dead).
-                console.log('[SyncWS] calling reconnectAllTerminalSessions from register_ok');
+                log('[SyncWS] calling reconnectAllTerminalSessions from register_ok');
                 reconnectAllTerminalSessions();
                 setTimeout(() => {
                   store.reloadActiveSession({ soft: true, skipSave: true }).then(() => {
@@ -107,13 +109,13 @@ export function useSyncWS() {
               break;
 
             case 'workspace_locked':
-              console.log('[SyncWS] workspace_locked', { session_id: msg.session_id, locked_by: msg.locked_by, myDeviceId: getDeviceId(), isMe: msg.locked_by?.device_id === getDeviceId() });
+              log('[SyncWS] workspace_locked', { session_id: msg.session_id, locked_by: msg.locked_by, myDeviceId: getDeviceId(), isMe: msg.locked_by?.device_id === getDeviceId() });
               if (msg.session_id && msg.locked_by) {
                 if (msg.locked_by.device_id === getDeviceId()) {
                   store.setLockState(msg.session_id, 'owner');
                 } else {
                   // Another device acquired the lock — disconnect terminals
-                  console.log('[SyncWS] workspace_locked by OTHER device — disconnecting all terminals');
+                  log('[SyncWS] workspace_locked by OTHER device — disconnecting all terminals');
                   disconnectAllTerminalSessions();
                   store.setLockState(msg.session_id, 'blocked', msg.locked_by);
                 }
@@ -121,6 +123,7 @@ export function useSyncWS() {
               break;
 
             case 'workspace_unlocked':
+              log('[SyncWS] workspace_unlocked', { session_id: msg.session_id, currentLock: store.lockStatus[msg.session_id] });
               if (msg.session_id) {
                 // Don't clear 'blocked' state — only owner losing lock → free.
                 // 'blocked' is cleared by force_takeover → register_ok.
@@ -132,7 +135,7 @@ export function useSyncWS() {
               break;
 
             case 'force_disconnected':
-              console.log('[SyncWS] force_disconnected', { session_id: msg.session_id, locked_by: msg.locked_by, myDeviceId: getDeviceId(), isMe: msg.locked_by?.device_id === getDeviceId() });
+              log('[SyncWS] force_disconnected', { session_id: msg.session_id, locked_by: msg.locked_by, myDeviceId: getDeviceId(), isMe: msg.locked_by?.device_id === getDeviceId() });
               // Another device took over — only react if it's not us
               if (msg.locked_by?.device_id !== getDeviceId() && msg.session_id) {
                 // Save current state immediately with keepalive fetch (reliable even if page is hiding)
@@ -151,13 +154,14 @@ export function useSyncWS() {
                   }
                 }
                 // Disconnect terminal WebSockets (PTY stays alive for new device)
-                console.log('[SyncWS] force_disconnected by OTHER device — disconnecting all terminals + saving state');
+                log('[SyncWS] force_disconnected by OTHER device — disconnecting all terminals + saving state');
                 disconnectAllTerminalSessions();
                 store.setLockState(msg.session_id, 'blocked', msg.locked_by);
               }
               break;
 
             case 'claude_hook':
+              log('[SyncWS] claude_hook', { event: msg.event, instance_id: msg.instance_id, tool: msg.tool, status: msg.status });
               // Forward Claude Code hook events to activityBus → petStore
               if (msg.event && msg.instance_id) {
                 emitActivity({
@@ -172,6 +176,7 @@ export function useSyncWS() {
               break;
 
             case 'pet_event':
+              log('[SyncWS] pet_event', { pet_action: msg.pet_action, instance_id: msg.instance_id, device_id: msg.device_id, isOwnDevice: msg.device_id === getDeviceId() });
               // Cross-device pet sync — another device launched/disconnected Claude
               if (msg.device_id === getDeviceId()) break; // ignore own events (already handled locally)
               if (msg.pet_action === 'launched' && msg.instance_id) {
@@ -182,6 +187,7 @@ export function useSyncWS() {
               break;
 
             case 'terminal_rename':
+              log('[SyncWS] terminal_rename', { instance_id: msg.instance_id, name: msg.name, device_id: msg.device_id, isOwnDevice: msg.device_id === getDeviceId() });
               // Cross-device terminal rename sync
               if (msg.device_id !== getDeviceId() && msg.instance_id && typeof msg.name === 'string') {
                 setTerminalName(msg.instance_id, msg.name);
@@ -189,7 +195,7 @@ export function useSyncWS() {
               break;
 
             case 'workspace_session_changed':
-              console.log('[Sync] workspace_session_changed', {
+              log('[Sync] workspace_session_changed', {
                 action: msg.action,
                 session_id: msg.session_id,
                 activeSessionId: store.activeSessionId,
@@ -210,9 +216,10 @@ export function useSyncWS() {
       };
 
       ws.onclose = (e) => {
-        console.log(`[SyncWS] ws.onclose code=${e.code} reason=${e.reason} destroyed=${destroyed}`);
+        log(`[SyncWS] ws.onclose code=${e.code} reason=${e.reason} destroyed=${destroyed}`);
         setSyncWs(null);
         if (!destroyed) {
+          log('[SyncWS] scheduling reconnect in 3s');
           reconnectTimerRef.current = window.setTimeout(connect, 3000);
         }
       };

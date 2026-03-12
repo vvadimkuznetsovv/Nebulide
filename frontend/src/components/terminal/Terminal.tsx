@@ -14,6 +14,7 @@ import { registerTerminal, unregisterTerminal, getTerminalNumber, useTerminalReg
 import { usePetStore } from '../../store/petStore';
 import api from '../../api/client';
 import toast from 'react-hot-toast';
+import { log } from '../../utils/logger';
 
 // ── Clipboard helper: first readText() on mobile may fail (permission not yet initialized) ──
 
@@ -146,7 +147,7 @@ function getWorkspaceSessionId(): string {
 /** Emit terminal_disconnect locally + broadcast to other devices for terminals with active pets */
 function emitDisconnect(instanceId: string) {
   const hasPet = !!usePetStore.getState().pets[instanceId];
-  console.log(`[Terminal] emitDisconnect id=${instanceId} hasPet=${hasPet}`, new Error().stack?.split('\n').slice(1, 4).join(' ← '));
+  log(`[Terminal] emitDisconnect id=${instanceId} hasPet=${hasPet}`, new Error().stack?.split('\n').slice(1, 4).join(' ← '));
   emitActivity({ type: 'terminal_disconnect', instanceId });
   // Broadcast pet disconnect for any terminal that has an active pet
   if (hasPet) {
@@ -155,7 +156,7 @@ function emitDisconnect(instanceId: string) {
 }
 
 function createXterm(instanceId: string): TermSession {
-  console.log(`[Terminal] createXterm id=${instanceId}`);
+  log(`[Terminal] createXterm id=${instanceId}`);
   const fontSize = getSavedFontSize();
 
   // Create session object first so onData can close over session.ws
@@ -224,7 +225,7 @@ function createXterm(instanceId: string): TermSession {
     // Debug: log escape sequences going to PTY (DA responses, focus reports, etc.)
     if (data.includes('\x1b')) {
       const escaped = JSON.stringify(data).slice(1, -1);
-      console.log(`[Terminal] onData id=${instanceId} wsState=${session.ws?.readyState ?? 'null'} escape_seq="${escaped}"`);
+      log(`[Terminal] onData id=${instanceId} wsState=${session.ws?.readyState ?? 'null'} escape_seq="${escaped}"`);
     }
     if (session.ws?.readyState === WebSocket.OPEN) {
       // Ctrl+L from keyboard: clear xterm scrollback before sending to PTY
@@ -306,7 +307,7 @@ async function connectWs(instanceId: string): Promise<void> {
   const wsId = getWorkspaceSessionId();
   const wsInstanceId = `${instanceId}@ws:${wsId}`;
   const url = `${protocol}//${window.location.host}/ws/terminal?token=${token}&instanceId=${encodeURIComponent(wsInstanceId)}`;
-  console.log(`[Terminal] connectWs id=${instanceId} attempt=${session.reconnectAttempts}`);
+  log(`[Terminal] connectWs id=${instanceId} attempt=${session.reconnectAttempts}`);
 
   const ws = new WebSocket(url);
   ws.binaryType = 'arraybuffer';
@@ -316,7 +317,7 @@ async function connectWs(instanceId: string): Promise<void> {
 
   ws.onopen = () => {
     opened = true;
-    console.log(`[Terminal] ws.onopen id=${instanceId} url=${url.replace(/token=[^&]+/, 'token=***')}`);
+    log(`[Terminal] ws.onopen id=${instanceId} url=${url.replace(/token=[^&]+/, 'token=***')}`);
     session.xterm.write(_green('[WS] Connected!') + '\r\n');
     session.reconnectAttempts = 0;
     emitActivity({ type: 'terminal_connect', instanceId });
@@ -345,14 +346,14 @@ async function connectWs(instanceId: string): Promise<void> {
       if (event.data.byteLength < 200) {
         const txt = new TextDecoder().decode(event.data);
         if (txt.includes('\x1b[') || txt.includes('1;2c')) {
-          console.log(`[Terminal] ws.onmessage id=${instanceId} bytes=${event.data.byteLength} contains_escape_or_1;2c raw=${JSON.stringify(txt).slice(0, 300)}`);
+          log(`[Terminal] ws.onmessage id=${instanceId} bytes=${event.data.byteLength} contains_escape_or_1;2c raw=${JSON.stringify(txt).slice(0, 300)}`);
         }
       }
       session.xterm.write(new Uint8Array(event.data));
       emitActivity({ type: 'terminal_data', instanceId, byteCount: event.data.byteLength });
     } else {
       if (event.data.length < 200 && (event.data.includes('\x1b[') || event.data.includes('1;2c'))) {
-        console.log(`[Terminal] ws.onmessage id=${instanceId} bytes=${event.data.length} contains_escape_or_1;2c raw=${JSON.stringify(event.data).slice(0, 300)}`);
+        log(`[Terminal] ws.onmessage id=${instanceId} bytes=${event.data.length} contains_escape_or_1;2c raw=${JSON.stringify(event.data).slice(0, 300)}`);
       }
       session.xterm.write(event.data);
       emitActivity({ type: 'terminal_data', instanceId, byteCount: event.data.length });
@@ -398,7 +399,7 @@ async function connectWs(instanceId: string): Promise<void> {
 
   ws.onclose = (e) => {
     const opened_ = opened;
-    console.log(`[Terminal] ws.onclose id=${instanceId} code=${e.code} opened=${opened_}`);
+    log(`[Terminal] ws.onclose id=${instanceId} code=${e.code} opened=${opened_}`);
 
     // WS was superseded by a newer connection — don't reconnect
     if (session.ws !== ws) return;
@@ -468,7 +469,7 @@ function getOrCreateSession(instanceId: string): TermSession {
   }
   // Always register — idempotent, but needed after resetTerminalRegistry()
   registerTerminal(instanceId);
-  console.log(`[Terminal] getOrCreateSession id=${instanceId} existed=${!!session.ws}`);
+  log(`[Terminal] getOrCreateSession id=${instanceId} existed=${!!session.ws}`);
   if (!session.ws || session.ws.readyState > WebSocket.OPEN) {
     connectWs(instanceId);
   }
@@ -491,7 +492,7 @@ export function destroyAllTerminalSessions(): void {
  *  Resets reconnectAttempts and calls connectWs for each session.
  *  Clears xterm to prevent stale replay buffer from duplicating output. */
 export function reconnectAllTerminalSessions(): void {
-  console.log('[Terminal] reconnectAllTerminalSessions:', Array.from(sessions.keys()), new Error().stack?.split('\n').slice(1, 5).join(' ← '));
+  log('[Terminal] reconnectAllTerminalSessions:', Array.from(sessions.keys()), new Error().stack?.split('\n').slice(1, 5).join(' ← '));
   for (const [instanceId, session] of sessions.entries()) {
     if (!session.ws || session.ws.readyState > WebSocket.OPEN) {
       session.reconnectAttempts = 0;
@@ -505,7 +506,7 @@ export function reconnectAllTerminalSessions(): void {
  *  Used on force_disconnected — PTY stays alive on backend,
  *  new device reconnects to the same shell via GetOrCreate. */
 export function disconnectAllTerminalSessions(): void {
-  console.log('[Terminal] disconnectAllTerminalSessions:', Array.from(sessions.keys()), new Error().stack?.split('\n').slice(1, 5).join(' ← '));
+  log('[Terminal] disconnectAllTerminalSessions:', Array.from(sessions.keys()), new Error().stack?.split('\n').slice(1, 5).join(' ← '));
   for (const session of sessions.values()) {
     if (session.reconnectTimer) {
       clearTimeout(session.reconnectTimer);
@@ -524,7 +525,7 @@ export function disconnectAllTerminalSessions(): void {
  *  Called by layoutStore when a detached terminal panel is closed. */
 export function destroyTerminalSession(instanceId: string): void {
   const session = sessions.get(instanceId);
-  console.log(`[Terminal] destroyTerminalSession id=${instanceId} exists=${!!session}`);
+  log(`[Terminal] destroyTerminalSession id=${instanceId} exists=${!!session}`);
   if (!session) return;
 
   if (session.reconnectTimer) {
@@ -698,7 +699,7 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
     const el = termRef.current;
     if (!el) return;
 
-    console.log(`[Terminal] useEffect MOUNT id=${instanceId} persistent=${persistent}`);
+    log(`[Terminal] useEffect MOUNT id=${instanceId} persistent=${persistent}`);
     const s = getOrCreateSession(instanceId);
 
     // Register re-render notifier
@@ -756,7 +757,7 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
     document.addEventListener('visibilitychange', onVisibilityChange);
 
     return () => {
-      console.log(`[Terminal] useEffect CLEANUP id=${instanceIdRef.current} persistent=${persistentRef.current}`);
+      log(`[Terminal] useEffect CLEANUP id=${instanceIdRef.current} persistent=${persistentRef.current}`);
       clearTimeout(resizeTimer);
       const sess = sessions.get(instanceIdRef.current);
       if (sess) clearTimeout(sess.deferredResizeTimer);

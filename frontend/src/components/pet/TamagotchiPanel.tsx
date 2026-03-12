@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import { usePetStore, getSpriteSheet, TASK_CONFIGS, EMOTION_SWAY, type PetTask, type PetEmotion } from '../../store/petStore';
 import { getTerminalLabel, useTerminalRegistryVersion } from '../../utils/terminalRegistry';
 import { useLayoutStore, type PanelId } from '../../store/layoutStore';
+import { log } from '../../utils/logger';
 
 // ── Animation constants ──
 
@@ -74,7 +75,7 @@ export default function TamagotchiPanel() {
   const petIds = Object.keys(pets);
   const hasPets = petIds.length > 0;
 
-  console.log('[TamagotchiPanel] render:', { petIds, hasPets, selectedPetId, viewMode });
+  log('[TamagotchiPanel] render:', { petIds, hasPets, selectedPetId, viewMode });
 
   // Determine which pets to render in the scene
   const visiblePetIds = viewMode === 'single' && selectedPetId && pets[selectedPetId]

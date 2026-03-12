@@ -1,5 +1,6 @@
 import axios from 'axios';
 import { refreshTokenOnce } from './tokenRefresh';
+import { warn, error } from '../utils/logger';
 
 const api = axios.create({
   baseURL: '/api',
@@ -24,7 +25,7 @@ api.interceptors.response.use(
 
     if (error.response?.status === 401 && !originalRequest._retry && !skipRefresh) {
       originalRequest._retry = true;
-      console.warn('[AUTH] 401 received for', originalRequest.url, '— attempting token refresh');
+      warn('[AUTH] 401 received for', originalRequest.url, '— attempting token refresh');
 
       const refreshToken = localStorage.getItem('refresh_token');
       if (refreshToken) {
@@ -36,13 +37,13 @@ api.interceptors.response.use(
           }
           throw new Error('refresh returned null');
         } catch (refreshErr) {
-          console.error('[AUTH] Token refresh FAILED — redirecting to /login', refreshErr);
+          error('[AUTH] Token refresh FAILED — redirecting to /login', refreshErr);
           localStorage.removeItem('access_token');
           localStorage.removeItem('refresh_token');
           window.location.href = '/login';
         }
       } else {
-        console.error('[AUTH] No refresh_token — redirecting to /login');
+        error('[AUTH] No refresh_token — redirecting to /login');
         window.location.href = '/login';
       }
     }

@@ -8,6 +8,7 @@ import {
   updateWorkspaceSession,
   deleteWorkspaceSession,
 } from '../api/workspaceSessions';
+import { log, warn } from '../utils/logger';
 import { getDeviceId, detectDeviceType } from '../utils/deviceId';
 import { sendSyncMessage } from '../utils/syncBridge';
 import { useWorkspaceStore, type WorkspaceSnapshot } from './workspaceStore';
@@ -113,7 +114,7 @@ export const useWorkspaceSessionStore = create<WorkspaceSessionState>((set, get)
               useLayoutStore.getState().restoreLayoutFromSnapshot(snap.layout, panelIdMapping);
             }
           } catch {
-            console.warn('[WorkspaceSession] Failed to restore snapshot');
+            warn('[WorkspaceSession] Failed to restore snapshot');
           }
           syncThemeFromServer();
           set({ loading: false });
@@ -135,7 +136,7 @@ export const useWorkspaceSessionStore = create<WorkspaceSessionState>((set, get)
               useLayoutStore.getState().restoreLayoutFromSnapshot(snap.layout, panelIdMapping);
             }
           } catch {
-            console.warn('[WorkspaceSession] Failed to restore snapshot, using default layout');
+            warn('[WorkspaceSession] Failed to restore snapshot, using default layout');
           }
           return;
         } catch {
@@ -246,7 +247,7 @@ export const useWorkspaceSessionStore = create<WorkspaceSessionState>((set, get)
           useLayoutStore.getState().resetLayout();
         }
       } catch {
-        console.warn('[WorkspaceSession] Failed to restore snapshot, resetting layout');
+        warn('[WorkspaceSession] Failed to restore snapshot, resetting layout');
         useWorkspaceStore.getState().restoreFromSnapshot({
           openTabs: [],
           activeTabIndex: null,
@@ -271,13 +272,13 @@ export const useWorkspaceSessionStore = create<WorkspaceSessionState>((set, get)
 
   saveCurrentSession: async () => {
     if (_restoringSnapshot) {
-      console.log('[WorkspaceSession] saveCurrentSession BLOCKED — _restoringSnapshot=true');
+      log('[WorkspaceSession] saveCurrentSession BLOCKED — _restoringSnapshot=true');
       return;
     }
     const { activeSessionId } = get();
     if (!activeSessionId) return;
 
-    console.log('[WorkspaceSession] saveCurrentSession EXECUTING', { activeSessionId, stack: new Error().stack?.split('\n').slice(1, 4).join(' ← ') });
+    log('[WorkspaceSession] saveCurrentSession EXECUTING', { activeSessionId, stack: new Error().stack?.split('\n').slice(1, 4).join(' ← ') });
     try {
       const workspaceSnap = useWorkspaceStore.getState().getWorkspaceSnapshot();
       const layoutSnap = useLayoutStore.getState().getLayoutSnapshot();
@@ -362,17 +363,17 @@ export const useWorkspaceSessionStore = create<WorkspaceSessionState>((set, get)
             // Full reload (Take Over): disconnect terminals, restore layout, then caller reconnects
             disconnectAllTerminalSessions();
           }
-          console.log('[WorkspaceSession] restoreFromSnapshot START — _restoringSnapshot=true');
+          log('[WorkspaceSession] restoreFromSnapshot START — _restoringSnapshot=true');
           _restoringSnapshot = true;
           try {
             const panelIdMapping = useWorkspaceStore.getState().restoreFromSnapshot(snap.workspace);
             useLayoutStore.getState().restoreLayoutFromSnapshot(snap.layout, panelIdMapping);
           } finally {
             // Delay reset so Zustand subscribe callbacks don't trigger save
-            console.log('[WorkspaceSession] restoreFromSnapshot DONE — holding _restoringSnapshot for 3s');
+            log('[WorkspaceSession] restoreFromSnapshot DONE — holding _restoringSnapshot for 3s');
             setTimeout(() => {
               _restoringSnapshot = false;
-              console.log('[WorkspaceSession] _restoringSnapshot=false (3s elapsed)');
+              log('[WorkspaceSession] _restoringSnapshot=false (3s elapsed)');
             }, 3000);
           }
         }
@@ -380,7 +381,7 @@ export const useWorkspaceSessionStore = create<WorkspaceSessionState>((set, get)
       syncThemeFromServer();
       set({ sessions: data || [] });
     } catch {
-      console.warn('[WorkspaceSession] Failed to reload active session');
+      warn('[WorkspaceSession] Failed to reload active session');
     }
   },
 

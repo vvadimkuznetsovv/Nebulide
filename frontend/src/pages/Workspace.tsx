@@ -30,6 +30,7 @@ import LayoutRenderer from '../components/layout/LayoutRenderer';
 import EdgeDropZone from '../components/layout/EdgeDropZone';
 import { panelIcons, getPanelIcon, getPanelTitle } from '../components/layout/PanelContent';
 import { useTerminalRegistryVersion } from '../utils/terminalRegistry';
+import { log } from '../utils/logger';
 
 // Custom collision detection: when dragging file tree items, prioritize
 // file tree drop targets (folder:/filezone:) over large panel zones (merge-/split-).
@@ -91,10 +92,10 @@ export default function Workspace() {
 
   useEffect(() => {
     const debouncedSave = () => {
-      console.log('[Workspace] debouncedSave triggered (store changed)');
+      log('[Workspace] debouncedSave triggered (store changed)');
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = window.setTimeout(() => {
-        console.log('[Workspace] debouncedSave FIRING (2s elapsed)');
+        log('[Workspace] debouncedSave FIRING (2s elapsed)');
         saveCurrentSession();
         debounceRef.current = null;
       }, 2000);
@@ -104,14 +105,14 @@ export default function Workspace() {
       const s = state as unknown as Record<string, unknown>;
       const p = prev as unknown as Record<string, unknown>;
       const changed = Object.keys(s).filter(k => s[k] !== p[k]);
-      console.log('[Workspace] layoutStore changed:', changed);
+      log('[Workspace] layoutStore changed:', changed);
       debouncedSave();
     });
     const unsubWorkspace = useWorkspaceStore.subscribe((state, prev) => {
       const s = state as unknown as Record<string, unknown>;
       const p = prev as unknown as Record<string, unknown>;
       const changed = Object.keys(s).filter(k => s[k] !== p[k]);
-      console.log('[Workspace] workspaceStore changed:', changed);
+      log('[Workspace] workspaceStore changed:', changed);
       debouncedSave();
     });
     const safetyInterval = setInterval(saveCurrentSession, 30_000);

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { log, warn } from '../utils/logger';
 
 interface User {
   id: string;
@@ -27,19 +28,19 @@ export const useAuthStore = create<AuthState>((set) => ({
   isAuthenticated: false,
 
   setAuth: (user, accessToken, refreshToken) => {
-    console.log('[AUTH-STORE] setAuth user=', user.username);
+    log('[AUTH-STORE] setAuth user=', user.username);
     localStorage.setItem('access_token', accessToken);
     localStorage.setItem('refresh_token', refreshToken);
     set({ user, accessToken, isAuthenticated: true });
   },
 
   setUser: (user) => {
-    console.log('[AUTH-STORE] setUser', user.username);
+    log('[AUTH-STORE] setUser', user.username);
     set({ user });
   },
 
   clearAuth: () => {
-    console.warn('[AUTH-STORE] clearAuth — tokens removed');
+    warn('[AUTH-STORE] clearAuth — tokens removed');
     localStorage.removeItem('access_token');
     localStorage.removeItem('refresh_token');
     set({ user: null, accessToken: null, isAuthenticated: false });
@@ -47,7 +48,7 @@ export const useAuthStore = create<AuthState>((set) => ({
 
   loadFromStorage: () => {
     const token = localStorage.getItem('access_token');
-    console.log('[AUTH-STORE] loadFromStorage hasToken=', !!token);
+    log('[AUTH-STORE] loadFromStorage hasToken=', !!token);
     if (token) {
       set({ accessToken: token, isAuthenticated: true });
       return true;

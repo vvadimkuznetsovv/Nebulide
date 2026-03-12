@@ -1,5 +1,6 @@
 // Module-level activity event bus.
 // Sources (terminal, chat, editor) emit events; pet store subscribes.
+import { log } from './logger';
 
 export type ActivityEvent =
   | { type: 'terminal_data'; instanceId: string; byteCount: number }
@@ -24,7 +25,7 @@ const listeners = new Set<Listener>();
 export function emitActivity(event: ActivityEvent) {
   // Log non-data events (data events are too frequent)
   if (event.type !== 'terminal_data' && event.type !== 'terminal_input' && event.type !== 'terminal_prompt_submit') {
-    console.log('[ActivityBus] emit:', event.type, event);
+    log('[ActivityBus] emit:', event.type, event);
   }
   for (const fn of listeners) fn(event);
 }

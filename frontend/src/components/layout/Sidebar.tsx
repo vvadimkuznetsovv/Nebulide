@@ -12,6 +12,7 @@ import { panelIcons, panelTitles } from './PanelContent';
 import type { BasePanelId } from '../../store/layoutUtils';
 import { getDeviceId } from '../../utils/deviceId';
 import { ACCENT_PRESETS, getAccentColor, getBlobsEnabled, saveThemeToServer } from '../../utils/theme';
+import { isLoggingEnabled, setLoggingEnabled } from '../../utils/logger';
 
 interface SidebarProps {
   isOpen: boolean;
@@ -89,6 +90,7 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
   const setUser = useAuthStore((s) => s.setUser);
   const devMode = useWorkspaceStore((s) => s.devMode);
   const setDevMode = useWorkspaceStore((s) => s.setDevMode);
+  const [loggingOn, setLoggingOn] = useState(isLoggingEnabled);
 
   const handleChangePassword = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -380,25 +382,50 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
                 <label className="block text-xs font-semibold mb-3 uppercase tracking-wider" style={{ color: 'var(--text-muted)', fontSize: '11px', letterSpacing: '0.1em' }}>
                   Developer
                 </label>
-                <div
-                  className="flex items-center justify-between px-3 py-2.5 rounded-xl cursor-pointer"
-                  style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.04)' }}
-                  onClick={() => setDevMode(!devMode)}
-                >
-                  <div>
-                    <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>Developer mode</span>
-                    <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
-                      Ctrl+Shift+C opens DevTools instead of copy
-                    </p>
-                  </div>
+                <div className="space-y-2">
                   <div
-                    className="w-9 h-5 rounded-full relative transition-colors duration-200"
-                    style={{ background: devMode ? 'var(--accent)' : 'rgba(255,255,255,0.1)' }}
+                    className="flex items-center justify-between px-3 py-2.5 rounded-xl cursor-pointer"
+                    style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.04)' }}
+                    onClick={() => setDevMode(!devMode)}
                   >
+                    <div>
+                      <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>Developer mode</span>
+                      <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                        Ctrl+Shift+C opens DevTools instead of copy
+                      </p>
+                    </div>
                     <div
-                      className="absolute top-0.5 w-4 h-4 rounded-full transition-transform duration-200"
-                      style={{ background: 'white', transform: devMode ? 'translateX(18px)' : 'translateX(2px)' }}
-                    />
+                      className="w-9 h-5 rounded-full relative transition-colors duration-200"
+                      style={{ background: devMode ? 'var(--accent)' : 'rgba(255,255,255,0.1)' }}
+                    >
+                      <div
+                        className="absolute top-0.5 w-4 h-4 rounded-full transition-transform duration-200"
+                        style={{ background: 'white', transform: devMode ? 'translateX(18px)' : 'translateX(2px)' }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Debug logging toggle */}
+                  <div
+                    className="flex items-center justify-between px-3 py-2.5 rounded-xl cursor-pointer"
+                    style={{ background: 'rgba(0,0,0,0.2)', border: '1px solid rgba(255,255,255,0.04)' }}
+                    onClick={() => { const next = !loggingOn; setLoggingOn(next); setLoggingEnabled(next); }}
+                  >
+                    <div>
+                      <span className="text-xs" style={{ color: 'var(--text-secondary)' }}>Debug logging</span>
+                      <p className="text-[10px] mt-0.5" style={{ color: 'var(--text-muted)' }}>
+                        Terminal, sync, pet & auth logs in console
+                      </p>
+                    </div>
+                    <div
+                      className="w-9 h-5 rounded-full relative transition-colors duration-200"
+                      style={{ background: loggingOn ? 'var(--accent)' : 'rgba(255,255,255,0.1)' }}
+                    >
+                      <div
+                        className="absolute top-0.5 w-4 h-4 rounded-full transition-transform duration-200"
+                        style={{ background: 'white', transform: loggingOn ? 'translateX(18px)' : 'translateX(2px)' }}
+                      />
+                    </div>
                   </div>
                 </div>
               </div>
