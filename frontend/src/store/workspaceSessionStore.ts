@@ -62,7 +62,7 @@ interface WorkspaceSessionState {
   updateSessionsList: (sessions: WorkspaceSession[]) => void;
 
   // Sync actions
-  reloadActiveSession: (opts?: { soft?: boolean }) => Promise<void>;
+  reloadActiveSession: (opts?: { soft?: boolean; skipSave?: boolean }) => Promise<void>;
 
   // Lock actions
   setLockState: (sessionId: string, status: LockStatus, info?: LockInfo) => void;
@@ -337,8 +337,12 @@ export const useWorkspaceSessionStore = create<WorkspaceSessionState>((set, get)
 
     try {
       // Save current state before fetching — prevents stale snapshot from
-      // overwriting recent changes (e.g. just-closed terminals)
-      try { await get().saveCurrentSession(); } catch { /* ignore */ }
+      // overwriting recent changes (e.g. just-closed terminals).
+      // skipSave: true when triggered by workspace_session_changed — prevents
+      // ping-pong loop (reload→save→broadcast→other device reload→save→...)
+      if (!opts?.skipSave) {
+        try { await get().saveCurrentSession(); } catch { /* ignore */ }
+      }
 
       const { data } = await getWorkspaceSessions();
       const fresh = data?.find((s) => s.id === activeSessionId);
