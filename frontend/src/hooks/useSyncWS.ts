@@ -193,11 +193,10 @@ export function useSyncWS() {
                 isRecentSelfSave: isRecentSelfSave(),
                 device_id: msg.device_id,
               });
-              if (msg.action === 'updated' && msg.session_id === store.activeSessionId && !isRecentSelfSave()) {
-                console.log('[Sync] → RELOADING (skipSave: true)');
-                store.reloadActiveSession({ skipSave: true });
-              } else {
-                console.log('[Sync] → SKIPPED (self-save or different session)');
+              // NEVER reload active session from workspace_session_changed —
+              // it causes ping-pong loop (restore→store change→save→broadcast→restore).
+              // Cross-device layout sync happens ONLY via visibilitychange (tab focus).
+              {
                 getWorkspaceSessions().then(({ data }) => {
                   store.updateSessionsList(data || []);
                 }).catch(() => { /* ignore */ });
