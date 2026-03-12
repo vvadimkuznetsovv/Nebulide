@@ -1413,6 +1413,7 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
 
                   const KNOB_MAX = 30; // max knob travel
                   const DEADZONE = 10;
+                  let delayTimer = 0;
                   let repeatTimer = 0;
                   let lastDir = '';
                   // Store joystickMode in a ref-like closure that reads from DOM
@@ -1459,19 +1460,31 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
                     if (dir) {
                       fire(dir);
                       lastDir = dir;
-                      repeatTimer = window.setInterval(() => { if (lastDir) fire(lastDir); }, 100);
+                      // Initial delay 300ms, then repeat every 200ms
+                      delayTimer = window.setTimeout(() => {
+                        repeatTimer = window.setInterval(() => { if (lastDir) fire(lastDir); }, 200);
+                      }, 300);
                     }
 
                     const onMove = (ev: PointerEvent) => {
                       const pos = updateKnob(ev.clientX, ev.clientY);
                       const d = getDir(pos.dx, pos.dy);
                       if (d !== lastDir) {
+                        // Direction changed — reset timers
+                        clearTimeout(delayTimer);
+                        clearInterval(repeatTimer);
                         lastDir = d;
-                        if (d) fire(d);
+                        if (d) {
+                          fire(d);
+                          delayTimer = window.setTimeout(() => {
+                            repeatTimer = window.setInterval(() => { if (lastDir) fire(lastDir); }, 200);
+                          }, 300);
+                        }
                       }
                     };
 
                     const onUp = () => {
+                      clearTimeout(delayTimer);
                       clearInterval(repeatTimer);
                       lastDir = '';
                       knob.style.transform = 'translate(0, 0)';
