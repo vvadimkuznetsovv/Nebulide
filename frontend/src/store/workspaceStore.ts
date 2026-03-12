@@ -446,7 +446,7 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       tempTabId,
       detachedEditors,
       fileTreeVisible: snap.fileTreeVisible,
-      sidebarOpen: snap.sidebarOpen,
+      // sidebarOpen: NOT restored from snapshot — local UI preference per device
       toolbarOpen: snap.toolbarOpen,
       previewTabs: [],
       activePreviewTabId: null,
