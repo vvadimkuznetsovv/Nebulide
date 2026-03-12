@@ -1026,6 +1026,17 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
   // ── Copy mode (row 3) — character-level selection via buttons ──
 
   /** Apply selection from selRef coordinates using xterm.select(col, row, length) */
+  /** Scroll only if target row is outside the visible viewport */
+  const scrollIfNeeded = useCallback((xterm: import('@xterm/xterm').Terminal, row: number) => {
+    const viewportTop = xterm.buffer.active.viewportY;
+    const viewportBottom = viewportTop + xterm.rows - 1;
+    if (row < viewportTop) {
+      xterm.scrollToLine(row);
+    } else if (row > viewportBottom) {
+      xterm.scrollToLine(row - xterm.rows + 1);
+    }
+  }, []);
+
   const applySelection = useCallback(() => {
     const s = sessions.get(instanceId);
     if (!s) return;
@@ -1100,7 +1111,7 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
       }
     }
     applySelection();
-    s.xterm.scrollToLine(boundary === 'start' ? sel.startRow : sel.endRow);
+    scrollIfNeeded(s.xterm, boundary === 'start' ? sel.startRow : sel.endRow);
   }, [instanceId, applySelection, getLineLen]);
 
   /** Move selection boundary by character (col delta) */
@@ -1143,7 +1154,7 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
       }
     }
     applySelection();
-    s.xterm.scrollToLine(boundary === 'start' ? sel.startRow : sel.endRow);
+    scrollIfNeeded(s.xterm, boundary === 'start' ? sel.startRow : sel.endRow);
   }, [instanceId, applySelection, getLineLen]);
 
   const copySelection = useCallback(() => {
