@@ -6,7 +6,7 @@ import { useLayoutStore } from '../store/layoutStore';
 import { getWorkspaceSessions } from '../api/workspaceSessions';
 import { getDeviceId, detectDeviceType } from '../utils/deviceId';
 import { setSyncWs } from '../utils/syncBridge';
-import { disconnectAllTerminalSessions, reconnectAllTerminalSessions, getActiveTerminalInstanceIds } from '../components/terminal/Terminal';
+import { disconnectAllTerminalSessions, getActiveTerminalInstanceIds } from '../components/terminal/Terminal';
 import { emitActivity } from '../utils/activityBus';
 import { usePetStore } from '../store/petStore';
 import { setTerminalName } from '../utils/terminalRegistry';
