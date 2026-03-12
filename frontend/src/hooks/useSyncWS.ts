@@ -6,7 +6,7 @@ import { useLayoutStore } from '../store/layoutStore';
 import { getWorkspaceSessions } from '../api/workspaceSessions';
 import { getDeviceId, detectDeviceType } from '../utils/deviceId';
 import { setSyncWs } from '../utils/syncBridge';
-import { disconnectAllTerminalSessions, getActiveTerminalInstanceIds } from '../components/terminal/Terminal';
+import { disconnectAllTerminalSessions, reconnectAllTerminalSessions, getActiveTerminalInstanceIds } from '../components/terminal/Terminal';
 import { emitActivity } from '../utils/activityBus';
 import { usePetStore } from '../store/petStore';
 import { setTerminalName } from '../utils/terminalRegistry';
@@ -79,9 +79,9 @@ export function useSyncWS() {
             case 'register_ok':
               if (msg.session_id) {
                 store.setLockState(msg.session_id, 'owner');
-                // Soft reload — do NOT disconnect/reconnect terminals.
-                // Terminals manage their own WS connections; disconnecting causes
-                // DA response fragmentation (1;2c spam) on every reconnect.
+                // Reconnect terminals that were disconnected by workspace_locked/force_disconnected.
+                // Soft reload — don't disconnect terminals again (they're already dead).
+                reconnectAllTerminalSessions();
                 setTimeout(() => {
                   store.reloadActiveSession({ soft: true, skipSave: true }).then(() => {
                     // Clean up phantom pets — terminals that exist in petStore but not
