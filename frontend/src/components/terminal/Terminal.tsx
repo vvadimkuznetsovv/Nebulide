@@ -227,6 +227,10 @@ function createXterm(instanceId: string): TermSession {
       console.log(`[Terminal] onData id=${instanceId} wsState=${session.ws?.readyState ?? 'null'} escape_seq="${escaped}"`);
     }
     if (session.ws?.readyState === WebSocket.OPEN) {
+      // Ctrl+L from keyboard: clear xterm scrollback before sending to PTY
+      if (data === '\x0c') {
+        session.xterm.clear();
+      }
       session.ws.send(new TextEncoder().encode(data));
       emitActivity({ type: 'terminal_input', instanceId });
 
@@ -323,7 +327,7 @@ async function connectWs(instanceId: string): Promise<void> {
     try {
       session.fitAddon.fit();
       const dims = session.fitAddon.proposeDimensions();
-      if (dims && dims.cols >= 2 && dims.rows >= 2) {
+      if (dims && dims.cols >= 1 && dims.rows >= 1) {
         session.lastCols = dims.cols;
         session.lastRows = dims.rows;
         session.lastResizeSent = Date.now();
@@ -664,7 +668,7 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
     try {
       s.fitAddon.fit();
       const dims = s.fitAddon.proposeDimensions();
-      if (!dims || dims.cols < 2 || dims.rows < 2) return;
+      if (!dims || dims.cols < 1 || dims.rows < 1) return;
       if (dims.cols !== s.lastCols || dims.rows !== s.lastRows) {
         s.lastCols = dims.cols;
         s.lastRows = dims.rows;
@@ -966,6 +970,10 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
   const sendKey = useCallback((data: string) => {
     const s = sessions.get(instanceId);
     if (s?.ws?.readyState === WebSocket.OPEN) {
+      // Ctrl+L: clear xterm scrollback buffer + send to PTY for shell redraw
+      if (data === '\x0c') {
+        s.xterm.clear();
+      }
       s.ws.send(new TextEncoder().encode(data));
     }
   }, [instanceId]);
