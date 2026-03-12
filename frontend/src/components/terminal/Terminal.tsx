@@ -1411,15 +1411,12 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
                   const knob = el.querySelector('.terminal-joystick-knob') as HTMLElement;
                   if (!knob) return;
 
-                  const KNOB_MAX = 30; // max knob travel
-                  const DEADZONE = 18; // entry threshold
-                  const DEADZONE_EXIT = 8; // exit threshold (hysteresis)
-                  let delayTimer = 0;
+                  const KNOB_MAX = 30;
+                  const DEADZONE = 20;
                   let repeatTimer = 0;
                   let lastDir = '';
                   let repeatCount = 0;
-                  let lastFireTime = 0;
-                  const FIRE_COOLDOWN = 120; // min ms between move-triggered fires
+                  let firedOnDown = false; // prevent double-fire on tap
 
                   const getModeFromDom = () => {
                     const activeBtn = el.parentElement?.querySelector('.terminal-joystick-mode .active');
@@ -1432,11 +1429,16 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
                     else if (dir === 'down') moveSelRow(mode, 1);
                     else if (dir === 'left') moveSelCol(mode, -1);
                     else if (dir === 'right') moveSelCol(mode, 1);
-                    lastFireTime = Date.now();
                   };
 
                   const getRepeatDelay = () => Math.max(40, 250 - repeatCount * 30);
 
+                  const stopRepeat = () => {
+                    clearTimeout(repeatTimer);
+                    repeatCount = 0;
+                  };
+
+                  // Only repeat timer calls fire() — pointermove NEVER fires directly
                   const scheduleRepeat = () => {
                     repeatTimer = window.setTimeout(() => {
                       if (!lastDir) return;
@@ -1446,28 +1448,9 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
                     }, getRepeatDelay());
                   };
 
-                  const startRepeat = () => {
-                    repeatCount = 0;
-                    delayTimer = window.setTimeout(() => {
-                      if (!lastDir) return;
-                      repeatCount++;
-                      fire(lastDir);
-                      scheduleRepeat();
-                    }, 300);
-                  };
-
-                  const stopRepeat = () => {
-                    clearTimeout(delayTimer);
-                    clearTimeout(repeatTimer);
-                    repeatCount = 0;
-                  };
-
-                  // Hysteresis: need DEADZONE to enter a direction, only DEADZONE_EXIT to leave
-                  const getDir = (dx: number, dy: number, current: string) => {
-                    const adx = Math.abs(dx), ady = Math.abs(dy);
-                    const threshold = current ? DEADZONE_EXIT : DEADZONE;
-                    if (adx < threshold && ady < threshold) return '';
-                    if (adx > ady) return dx > 0 ? 'right' : 'left';
+                  const getDir = (dx: number, dy: number) => {
+                    if (Math.abs(dx) < DEADZONE && Math.abs(dy) < DEADZONE) return '';
+                    if (Math.abs(dx) > Math.abs(dy)) return dx > 0 ? 'right' : 'left';
                     return dy > 0 ? 'down' : 'up';
                   };
 
@@ -1477,6 +1460,7 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
                     const rect = el.getBoundingClientRect();
                     const cx = rect.left + rect.width / 2;
                     const cy = rect.top + rect.height / 2;
+                    firedOnDown = false;
 
                     const updateKnob = (clientX: number, clientY: number) => {
                       let dx = clientX - cx;
@@ -1491,30 +1475,51 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
                     };
 
                     const { dx, dy } = updateKnob(e.clientX, e.clientY);
-                    const dir = getDir(dx, dy, '');
+                    const dir = getDir(dx, dy);
+                    lastDir = dir;
                     if (dir) {
                       fire(dir);
-                      lastDir = dir;
-                      startRepeat();
+                      firedOnDown = true;
+                      // Hold repeat: 350ms delay then accelerating
+                      repeatTimer = window.setTimeout(() => {
+                        if (!lastDir) return;
+                        repeatCount++;
+                        fire(lastDir);
+                        scheduleRepeat();
+                      }, 350);
                     }
 
                     const onMove = (ev: PointerEvent) => {
                       const pos = updateKnob(ev.clientX, ev.clientY);
-                      const d = getDir(pos.dx, pos.dy, lastDir);
+                      const d = getDir(pos.dx, pos.dy);
                       if (d !== lastDir) {
+                        // Direction changed — restart repeat for new direction
+                        // but do NOT fire() here, only update lastDir
                         stopRepeat();
                         lastDir = d;
                         if (d) {
-                          // Throttle: don't fire if too soon after last fire
-                          if (Date.now() - lastFireTime >= FIRE_COOLDOWN) {
-                            fire(d);
-                          }
-                          startRepeat();
+                          // Start repeat for new direction (first fire after 150ms)
+                          repeatTimer = window.setTimeout(() => {
+                            if (!lastDir) return;
+                            fire(lastDir);
+                            repeatCount = 1;
+                            scheduleRepeat();
+                          }, 150);
                         }
                       }
                     };
 
                     const onUp = () => {
+                      // If tap landed in deadzone (no fire on down), fire once for closest direction
+                      if (!firedOnDown && !lastDir) {
+                        const pos = updateKnob(e.clientX, e.clientY);
+                        // Lower threshold for tap
+                        const adx = Math.abs(pos.dx), ady = Math.abs(pos.dy);
+                        if (adx > 5 || ady > 5) {
+                          const tapDir = adx > ady ? (pos.dx > 0 ? 'right' : 'left') : (pos.dy > 0 ? 'down' : 'up');
+                          fire(tapDir);
+                        }
+                      }
                       stopRepeat();
                       lastDir = '';
                       knob.style.transform = 'translate(0, 0)';
