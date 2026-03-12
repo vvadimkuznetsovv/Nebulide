@@ -5,19 +5,108 @@ import toast from 'react-hot-toast';
 import { log } from '../utils/logger';
 
 /**
+ * Check clipboard for image via Clipboard API (async).
+ * Returns the first image blob found, or null.
+ */
+async function getClipboardImage(): Promise<File | null> {
+  try {
+    const clipItems = await navigator.clipboard.read();
+    for (const item of clipItems) {
+      for (const type of item.types) {
+        if (type.startsWith('image/')) {
+          const blob = await item.getType(type);
+          return new File([blob], 'clipboard.png', { type });
+        }
+      }
+    }
+  } catch {
+    // Clipboard API denied or not available
+  }
+  return null;
+}
+
+async function handleImageUpload(file: File, isXterm: boolean) {
+  const ext = file.type.split('/')[1]?.replace('jpeg', 'jpg') || 'png';
+  const name = `clipboard_${Date.now()}.${ext}`;
+  log('[ImagePaste] uploading', { name, type: file.type, size: file.size, isXterm });
+
+  try {
+    const { data } = await uploadFile(file, undefined, name);
+    log('[ImagePaste] uploaded:', data.path);
+    const sent = sendToActiveTerminal(data.path);
+    if (sent) {
+      toast.success('Image uploaded & sent to terminal');
+    } else {
+      try { await navigator.clipboard.writeText(data.path); } catch { /* noop */ }
+      toast.success(`Image uploaded: ${data.path}`, { duration: 4000 });
+    }
+  } catch (err) {
+    console.error('[ImagePaste] upload failed:', err);
+    toast.error('Failed to upload image');
+  }
+}
+
+/**
  * Global image paste interceptor.
  * Captures Ctrl+V with image data anywhere on the page.
  * Uploads image to ~/uploads/, sends path to active terminal or shows toast.
+ *
+ * Two-layer approach:
+ * 1. keydown (capture) — intercepts Ctrl+V BEFORE xterm processes it,
+ *    checks clipboard for image via async Clipboard API.
+ * 2. paste (capture) — fallback for non-keyboard pastes (context menu, etc.)
  */
 export function useGlobalImagePaste() {
   useEffect(() => {
-    const handler = async (e: ClipboardEvent) => {
+    // Flag to prevent double-handling (keydown already handled → skip paste event)
+    let keydownHandled = false;
+
+    // Layer 1: keydown capture — catches Ctrl+V before xterm's keydown handler
+    const keydownHandler = async (e: KeyboardEvent) => {
       if (e.defaultPrevented) return;
+      if (!((e.ctrlKey || e.metaKey) && e.key === 'v')) return;
+
+      keydownHandled = false;
+
+      const target = e.target as HTMLElement;
+      const isXtermTextarea = target.classList?.contains('xterm-helper-textarea');
+
+      if (!isXtermTextarea) {
+        // Don't intercept real text inputs
+        const isTextInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA'
+          || target.isContentEditable
+          || target.closest('.monaco-editor');
+        if (isTextInput) return;
+      }
+
+      // Check clipboard for image via async API
+      const imageFile = await getClipboardImage();
+      if (!imageFile) {
+        log('[ImagePaste] keydown: no image in clipboard');
+        return;
+      }
+
+      // We have an image — prevent default paste behavior
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      keydownHandled = true;
+
+      log('[ImagePaste] keydown: intercepted Ctrl+V with image');
+      await handleImageUpload(imageFile, isXtermTextarea);
+    };
+
+    // Layer 2: paste event capture — fallback for non-keyboard pastes
+    const pasteHandler = async (e: ClipboardEvent) => {
+      if (e.defaultPrevented) return;
+      if (keydownHandled) {
+        keydownHandled = false;
+        return;
+      }
 
       const items = e.clipboardData?.items;
       if (!items) return;
 
-      // Check if clipboard contains an image
       let imageItem: DataTransferItem | null = null;
       for (let i = 0; i < items.length; i++) {
         if (items[i].type.startsWith('image/')) {
@@ -28,23 +117,18 @@ export function useGlobalImagePaste() {
       if (!imageItem) return;
 
       const target = e.target as HTMLElement;
-
-      // xterm's hidden textarea — ALWAYS intercept (terminal has no clipboard access)
       const isXtermTextarea = target.classList?.contains('xterm-helper-textarea');
 
       if (!isXtermTextarea) {
-        // Don't intercept if the target is a real text input that handles paste itself
         const isTextInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA'
           || target.isContentEditable
           || target.closest('.monaco-editor');
         if (isTextInput) {
-          // If clipboard also has text, let the input handle it (text paste)
           let hasText = false;
           for (let i = 0; i < items.length; i++) {
             if (items[i].type === 'text/plain') { hasText = true; break; }
           }
           if (hasText) return;
-          // Image-only paste in a real textarea (e.g. chat) — let component handle
           return;
         }
       }
@@ -54,31 +138,18 @@ export function useGlobalImagePaste() {
 
       const blob = imageItem.getAsFile();
       if (!blob) {
-        log('[ImagePaste] getAsFile() returned null');
+        log('[ImagePaste] paste: getAsFile() returned null');
         return;
       }
 
-      const ext = imageItem.type.split('/')[1]?.replace('jpeg', 'jpg') || 'png';
-      const name = `clipboard_${Date.now()}.${ext}`;
-      log('[ImagePaste] uploading', { name, type: imageItem.type, size: blob.size, isXterm: isXtermTextarea });
-
-      try {
-        const { data } = await uploadFile(blob, undefined, name);
-        log('[ImagePaste] uploaded:', data.path);
-        const sent = sendToActiveTerminal(data.path);
-        if (sent) {
-          toast.success('Image uploaded & sent to terminal');
-        } else {
-          try { await navigator.clipboard.writeText(data.path); } catch { /* noop */ }
-          toast.success(`Image uploaded: ${data.path}`, { duration: 4000 });
-        }
-      } catch (err) {
-        console.error('[ImagePaste] upload failed:', err);
-        toast.error('Failed to upload image');
-      }
+      await handleImageUpload(blob, isXtermTextarea);
     };
 
-    document.addEventListener('paste', handler, true);
-    return () => document.removeEventListener('paste', handler, true);
+    document.addEventListener('keydown', keydownHandler, true);
+    document.addEventListener('paste', pasteHandler, true);
+    return () => {
+      document.removeEventListener('keydown', keydownHandler, true);
+      document.removeEventListener('paste', pasteHandler, true);
+    };
   }, []);
 }
