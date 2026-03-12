@@ -85,6 +85,11 @@ export function getAnyTerminalSelection(): string | null {
   return null;
 }
 
+/** Focus a specific terminal's xterm instance. */
+export function focusTerminal(instanceId: string): void {
+  sessions.get(instanceId)?.xterm.focus();
+}
+
 /** Send text to the first connected terminal session. Returns true if sent. */
 export function sendToActiveTerminal(text: string): boolean {
   for (const sess of sessions.values()) {

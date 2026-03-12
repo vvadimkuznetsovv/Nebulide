@@ -7,6 +7,7 @@ import { useWorkspaceStore } from '../../store/workspaceStore';
 import { useTerminalRegistryVersion, getTerminalCustomName, getTerminalLabel, setTerminalName } from '../../utils/terminalRegistry';
 import { sendSyncMessage } from '../../utils/syncBridge';
 import PanelContent, { getPanelIcon, getPanelTitle } from './PanelContent';
+import { focusTerminal } from '../terminal/Terminal';
 import ContextMenu from '../files/ContextMenu';
 import { useLongPress, mergeEventHandlers } from '../../hooks/useLongPress';
 
@@ -332,6 +333,13 @@ function DragHeader({ panelId, nodeId, showSidebarBtn }: { panelId: PanelId; nod
         {...attributes}
         onClick={() => {
           if (longPressedRef.current) { longPressedRef.current = false; return; }
+          // Focus terminal xterm when its header is clicked
+          if (panelId === 'terminal') {
+            setTimeout(() => focusTerminal('default'), 50);
+          } else if (isDetachedTerminal(panelId)) {
+            const instId = getDetachedTerminalId(panelId);
+            if (instId) setTimeout(() => focusTerminal(instId), 50);
+          }
         }}
       >
         {showSidebarBtn && <SidebarToggleBtn />}
@@ -452,6 +460,13 @@ function DraggableTab({
         onClick={() => {
           if (longPressedRef.current) { longPressedRef.current = false; return; }
           onActivate();
+          // Focus terminal xterm when its tab is clicked
+          if (panelId === 'terminal') {
+            setTimeout(() => focusTerminal('default'), 50);
+          } else if (isDetachedTerminal(panelId)) {
+            const instId = getDetachedTerminalId(panelId);
+            if (instId) setTimeout(() => focusTerminal(instId), 50);
+          }
         }}
         onContextMenu={handleContextMenu}
         {...mergedHandlers}
