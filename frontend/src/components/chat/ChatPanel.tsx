@@ -755,6 +755,18 @@ export default function ChatPanel(_props: ChatPanelProps) {
                       }}>
                         <span>{projectDisplayName(session.project)}</span>
                         <span>{formatSize(session.size_mb)}</span>
+                        {(session.branch_count ?? 0) > 1 && (
+                          <span style={{
+                            background: 'rgba(127, 0, 255, 0.15)',
+                            color: 'var(--accent)',
+                            padding: '0 4px',
+                            borderRadius: 3,
+                            fontSize: 9,
+                            fontWeight: 600,
+                          }}>
+                            {session.branch_count} branches
+                          </span>
+                        )}
                         <span>{timeAgo(session.updated_at)}</span>
                         <span
                           onClick={() => copySessionId(session.session_id)}

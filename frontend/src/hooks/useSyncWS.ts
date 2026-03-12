@@ -9,6 +9,7 @@ import { setSyncWs } from '../utils/syncBridge';
 import { disconnectAllTerminalSessions, reconnectAllTerminalSessions, getActiveTerminalInstanceIds } from '../components/terminal/Terminal';
 import { emitActivity } from '../utils/activityBus';
 import { usePetStore } from '../store/petStore';
+import { setTerminalName } from '../utils/terminalRegistry';
 
 // Re-export for backwards compat (store imports from syncBridge directly now)
 export { sendSyncMessage } from '../utils/syncBridge';
@@ -174,6 +175,13 @@ export function useSyncWS() {
                 emitActivity({ type: 'claude_launched', instanceId: msg.instance_id });
               } else if (msg.pet_action === 'disconnected' && msg.instance_id) {
                 usePetStore.getState().processEvent({ type: 'terminal_disconnect', instanceId: msg.instance_id });
+              }
+              break;
+
+            case 'terminal_rename':
+              // Cross-device terminal rename sync
+              if (msg.device_id !== getDeviceId() && msg.instance_id && typeof msg.name === 'string') {
+                setTerminalName(msg.instance_id, msg.name);
               }
               break;
 

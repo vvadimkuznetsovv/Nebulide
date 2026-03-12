@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { usePetStore, getSpriteSheet, TASK_CONFIGS, EMOTION_SWAY, type PetTask, type PetEmotion } from '../../store/petStore';
 import { getTerminalLabel, useTerminalRegistryVersion } from '../../utils/terminalRegistry';
+import { useLayoutStore, type PanelId } from '../../store/layoutStore';
 
 // ── Animation constants ──
 
@@ -62,6 +63,7 @@ export default function TamagotchiPanel() {
   const selectPet = usePetStore((s) => s.selectPet);
   const setViewMode = usePetStore((s) => s.setViewMode);
   const tapPet = usePetStore((s) => s.tap);
+  const showPanel = useLayoutStore((s) => s.showPanel);
 
   useTerminalRegistryVersion();
 
@@ -206,6 +208,11 @@ export default function TamagotchiPanel() {
   const handleTap = useCallback((id: string) => {
     tapPet(id);
     if (viewMode === 'all') selectPet(id);
+
+    // Focus the terminal panel where this pet lives
+    const panelId: PanelId = id === 'default' ? 'terminal' : `terminal:${id}` as PanelId;
+    showPanel(panelId);
+
     // Bounce animation
     const refs = spriteRefsMap.get(id);
     if (refs?.pet) {
@@ -215,7 +222,7 @@ export default function TamagotchiPanel() {
         { transform: refs.pet.style.transform },
       ], { duration: 300, easing: 'ease-out' });
     }
-  }, [tapPet, selectPet, viewMode]);
+  }, [tapPet, selectPet, viewMode, showPanel]);
 
   // Selected pet for status bar
   const selectedPet = selectedPetId ? pets[selectedPetId] : null;

@@ -715,20 +715,12 @@ type SessionProcessInfo struct {
 	Alive       bool   `json:"alive"`
 	PID         int    `json:"pid"`
 	WriterCount int    `json:"writer_count"`
+	HasChildren bool   `json:"has_children"`
 }
 
 // ListSessionsWithPID returns all sessions with their process PIDs.
-// Dead sessions are auto-reaped before returning.
+// Does NOT reap dead sessions — reapLoop handles that separately.
 func (s *TerminalService) ListSessionsWithPID() []SessionProcessInfo {
-	s.mu.Lock()
-	for key, sess := range s.sessions {
-		if !sess.IsAlive() {
-			sess.Close()
-			delete(s.sessions, key)
-		}
-	}
-	s.mu.Unlock()
-
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	result := make([]SessionProcessInfo, 0, len(s.sessions))
@@ -745,6 +737,7 @@ func (s *TerminalService) ListSessionsWithPID() []SessionProcessInfo {
 			Alive:       sess.IsAlive(),
 			PID:         pid,
 			WriterCount: sess.WriterCount(),
+			HasChildren: sess.HasChildProcesses(),
 		})
 	}
 	return result

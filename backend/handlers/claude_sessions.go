@@ -81,12 +81,14 @@ var slugRe = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 // --- JSONL metadata extraction ---
 
 type jsonlMeta struct {
-	SessionID string `json:"sessionId"`
-	Slug      string `json:"slug"`
-	Type      string `json:"type"`
-	Timestamp string `json:"timestamp"`
-	CWD       string `json:"cwd"`
-	Message   *struct {
+	SessionID  string `json:"sessionId"`
+	Slug       string `json:"slug"`
+	Type       string `json:"type"`
+	Timestamp  string `json:"timestamp"`
+	CWD        string `json:"cwd"`
+	UUID       string `json:"uuid"`
+	ParentUUID string `json:"parentUuid"`
+	Message    *struct {
 		Role    string          `json:"role"`
 		Content json.RawMessage `json:"content"`
 	} `json:"message,omitempty"`
@@ -125,6 +127,64 @@ func truncate(s string, max int) string {
 	return s
 }
 
+// countBranches scans a JSONL file and counts conversation branches.
+// Reads up to maxLines lines (0 = unlimited). Returns 1 for linear conversations.
+func countBranches(fullPath string, maxLines int) int {
+	file, err := os.Open(fullPath)
+	if err != nil {
+		return 1
+	}
+	defer file.Close()
+
+	// parentUUID → number of children
+	childCount := map[string]int{}
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), 256*1024)
+	lineCount := 0
+
+	for scanner.Scan() {
+		if maxLines > 0 && lineCount >= maxLines {
+			break
+		}
+		lineCount++
+		line := scanner.Text()
+		if line == "" {
+			continue
+		}
+		// Fast check — only parse lines that have parentUuid
+		if !strings.Contains(line, `"parentUuid"`) {
+			continue
+		}
+		var meta struct {
+			UUID       string `json:"uuid"`
+			ParentUUID string `json:"parentUuid"`
+			Type       string `json:"type"`
+		}
+		if err := json.Unmarshal([]byte(line), &meta); err != nil || meta.UUID == "" {
+			continue
+		}
+		// Only count user/assistant messages (not system records)
+		if meta.Type != "user" && meta.Type != "assistant" {
+			continue
+		}
+		if meta.ParentUUID != "" {
+			childCount[meta.ParentUUID]++
+		}
+	}
+
+	// Count branch points (parents with >1 child)
+	branchPoints := 0
+	for _, count := range childCount {
+		if count > 1 {
+			branchPoints++
+		}
+	}
+	if branchPoints == 0 {
+		return 1
+	}
+	return branchPoints + 1
+}
+
 type sessionInfo struct {
 	SessionID    string  `json:"session_id"`
 	Slug         string  `json:"slug"`
@@ -133,7 +193,8 @@ type sessionInfo struct {
 	UpdatedAt    string  `json:"updated_at"`
 	SizeMB       float64 `json:"size_mb"`
 	FirstMessage string  `json:"first_message"`
-	Project      string  `json:"project"` // project slug (needed for preview)
+	Project      string  `json:"project"`      // project slug (needed for preview)
+	BranchCount  int     `json:"branch_count"` // number of conversation branches (>1 = has branches)
 }
 
 type projectInfo struct {
@@ -256,6 +317,13 @@ func (h *ClaudeSessionsHandler) List(c *gin.Context) {
 
 			// Override cwd with path derived from project slug (more reliable for --resume)
 			si.CWD = deriveResumeCWD(projEntry.Name(), si.CWD)
+
+			// Count branches (limit to 500 lines for large files to avoid slow parsing)
+			maxLines := 0
+			if fi.Size() > 1024*1024 { // >1MB
+				maxLines = 500
+			}
+			si.BranchCount = countBranches(fullPath, maxLines)
 
 			sessions = append(sessions, si)
 		}
@@ -671,6 +739,196 @@ func (h *ClaudeSessionsHandler) DeleteSession(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"message": "Session deleted"})
+}
+
+// --- List Branches ---
+
+type branchDetail struct {
+	BranchID     string `json:"branch_id"`
+	FirstMessage string `json:"first_message"`
+	MessageCount int    `json:"message_count"`
+	CreatedAt    string `json:"created_at"`
+	ParentMsgID  string `json:"parent_msg_id"`
+}
+
+// ListBranches parses a session JSONL and returns distinct conversation branches.
+func (h *ClaudeSessionsHandler) ListBranches(c *gin.Context) {
+	project := c.Param("project")
+	sessionFile := c.Param("sessionFile")
+
+	if !slugRe.MatchString(project) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid project"})
+		return
+	}
+
+	wsSlug := h.userWorkspaceSlug(c)
+	if !matchesWorkspace(project, wsSlug) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	claudeBase := h.claudeBaseDir()
+	projDir := filepath.Join(claudeBase, "projects", project)
+
+	// Find JSONL file
+	var fullPath string
+	candidate := filepath.Join(projDir, sessionFile+".jsonl")
+	if _, err := os.Stat(candidate); err == nil {
+		fullPath = candidate
+	} else {
+		files, err := os.ReadDir(projDir)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
+			return
+		}
+		for _, f := range files {
+			if f.IsDir() || !strings.HasSuffix(f.Name(), ".jsonl") {
+				continue
+			}
+			fp := filepath.Join(projDir, f.Name())
+			file, err := os.Open(fp)
+			if err != nil {
+				continue
+			}
+			scanner := bufio.NewScanner(file)
+			scanner.Buffer(make([]byte, 0, 64*1024), 256*1024)
+			for i := 0; i < 5 && scanner.Scan(); i++ {
+				var meta jsonlMeta
+				if json.Unmarshal([]byte(scanner.Text()), &meta) == nil && meta.SessionID == sessionFile {
+					fullPath = fp
+					break
+				}
+			}
+			file.Close()
+			if fullPath != "" {
+				break
+			}
+		}
+	}
+
+	if fullPath == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
+		return
+	}
+
+	fi, err := os.Stat(fullPath)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
+		return
+	}
+	if fi.Size() > 100<<20 {
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "Session too large"})
+		return
+	}
+
+	file, err := os.Open(fullPath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to read session"})
+		return
+	}
+	defer file.Close()
+
+	// Build message tree
+	type msgNode struct {
+		uuid       string
+		parentUUID string
+		msgType    string // user, assistant
+		text       string
+		timestamp  string
+		children   []string
+	}
+
+	nodes := map[string]*msgNode{}
+	var rootUUIDs []string
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			continue
+		}
+		var meta jsonlMeta
+		if err := json.Unmarshal([]byte(line), &meta); err != nil || meta.UUID == "" {
+			continue
+		}
+		if meta.Type != "user" && meta.Type != "assistant" {
+			continue
+		}
+		text := extractTextContent(meta)
+		n := &msgNode{
+			uuid:       meta.UUID,
+			parentUUID: meta.ParentUUID,
+			msgType:    meta.Type,
+			text:       text,
+			timestamp:  meta.Timestamp,
+		}
+		nodes[meta.UUID] = n
+		if meta.ParentUUID == "" {
+			rootUUIDs = append(rootUUIDs, meta.UUID)
+		}
+	}
+
+	// Link children
+	for _, n := range nodes {
+		if n.parentUUID != "" {
+			if parent, ok := nodes[n.parentUUID]; ok {
+				parent.children = append(parent.children, n.uuid)
+			}
+		}
+	}
+
+	// Find leaf nodes (nodes with no children)
+	var leafUUIDs []string
+	for uuid, n := range nodes {
+		if len(n.children) == 0 && n.msgType != "" {
+			_ = n
+			leafUUIDs = append(leafUUIDs, uuid)
+		}
+	}
+
+	// For each leaf, trace back to find the branch point and first user message
+	var branches []branchDetail
+	for _, leafUUID := range leafUUIDs {
+		// Walk back to root, counting messages and finding first user msg
+		msgCount := 0
+		var firstUserMsg, firstTimestamp, branchParent string
+		current := leafUUID
+		for current != "" {
+			n := nodes[current]
+			if n == nil {
+				break
+			}
+			msgCount++
+			if n.msgType == "user" && n.text != "" {
+				firstUserMsg = n.text
+				firstTimestamp = n.timestamp
+			}
+			// Check if this node's parent has >1 child (branch point)
+			if n.parentUUID != "" {
+				parent := nodes[n.parentUUID]
+				if parent != nil && len(parent.children) > 1 && branchParent == "" {
+					branchParent = n.parentUUID
+				}
+			}
+			current = n.parentUUID
+		}
+
+		branches = append(branches, branchDetail{
+			BranchID:     leafUUID,
+			FirstMessage: truncate(firstUserMsg, 200),
+			MessageCount: msgCount,
+			CreatedAt:    firstTimestamp,
+			ParentMsgID:  branchParent,
+		})
+	}
+
+	// Sort branches by created_at
+	sort.Slice(branches, func(i, j int) bool {
+		return branches[i].CreatedAt < branches[j].CreatedAt
+	})
+
+	c.JSON(http.StatusOK, gin.H{"branches": branches})
 }
 
 // --- Plans ---

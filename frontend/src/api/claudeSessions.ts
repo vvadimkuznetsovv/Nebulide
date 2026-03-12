@@ -9,6 +9,7 @@ export interface ClaudeSession {
   size_mb: number;
   first_message: string;
   project: string;
+  branch_count?: number;
 }
 
 export interface ClaudeSessionMessage {
@@ -54,6 +55,17 @@ export interface ClaudeSearchResult {
 
 export const searchClaudeSessions = (q: string) =>
   api.get<{ results: ClaudeSearchResult[] }>('/claude-sessions/search', { params: { q } });
+
+export interface ClaudeBranch {
+  branch_id: string;
+  first_message: string;
+  message_count: number;
+  created_at: string;
+  parent_msg_id: string;
+}
+
+export const listBranches = (project: string, sessionFile: string) =>
+  api.get<{ branches: ClaudeBranch[] }>(`/claude-sessions/${encodeURIComponent(project)}/${encodeURIComponent(sessionFile)}/branches`);
 
 export const deleteClaudeSession = (project: string, sessionId: string) =>
   api.delete(`/claude-sessions/${encodeURIComponent(project)}/${encodeURIComponent(sessionId)}`);

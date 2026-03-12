@@ -11,6 +11,7 @@ import { useWorkspaceSessionStore } from '../../store/workspaceSessionStore';
 import { emitActivity } from '../../utils/activityBus';
 import { sendSyncMessage } from '../../utils/syncBridge';
 import { registerTerminal, unregisterTerminal, getTerminalNumber, useTerminalRegistryVersion, markTerminalClosed } from '../../utils/terminalRegistry';
+import { usePetStore } from '../../store/petStore';
 import api from '../../api/client';
 import toast from 'react-hot-toast';
 
@@ -66,6 +67,8 @@ interface TermSession {
   streamEndTimer: number;
   /** Accumulated user input for Claude terminals (prompt sentiment analysis) */
   inputBuffer: string;
+  /** Timer to auto-remove pet for non-claude-* terminals after inactivity */
+  petInactivityTimer: number;
 }
 
 const sessions = new Map<string, TermSession>();
@@ -140,10 +143,11 @@ function getWorkspaceSessionId(): string {
     || 'default';
 }
 
-/** Emit terminal_disconnect locally + broadcast to other devices for Claude terminals */
+/** Emit terminal_disconnect locally + broadcast to other devices for terminals with active pets */
 function emitDisconnect(instanceId: string) {
   emitActivity({ type: 'terminal_disconnect', instanceId });
-  if (instanceId.startsWith('claude-')) {
+  // Broadcast pet disconnect for any terminal that has an active pet
+  if (usePetStore.getState().pets[instanceId]) {
     sendSyncMessage({ type: 'pet_event', pet_action: 'disconnected', instance_id: instanceId });
   }
 }
@@ -171,6 +175,7 @@ function createXterm(instanceId: string): TermSession {
     streamActive: false,
     streamEndTimer: 0,
     inputBuffer: '',
+    petInactivityTimer: 0,
   };
 
   const xterm = new XTerm({
@@ -218,22 +223,29 @@ function createXterm(instanceId: string): TermSession {
       session.ws.send(new TextEncoder().encode(data));
       emitActivity({ type: 'terminal_input', instanceId });
 
-      // Accumulate input for Claude terminals → sentiment analysis on prompt submit
-      if (instanceId.startsWith('claude-')) {
-        for (const ch of data) {
-          if (ch === '\r' || ch === '\n') {
-            const text = session.inputBuffer.trim();
-            if (text.length > 2) {
-              emitActivity({ type: 'terminal_prompt_submit', instanceId, text });
-            }
-            session.inputBuffer = '';
-          } else if (ch === '\x7f' || ch === '\b') {
-            session.inputBuffer = session.inputBuffer.slice(0, -1);
-          } else if (ch === '\x03') {
-            session.inputBuffer = '';
-          } else if (ch.charCodeAt(0) >= 32) {
-            session.inputBuffer += ch;
+      // Accumulate input for ALL terminals (detect claude command + sentiment analysis)
+      for (const ch of data) {
+        if (ch === '\r' || ch === '\n') {
+          const text = session.inputBuffer.trim();
+
+          // Detect claude command launch from any terminal
+          if (text && /^claude\b/.test(text) && !/^claude\s+(-h|--help|--version|-v)$/.test(text)) {
+            emitActivity({ type: 'claude_launched', instanceId });
+            sendSyncMessage({ type: 'pet_event', pet_action: 'launched', instance_id: instanceId });
           }
+
+          // Sentiment analysis for terminals with active pet
+          if (text.length > 2 && usePetStore.getState().pets[instanceId]) {
+            emitActivity({ type: 'terminal_prompt_submit', instanceId, text });
+          }
+
+          session.inputBuffer = '';
+        } else if (ch === '\x7f' || ch === '\b') {
+          session.inputBuffer = session.inputBuffer.slice(0, -1);
+        } else if (ch === '\x03') {
+          session.inputBuffer = '';
+        } else if (ch.charCodeAt(0) >= 32) {
+          session.inputBuffer += ch;
         }
       }
     }
@@ -344,6 +356,16 @@ async function connectWs(instanceId: string): Promise<void> {
           emitActivity({ type: 'terminal_streaming_end', instanceId });
         }
       }, 3000);
+    }
+    // Auto-remove pet for non-claude-* terminals after inactivity
+    // (Claude process exited back to bash prompt — no more significant output)
+    if (usePetStore.getState().pets[instanceId] && !instanceId.startsWith('claude-')) {
+      clearTimeout(session.petInactivityTimer);
+      session.petInactivityTimer = window.setTimeout(() => {
+        if (usePetStore.getState().pets[instanceId] && !session.streamActive) {
+          emitDisconnect(instanceId);
+        }
+      }, 60_000);
     }
   };
 
@@ -487,6 +509,7 @@ export function destroyTerminalSession(instanceId: string): void {
     session.reconnectTimer = null;
   }
   clearTimeout(session.streamEndTimer);
+  clearTimeout(session.petInactivityTimer);
   if (session.ws) {
     session.ws.close();
     session.ws = null;

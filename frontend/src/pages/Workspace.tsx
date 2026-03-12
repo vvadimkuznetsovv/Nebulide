@@ -15,6 +15,7 @@ import {
 import { ScrollAwareTouchSensor } from '../utils/ScrollAwareTouchSensor';
 import { useAuth } from '../hooks/useAuth';
 import { renameFile, copyFile } from '../api/files';
+import { getFileTreeSelectedPaths } from '../components/files/FileTree';
 import { useAuthStore } from '../store/authStore';
 import { useLayoutStore, type PanelId } from '../store/layoutStore';
 import { findPanelNode, isDetachedEditor } from '../store/layoutUtils';
@@ -38,6 +39,9 @@ const fileTreeAwareCollision: CollisionDetection = (args) => {
   const collisions = pointerWithin(args);
   const dragId = args.active?.id ? String(args.active.id) : '';
   if (dragId.startsWith('file:')) {
+    // Toolbar buttons (toolbar:) have priority over FileTree zones (folder:/filezone:)
+    const toolbarCollisions = collisions.filter(c => String(c.id).startsWith('toolbar:'));
+    if (toolbarCollisions.length > 0) return toolbarCollisions;
     const ftCollisions = collisions.filter(
       (c) => {
         const id = String(c.id);
@@ -210,8 +214,9 @@ export default function Workspace() {
   const anyPanelVisible = Object.entries(visibility).some(([, v]) => v);
 
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
+  const [draggedFiles, setDraggedFiles] = useState<string[]>([]);
   const [pendingSharedDrop, setPendingSharedDrop] = useState<{
-    srcPath: string; destPath: string; fileName: string;
+    files: Array<{ src: string; dest: string; name: string }>;
   } | null>(null);
 
   const mouseSensor = useSensor(MouseSensor, { activationConstraint: { distance: 8 } });
@@ -224,8 +229,17 @@ export default function Workspace() {
     const dragId = String(event.active.id);
     setActiveDragId(dragId);
 
-    // File tree DnD — don't set panel dragging state
-    if (dragId.startsWith('file:')) return;
+    // File tree DnD — collect selected files for multi-select drag
+    if (dragId.startsWith('file:')) {
+      const srcPath = dragId.slice('file:'.length);
+      const selected = getFileTreeSelectedPaths();
+      if (selected.has(srcPath) && selected.size > 1) {
+        setDraggedFiles([...selected]);
+      } else {
+        setDraggedFiles([srcPath]);
+      }
+      return;
+    }
 
     // Editor tab drag from File Manager
     if (dragId.startsWith('editor-tab:')) {
@@ -239,48 +253,56 @@ export default function Workspace() {
     const dragId = String(event.active.id);
     setActiveDragId(null);
     setDragging(null);
+    const currentDraggedFiles = draggedFiles;
+    setDraggedFiles([]);
 
     const { over } = event;
-    // Debug: log file tree drops to diagnose missing drop targets
-    if (dragId.startsWith('file:')) {
-      console.debug('[DnD drop]', { dragId, over: over ? String(over.id) : null });
-    }
     if (!over) return;
     const targetId = String(over.id);
 
     // === File tree DnD: move file/folder into target folder ===
-    if (dragId.startsWith('file:') && (targetId.startsWith('folder:') || targetId.startsWith('filezone:'))) {
-      const srcPath = dragId.slice('file:'.length);
-      // folder: → drop into that folder; filezone: → drop into file's parent folder
+    // toolbar: = EditorPanel toolbar buttons, folder: = FileTree folders, filezone: = file's parent
+    if (dragId.startsWith('file:') && (targetId.startsWith('folder:') || targetId.startsWith('filezone:') || targetId.startsWith('toolbar:'))) {
       let destFolder: string;
-      if (targetId.startsWith('folder:')) {
+      if (targetId.startsWith('toolbar:')) {
+        destFolder = targetId.slice('toolbar:'.length);
+      } else if (targetId.startsWith('folder:')) {
         destFolder = targetId.slice('folder:'.length);
       } else {
         const filePath = targetId.slice('filezone:'.length);
         destFolder = filePath.split(/[/\\]/).slice(0, -1).join('/');
       }
-      const fileName = srcPath.split(/[/\\]/).pop() || '';
       const normDest = destFolder.replace(/\\/g, '/');
-      const destPath = normDest + '/' + fileName;
-      const normSrc = srcPath.replace(/\\/g, '/');
-      const srcParent = normSrc.split('/').slice(0, -1).join('/');
-      // Guards: same path, already in folder, folder onto itself, or dest inside source (cycle)
-      if (normSrc === destPath || srcParent === normDest || normDest === normSrc || normDest.startsWith(normSrc + '/')) return;
+
+      // Build moves list from all dragged files
+      const filesToMove = currentDraggedFiles.length > 0 ? currentDraggedFiles : [dragId.slice('file:'.length)];
+      const moves = filesToMove.map(src => {
+        const name = src.split(/[/\\]/).pop() || '';
+        const dest = normDest + '/' + name;
+        const normSrc = src.replace(/\\/g, '/');
+        const srcParent = normSrc.split('/').slice(0, -1).join('/');
+        // Guards: same path, already in folder, folder onto itself, or dest inside source (cycle)
+        if (normSrc === dest || srcParent === normDest || normDest === normSrc || normDest.startsWith(normSrc + '/')) return null;
+        return { src, dest, name };
+      }).filter((m): m is { src: string; dest: string; name: string } => m !== null);
+
+      if (moves.length === 0) return;
 
       // Dropping into Shared folder → show Copy/Move modal
       const sharedDir = useAuthStore.getState().user?.shared_dir;
       if (sharedDir && normDest.startsWith(sharedDir.replace(/\\/g, '/'))) {
-        setPendingSharedDrop({ srcPath, destPath, fileName });
+        setPendingSharedDrop({ files: moves });
         return;
       }
 
-      renameFile(srcPath, destPath)
+      Promise.all(moves.map(m => renameFile(m.src, m.dest)))
         .then(() => {
           window.dispatchEvent(new CustomEvent('filetree-refresh'));
-          import('react-hot-toast').then(m => m.default.success(`Moved ${fileName}`));
+          const msg = moves.length === 1 ? `Moved ${moves[0].name}` : `Moved ${moves.length} files`;
+          import('react-hot-toast').then(mod => mod.default.success(msg));
         })
         .catch(() => {
-          import('react-hot-toast').then(m => m.default.error('Failed to move file'));
+          import('react-hot-toast').then(mod => mod.default.error('Failed to move files'));
         });
       return;
     }
@@ -348,10 +370,11 @@ export default function Workspace() {
       if (sourceNode && sourceNode.id === nodeId) return;
       mergePanels(draggedPanelId, nodeId);
     }
-  }, [layout, mergePanels, splitPanel, movePanelToEdge, setDragging, detachEditorTabToSplit, detachEditorTabToEdge, detachEditorTabToMerge, reattachEditor]);
+  }, [layout, mergePanels, splitPanel, movePanelToEdge, setDragging, detachEditorTabToSplit, detachEditorTabToEdge, detachEditorTabToMerge, reattachEditor, draggedFiles]);
 
   const handleDragCancel = useCallback(() => {
     setActiveDragId(null);
+    setDraggedFiles([]);
     setDragging(null);
   }, [setDragging]);
 
@@ -359,21 +382,31 @@ export default function Workspace() {
   const getDragOverlayContent = () => {
     if (!activeDragId) return null;
 
-    // File tree item
+    // File tree item (single or multi-select)
     if (activeDragId.startsWith('file:')) {
       const filePath = activeDragId.slice('file:'.length);
       const fileName = filePath.split(/[/\\]/).pop() || 'File';
+      const count = draggedFiles.length;
       return (
-        <div className="drag-overlay-panel">
+        <div className="drag-overlay-panel" style={{ position: 'relative' }}>
           <div className="flex items-center gap-2 px-3 py-2">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
               <polyline points="14 2 14 8 20 8" />
             </svg>
             <span className="text-xs font-semibold" style={{ color: 'rgba(255,255,255,0.8)' }}>
-              {fileName}
+              {count > 1 ? `${count} files` : fileName}
             </span>
           </div>
+          {count > 1 && (
+            <span style={{
+              position: 'absolute', top: -6, right: -6,
+              background: 'var(--accent)', color: '#fff',
+              borderRadius: '50%', width: 18, height: 18,
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 10, fontWeight: 700,
+            }}>{count}</span>
+          )}
         </div>
       );
     }
@@ -545,18 +578,19 @@ export default function Workspace() {
               fontSize: 12, color: 'var(--text-muted)', marginBottom: 16,
               overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
             }}>
-              {pendingSharedDrop.fileName}
+              {pendingSharedDrop.files.length === 1 ? pendingSharedDrop.files[0].name : `${pendingSharedDrop.files.length} files`}
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
               <button
                 type="button"
                 onClick={() => {
-                  const { srcPath, destPath, fileName } = pendingSharedDrop;
+                  const { files } = pendingSharedDrop;
                   setPendingSharedDrop(null);
-                  copyFile(srcPath, destPath)
+                  Promise.all(files.map(f => copyFile(f.src, f.dest)))
                     .then(() => {
                       window.dispatchEvent(new CustomEvent('filetree-refresh'));
-                      import('react-hot-toast').then(m => m.default.success(`Copied ${fileName}`));
+                      const msg = files.length === 1 ? `Copied ${files[0].name}` : `Copied ${files.length} files`;
+                      import('react-hot-toast').then(m => m.default.success(msg));
                     })
                     .catch(() => {
                       import('react-hot-toast').then(m => m.default.error('Failed to copy'));
@@ -580,12 +614,13 @@ export default function Workspace() {
               <button
                 type="button"
                 onClick={() => {
-                  const { srcPath, destPath, fileName } = pendingSharedDrop;
+                  const { files } = pendingSharedDrop;
                   setPendingSharedDrop(null);
-                  renameFile(srcPath, destPath)
+                  Promise.all(files.map(f => renameFile(f.src, f.dest)))
                     .then(() => {
                       window.dispatchEvent(new CustomEvent('filetree-refresh'));
-                      import('react-hot-toast').then(m => m.default.success(`Moved ${fileName}`));
+                      const msg = files.length === 1 ? `Moved ${files[0].name}` : `Moved ${files.length} files`;
+                      import('react-hot-toast').then(m => m.default.success(msg));
                     })
                     .catch(() => {
                       import('react-hot-toast').then(m => m.default.error('Failed to move'));

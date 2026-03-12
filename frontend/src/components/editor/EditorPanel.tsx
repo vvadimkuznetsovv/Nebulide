@@ -59,20 +59,19 @@ export default function EditorPanel() {
     return 'root' as const;
   }, [currentTreePath, rootPath, sharedDir]);
 
-  // Folder icon = droppable target for "move to workspace root"
+  // Toolbar buttons use "toolbar:" prefix to avoid duplicate droppable IDs with FileTree's "folder:" zones
   const { setNodeRef: setRootDropRef, isOver: isOverRoot } = useDroppable({
-    id: rootPath ? `folder:${rootPath}` : 'folder:__root__',
+    id: rootPath ? `toolbar:${rootPath}` : 'toolbar:__root__',
     disabled: !rootPath,
   });
 
-  // Uploads/Shared toolbar buttons = droppable targets for file DnD
   const uploadsPath = rootPath ? rootPath + '/uploads' : null;
   const { setNodeRef: setUploadsDropRef, isOver: isOverUploads } = useDroppable({
-    id: uploadsPath ? `folder:${uploadsPath}` : 'folder:__uploads__',
+    id: uploadsPath ? `toolbar:${uploadsPath}` : 'toolbar:__uploads__',
     disabled: !uploadsPath,
   });
   const { setNodeRef: setSharedDropRef, isOver: isOverShared } = useDroppable({
-    id: sharedDir ? `folder:${sharedDir}` : 'folder:__shared__',
+    id: sharedDir ? `toolbar:${sharedDir}` : 'toolbar:__shared__',
     disabled: !sharedDir,
   });
 

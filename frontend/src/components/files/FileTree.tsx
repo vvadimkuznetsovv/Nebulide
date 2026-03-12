@@ -8,6 +8,10 @@ import toast from 'react-hot-toast';
 import { useAuthStore } from '../../store/authStore';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 
+// Module-level selected paths for cross-component access (used by Workspace DnD)
+let _fileTreeSelectedPaths: Set<string> = new Set();
+export function getFileTreeSelectedPaths(): Set<string> { return _fileTreeSelectedPaths; }
+
 interface FileTreeProps {
   rootPath?: string;
   onFileSelect: (path: string) => void;
@@ -162,6 +166,8 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree({ r
   const [loading, setLoading] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; target: FileEntry | null } | null>(null);
   const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set());
+  // Sync module-level var for Workspace DnD multi-select
+  useEffect(() => { _fileTreeSelectedPaths = selectedPaths; }, [selectedPaths]);
   const lastClickedPathRef = useRef<string | null>(null);
   const [creatingType, setCreatingType] = useState<'file' | 'folder' | null>(null);
   const [renamingFile, setRenamingFile] = useState<FileEntry | null>(null);

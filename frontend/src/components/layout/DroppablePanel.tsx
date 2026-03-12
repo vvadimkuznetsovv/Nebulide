@@ -2,9 +2,10 @@ import { useState, useCallback } from 'react';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import type { PanelId, PanelNode } from '../../store/layoutStore';
 import { useLayoutStore } from '../../store/layoutStore';
-import { isDetachedEditor, getDetachedTabId, isDetachedTerminal } from '../../store/layoutUtils';
+import { isDetachedEditor, getDetachedTabId, isDetachedTerminal, getDetachedTerminalId } from '../../store/layoutUtils';
 import { useWorkspaceStore } from '../../store/workspaceStore';
-import { useTerminalRegistryVersion } from '../../utils/terminalRegistry';
+import { useTerminalRegistryVersion, getTerminalCustomName, getTerminalLabel, setTerminalName } from '../../utils/terminalRegistry';
+import { sendSyncMessage } from '../../utils/syncBridge';
 import PanelContent, { getPanelIcon, getPanelTitle } from './PanelContent';
 import ContextMenu from '../files/ContextMenu';
 import { useLongPress, mergeEventHandlers } from '../../hooks/useLongPress';
@@ -45,6 +46,11 @@ const ICONS = {
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <polyline points="1 4 1 10 7 10" />
       <path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+    </svg>
+  ),
+  edit2: (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M17 3a2.828 2.828 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5L17 3z" />
     </svg>
   ),
 };
@@ -171,6 +177,8 @@ function getPanelMenuItems(panelId: PanelId, isMultiTab: boolean) {
 
   if (isDetachedTerm) {
     return [
+      { label: 'Rename', action: 'rename-terminal', icon: ICONS.edit2 },
+      { type: 'separator' as const },
       { label: 'Close Terminal', action: 'close-detached', icon: ICONS.x },
       { type: 'separator' as const },
       { label: 'Reset Layout', action: 'reset-layout', icon: ICONS.rotateCcw },
@@ -182,6 +190,12 @@ function getPanelMenuItems(panelId: PanelId, isMultiTab: boolean) {
   // "Open in Separate Panel" — only when this panel shares a tab group with others
   if (isMultiTab) {
     items.push({ label: 'Open in Separate Panel', action: 'split-out', icon: ICONS.splitPanel });
+    items.push({ type: 'separator' as const });
+  }
+
+  // Rename for terminal panels
+  if (panelId === 'terminal') {
+    items.push({ label: 'Rename', action: 'rename-terminal', icon: ICONS.edit2 });
     items.push({ type: 'separator' as const });
   }
 
@@ -222,6 +236,19 @@ function handlePanelMenuAction(
         useWorkspaceStore.getState().closeDetachedEditor(tabId);
       }
       fns.removeDetachedPanel(panelId);
+      break;
+    }
+    case 'rename-terminal': {
+      const instId = isDetachedTerminal(panelId)
+        ? getDetachedTerminalId(panelId)
+        : 'default';
+      if (!instId) break;
+      const currentName = getTerminalCustomName(instId) || getTerminalLabel(instId);
+      const newName = window.prompt('Terminal name:', currentName);
+      if (newName !== null) {
+        setTerminalName(instId, newName);
+        sendSyncMessage({ type: 'terminal_rename', instance_id: instId, name: newName.trim() });
+      }
       break;
     }
     case 'reset-layout':

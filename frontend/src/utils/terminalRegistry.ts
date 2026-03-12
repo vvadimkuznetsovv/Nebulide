@@ -9,6 +9,7 @@ import { create } from 'zustand';
 
 const registry = new Map<string, number>();
 const usedNumbers = new Set<number>();
+const customNames = new Map<string, string>();
 
 /** Pending numbers from snapshot — used as hints when terminals register on mount. */
 let pendingNumbers: Record<string, number> = {};
@@ -53,6 +54,7 @@ export function unregisterTerminal(instanceId: string): void {
   if (num == null) return;
   registry.delete(instanceId);
   usedNumbers.delete(num);
+  customNames.delete(instanceId);
   // Compact: close gaps so remaining terminals are 1, 2, 3...
   // e.g. if Terminal-1 removed and Terminal-2 remains → becomes Terminal-1
   if (registry.size > 0) {
@@ -74,8 +76,24 @@ export function getTerminalNumber(instanceId: string): number | null {
 }
 
 export function getTerminalLabel(instanceId: string): string {
+  const custom = customNames.get(instanceId);
+  if (custom) return custom;
   const num = registry.get(instanceId);
   return num != null ? `Terminal-${num}` : 'Terminal';
+}
+
+export function setTerminalName(instanceId: string, name: string): void {
+  const trimmed = name.trim();
+  if (trimmed) {
+    customNames.set(instanceId, trimmed);
+  } else {
+    customNames.delete(instanceId);
+  }
+  bump();
+}
+
+export function getTerminalCustomName(instanceId: string): string | null {
+  return customNames.get(instanceId) ?? null;
 }
 
 export function getAllTerminalIds(): string[] {
@@ -86,6 +104,7 @@ export function getAllTerminalIds(): string[] {
 export function resetTerminalRegistry(): void {
   registry.clear();
   usedNumbers.clear();
+  customNames.clear();
   pendingNumbers = {};
   bump();
 }
@@ -121,6 +140,22 @@ export function getRegistrySnapshot(): Record<string, number> {
   const snap: Record<string, number> = {};
   for (const [id, num] of registry) snap[id] = num;
   return snap;
+}
+
+/** Get a snapshot of custom terminal names for persistence. */
+export function getCustomNamesSnapshot(): Record<string, string> {
+  const snap: Record<string, string> = {};
+  for (const [id, name] of customNames) snap[id] = name;
+  return snap;
+}
+
+/** Restore custom terminal names from a snapshot. */
+export function setCustomNames(names: Record<string, string>): void {
+  customNames.clear();
+  for (const [id, name] of Object.entries(names)) {
+    customNames.set(id, name);
+  }
+  bump();
 }
 
 /** React hook — re-renders when the registry changes. */

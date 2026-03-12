@@ -29,6 +29,8 @@ type syncClientMsg struct {
 	// pet_event fields
 	PetAction  string `json:"pet_action,omitempty"`  // launched | disconnected
 	InstanceID string `json:"instance_id,omitempty"` // terminal instanceId
+	// terminal_rename fields
+	Name       string `json:"name,omitempty"`        // new terminal name
 }
 
 type syncServerMsg struct {
@@ -333,6 +335,19 @@ func (h *SyncHandler) HandleWebSocket(c *gin.Context) {
 				})
 				database.RDB.Publish(context.Background(), "ws:user:"+userID, string(payload))
 				log.Printf("[Sync] pet_event broadcast: action=%s instanceId=%s from=%s", msg.PetAction, msg.InstanceID, deviceID)
+			}
+
+		case "terminal_rename":
+			// Broadcast terminal rename to all devices
+			if msg.InstanceID != "" {
+				payload, _ := json.Marshal(map[string]string{
+					"type":        "terminal_rename",
+					"instance_id": msg.InstanceID,
+					"name":        msg.Name,
+					"device_id":   deviceID,
+				})
+				database.RDB.Publish(context.Background(), "ws:user:"+userID, string(payload))
+				log.Printf("[Sync] terminal_rename broadcast: instanceId=%s name=%q from=%s", msg.InstanceID, msg.Name, deviceID)
 			}
 		}
 	}

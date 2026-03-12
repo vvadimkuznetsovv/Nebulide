@@ -26,7 +26,7 @@ import {
 } from './layoutUtils';
 import { useWorkspaceStore } from './workspaceStore';
 import { destroyTerminalSession, getActiveTerminalInstanceIds } from '../components/terminal/Terminal';
-import { registerTerminal, resetTerminalRegistry, getRegistrySnapshot, setPendingNumbers, isTerminalRecentlyClosed } from '../utils/terminalRegistry';
+import { registerTerminal, resetTerminalRegistry, getRegistrySnapshot, setPendingNumbers, isTerminalRecentlyClosed, getCustomNamesSnapshot, setCustomNames } from '../utils/terminalRegistry';
 
 export type { PanelId };
 export type { LayoutNode, PanelNode, GroupNode } from './layoutUtils';
@@ -98,6 +98,8 @@ export interface LayoutSnapshot {
   mobilePanels: PanelId[];
   /** Terminal instanceId → number mapping for persistent numbering across reloads. */
   terminalNumbers?: Record<string, number>;
+  /** Custom terminal names for persistent naming across reloads. */
+  terminalNames?: Record<string, string>;
 }
 
 const STORAGE_KEY = 'nebulide-layout-v7';
@@ -539,6 +541,7 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
       visibility: { ...state.visibility },
       mobilePanels: [...state.mobilePanels],
       terminalNumbers: getRegistrySnapshot(),
+      terminalNames: getCustomNamesSnapshot(),
     };
   },
 
@@ -565,6 +568,9 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
     resetTerminalRegistry();
     if (snap.terminalNumbers && Object.keys(snap.terminalNumbers).length > 0) {
       setPendingNumbers(snap.terminalNumbers);
+    }
+    if (snap.terminalNames && Object.keys(snap.terminalNames).length > 0) {
+      setCustomNames(snap.terminalNames);
     }
 
     // Destroy frontend+backend sessions that are NOT in the new layout

@@ -330,9 +330,20 @@ func (h *FilesHandler) Rename(c *gin.Context) {
 		return
 	}
 
+	// Auto-rename on conflict: file.json → file (2).json, file (3).json, etc.
 	if _, err := os.Stat(fullNewPath); err == nil {
-		c.JSON(http.StatusConflict, gin.H{"error": "Target already exists"})
-		return
+		dir := filepath.Dir(fullNewPath)
+		ext := filepath.Ext(fullNewPath)
+		base := strings.TrimSuffix(filepath.Base(fullNewPath), ext)
+		for i := 2; i < 100; i++ {
+			candidate := filepath.Join(dir, fmt.Sprintf("%s (%d)%s", base, i, ext))
+			if _, err := os.Stat(candidate); os.IsNotExist(err) {
+				fullNewPath = candidate
+				// Update req.NewPath so the response reflects the actual name
+				req.NewPath = filepath.Dir(req.NewPath) + "/" + fmt.Sprintf("%s (%d)%s", base, i, ext)
+				break
+			}
+		}
 	}
 
 	if err := os.Rename(fullOldPath, fullNewPath); err != nil {
