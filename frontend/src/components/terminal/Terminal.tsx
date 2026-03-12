@@ -1383,87 +1383,119 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
               CpAll
             </button>
           </div>
-          {/* Joystick overlay */}
+          {/* Floating joystick overlay */}
           {joystickOpen && (
-            <div className="terminal-joystick-container">
-              <button
-                type="button"
-                className={`terminal-toolbar-btn${joystickMode === 'start' ? ' active' : ''}`}
-                onPointerDown={(e) => e.preventDefault()}
-                onClick={() => setJoystickMode('start')}
-              >
-                S
-              </button>
-              <button
-                type="button"
-                className={`terminal-toolbar-btn${joystickMode === 'end' ? ' active' : ''}`}
-                onPointerDown={(e) => e.preventDefault()}
-                onClick={() => setJoystickMode('end')}
-              >
-                E
-              </button>
+            <div className="terminal-joystick-overlay">
+              <div className="terminal-joystick-mode">
+                <button
+                  type="button"
+                  className={`terminal-toolbar-btn${joystickMode === 'start' ? ' active' : ''}`}
+                  onPointerDown={(e) => e.preventDefault()}
+                  onClick={() => setJoystickMode('start')}
+                >
+                  Start
+                </button>
+                <button
+                  type="button"
+                  className={`terminal-toolbar-btn${joystickMode === 'end' ? ' active' : ''}`}
+                  onPointerDown={(e) => e.preventDefault()}
+                  onClick={() => setJoystickMode('end')}
+                >
+                  End
+                </button>
+              </div>
               <div
-                className="terminal-joystick-pad"
-                onPointerDown={(e) => {
-                  e.preventDefault();
-                  const el = e.currentTarget;
-                  const rect = el.getBoundingClientRect();
-                  const cx = rect.left + rect.width / 2;
-                  const cy = rect.top + rect.height / 2;
-                  let lastDir = '';
-                  let repeatTimer = 0;
+                className="terminal-joystick-base"
+                ref={(el) => {
+                  if (!el) return;
+                  const knob = el.querySelector('.terminal-joystick-knob') as HTMLElement;
+                  if (!knob) return;
 
-                  const fire = (dir: string) => {
-                    if (dir === 'up') moveSelRow(joystickMode, -1);
-                    else if (dir === 'down') moveSelRow(joystickMode, 1);
-                    else if (dir === 'left') moveSelCol(joystickMode, -1);
-                    else if (dir === 'right') moveSelCol(joystickMode, 1);
+                  const RADIUS = 44; // base radius
+                  const KNOB_MAX = 30; // max knob travel
+                  const DEADZONE = 10;
+                  let repeatTimer = 0;
+                  let lastDir = '';
+                  // Store joystickMode in a ref-like closure that reads from DOM
+                  const getModeFromDom = () => {
+                    const activeBtn = el.parentElement?.querySelector('.terminal-joystick-mode .active');
+                    return activeBtn?.textContent === 'Start' ? 'start' as const : 'end' as const;
                   };
 
-                  const getDir = (clientX: number, clientY: number) => {
-                    const dx = clientX - cx;
-                    const dy = clientY - cy;
-                    const deadzone = 8;
-                    if (Math.abs(dx) < deadzone && Math.abs(dy) < deadzone) return '';
+                  const fire = (dir: string) => {
+                    const mode = getModeFromDom();
+                    if (dir === 'up') moveSelRow(mode, -1);
+                    else if (dir === 'down') moveSelRow(mode, 1);
+                    else if (dir === 'left') moveSelCol(mode, -1);
+                    else if (dir === 'right') moveSelCol(mode, 1);
+                  };
+
+                  const getDir = (dx: number, dy: number) => {
+                    if (Math.abs(dx) < DEADZONE && Math.abs(dy) < DEADZONE) return '';
                     if (Math.abs(dx) > Math.abs(dy)) return dx > 0 ? 'right' : 'left';
                     return dy > 0 ? 'down' : 'up';
                   };
 
-                  const dir = getDir(e.clientX, e.clientY);
-                  if (dir) {
-                    fire(dir);
-                    lastDir = dir;
-                    repeatTimer = window.setInterval(() => { if (lastDir) fire(lastDir); }, 120);
-                  }
+                  el.addEventListener('pointerdown', (e) => {
+                    e.preventDefault();
+                    (el as HTMLElement).setPointerCapture(e.pointerId);
+                    const rect = el.getBoundingClientRect();
+                    const cx = rect.left + rect.width / 2;
+                    const cy = rect.top + rect.height / 2;
 
-                  const onMove = (ev: PointerEvent) => {
-                    const d = getDir(ev.clientX, ev.clientY);
-                    if (d !== lastDir) {
-                      lastDir = d;
-                      if (d) fire(d);
+                    const updateKnob = (clientX: number, clientY: number) => {
+                      let dx = clientX - cx;
+                      let dy = clientY - cy;
+                      const dist = Math.sqrt(dx * dx + dy * dy);
+                      if (dist > KNOB_MAX) {
+                        dx = (dx / dist) * KNOB_MAX;
+                        dy = (dy / dist) * KNOB_MAX;
+                      }
+                      knob.style.transform = `translate(${dx}px, ${dy}px)`;
+                      return { dx, dy };
+                    };
+
+                    const { dx, dy } = updateKnob(e.clientX, e.clientY);
+                    const dir = getDir(dx, dy);
+                    if (dir) {
+                      fire(dir);
+                      lastDir = dir;
+                      repeatTimer = window.setInterval(() => { if (lastDir) fire(lastDir); }, 100);
                     }
-                  };
 
-                  const onUp = () => {
-                    clearInterval(repeatTimer);
-                    window.removeEventListener('pointermove', onMove);
-                    window.removeEventListener('pointerup', onUp);
-                    window.removeEventListener('pointercancel', onUp);
-                  };
+                    const onMove = (ev: PointerEvent) => {
+                      const pos = updateKnob(ev.clientX, ev.clientY);
+                      const d = getDir(pos.dx, pos.dy);
+                      if (d !== lastDir) {
+                        lastDir = d;
+                        if (d) fire(d);
+                      }
+                    };
 
-                  window.addEventListener('pointermove', onMove);
-                  window.addEventListener('pointerup', onUp);
-                  window.addEventListener('pointercancel', onUp);
+                    const onUp = () => {
+                      clearInterval(repeatTimer);
+                      lastDir = '';
+                      knob.style.transform = 'translate(0, 0)';
+                      el.removeEventListener('pointermove', onMove);
+                      el.removeEventListener('pointerup', onUp);
+                      el.removeEventListener('pointercancel', onUp);
+                    };
+
+                    el.addEventListener('pointermove', onMove);
+                    el.addEventListener('pointerup', onUp);
+                    el.addEventListener('pointercancel', onUp);
+                  });
                 }}
               >
-                <svg width="60" height="60" viewBox="0 0 60 60" fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5">
-                  <circle cx="30" cy="30" r="28" fill="rgba(127,0,255,0.08)" stroke="rgba(127,0,255,0.3)" />
-                  <path d="M30 8 L30 18" strokeLinecap="round" />
-                  <path d="M30 52 L30 42" strokeLinecap="round" />
-                  <path d="M8 30 L18 30" strokeLinecap="round" />
-                  <path d="M52 30 L42 30" strokeLinecap="round" />
-                  <circle cx="30" cy="30" r="6" fill="rgba(127,0,255,0.25)" stroke="rgba(127,0,255,0.5)" />
+                {/* Direction arrows */}
+                <svg className="terminal-joystick-arrows" width="100" height="100" viewBox="0 0 100 100">
+                  <path d="M50 15 L45 25 L55 25 Z" className="joystick-arrow" />
+                  <path d="M50 85 L45 75 L55 75 Z" className="joystick-arrow" />
+                  <path d="M15 50 L25 45 L25 55 Z" className="joystick-arrow" />
+                  <path d="M85 50 L75 45 L75 55 Z" className="joystick-arrow" />
                 </svg>
+                {/* Knob */}
+                <div className="terminal-joystick-knob" />
               </div>
             </div>
           )}
