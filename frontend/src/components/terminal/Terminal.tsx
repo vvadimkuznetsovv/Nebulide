@@ -219,8 +219,17 @@ function createXterm(instanceId: string): TermSession {
 
   // onData closes over session.ws (mutable field on the session object)
   xterm.onData((data) => {
+    console.log(`[Terminal] onData BEFORE id=${instanceId} len=${data.length} raw=${JSON.stringify(data).slice(0, 300)}`);
     if (session.ws?.readyState === WebSocket.OPEN) {
-      session.ws.send(new TextEncoder().encode(data));
+      // Filter out Device Attributes (DA) responses that xterm.js auto-generates.
+      // Without this, \e[?1;2c goes to PTY stdin → bash displays "1;2c" as literal text.
+      const filtered = data.replace(/\x1b\[\?[\d;]*c/g, '');
+      console.log(`[Terminal] onData AFTER id=${instanceId} len=${filtered.length} raw=${JSON.stringify(filtered).slice(0, 300)} blockedBytes=${data.length - filtered.length}`);
+      if (!filtered) {
+        console.log(`[Terminal] onData FULLY BLOCKED (DA response) id=${instanceId}`);
+        return;
+      }
+      session.ws.send(new TextEncoder().encode(filtered));
       emitActivity({ type: 'terminal_input', instanceId });
 
       // Accumulate input for ALL terminals (detect claude command + sentiment analysis)
@@ -305,6 +314,7 @@ async function connectWs(instanceId: string): Promise<void> {
 
   ws.onopen = () => {
     opened = true;
+    console.log(`[Terminal] ws.onopen id=${instanceId}`);
     session.xterm.write(_green('[WS] Connected!') + '\r\n');
     session.reconnectAttempts = 0;
     emitActivity({ type: 'terminal_connect', instanceId });
@@ -328,6 +338,14 @@ async function connectWs(instanceId: string): Promise<void> {
   };
 
   ws.onmessage = (event) => {
+    const bytes = event.data instanceof ArrayBuffer ? event.data.byteLength : event.data.length;
+    // Log first message and any containing potential DA query
+    if (bytes < 200) {
+      const raw = event.data instanceof ArrayBuffer ? new TextDecoder().decode(event.data) : event.data;
+      if (raw.includes('\x1b[') || raw.includes('1;2c')) {
+        console.log(`[Terminal] ws.onmessage id=${instanceId} bytes=${bytes} raw=${JSON.stringify(raw).slice(0, 300)}`);
+      }
+    }
     if (event.data instanceof ArrayBuffer) {
       session.xterm.write(new Uint8Array(event.data));
       emitActivity({ type: 'terminal_data', instanceId, byteCount: event.data.byteLength });
@@ -370,6 +388,7 @@ async function connectWs(instanceId: string): Promise<void> {
   };
 
   ws.onerror = () => {
+    console.log(`[Terminal] ws.onerror id=${instanceId}`);
     session.xterm.write(_red('[WS] Connection error!') + '\r\n');
   };
 
@@ -468,7 +487,7 @@ export function destroyAllTerminalSessions(): void {
  *  Resets reconnectAttempts and calls connectWs for each session.
  *  Clears xterm to prevent stale replay buffer from duplicating output. */
 export function reconnectAllTerminalSessions(): void {
-  console.log('[Terminal] reconnectAllTerminalSessions:', Array.from(sessions.keys()));
+  console.log('[Terminal] reconnectAllTerminalSessions:', Array.from(sessions.keys()), new Error().stack?.split('\n').slice(1, 5).join(' ← '));
   for (const [instanceId, session] of sessions.entries()) {
     if (!session.ws || session.ws.readyState > WebSocket.OPEN) {
       session.reconnectAttempts = 0;
@@ -482,7 +501,7 @@ export function reconnectAllTerminalSessions(): void {
  *  Used on force_disconnected — PTY stays alive on backend,
  *  new device reconnects to the same shell via GetOrCreate. */
 export function disconnectAllTerminalSessions(): void {
-  console.log('[Terminal] disconnectAllTerminalSessions:', Array.from(sessions.keys()));
+  console.log('[Terminal] disconnectAllTerminalSessions:', Array.from(sessions.keys()), new Error().stack?.split('\n').slice(1, 5).join(' ← '));
   for (const session of sessions.values()) {
     if (session.reconnectTimer) {
       clearTimeout(session.reconnectTimer);
