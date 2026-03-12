@@ -30,19 +30,21 @@ async function handleImageUpload(file: File, isXterm: boolean) {
   const name = `clipboard_${Date.now()}.${ext}`;
   log('[ImagePaste] uploading', { name, type: file.type, size: file.size, isXterm });
 
+  const toastId = toast.loading('Uploading image...');
+
   try {
     const { data } = await uploadFile(file, undefined, name);
     log('[ImagePaste] uploaded:', data.path);
     const sent = sendToActiveTerminal(data.path);
     if (sent) {
-      toast.success('Image uploaded & sent to terminal');
+      toast.success('Image uploaded & sent to terminal', { id: toastId });
     } else {
       try { await navigator.clipboard.writeText(data.path); } catch { /* noop */ }
-      toast.success(`Image uploaded: ${data.path}`, { duration: 4000 });
+      toast.success(`Image uploaded: ${data.path}`, { id: toastId, duration: 4000 });
     }
   } catch (err) {
     console.error('[ImagePaste] upload failed:', err);
-    toast.error('Failed to upload image');
+    toast.error('Failed to upload image', { id: toastId });
   }
 }
 
