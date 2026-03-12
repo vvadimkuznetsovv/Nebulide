@@ -101,13 +101,17 @@ export default function Workspace() {
     };
 
     const unsubLayout = useLayoutStore.subscribe((state, prev) => {
-      const changedKeys = Object.keys(state).filter(k => (state as Record<string, unknown>)[k] !== (prev as Record<string, unknown>)[k]);
-      console.log('[Workspace] layoutStore changed:', changedKeys);
+      const s = state as unknown as Record<string, unknown>;
+      const p = prev as unknown as Record<string, unknown>;
+      const changed = Object.keys(s).filter(k => s[k] !== p[k]);
+      console.log('[Workspace] layoutStore changed:', changed);
       debouncedSave();
     });
     const unsubWorkspace = useWorkspaceStore.subscribe((state, prev) => {
-      const changedKeys = Object.keys(state).filter(k => (state as Record<string, unknown>)[k] !== (prev as Record<string, unknown>)[k]);
-      console.log('[Workspace] workspaceStore changed:', changedKeys);
+      const s = state as unknown as Record<string, unknown>;
+      const p = prev as unknown as Record<string, unknown>;
+      const changed = Object.keys(s).filter(k => s[k] !== p[k]);
+      console.log('[Workspace] workspaceStore changed:', changed);
       debouncedSave();
     });
     const safetyInterval = setInterval(saveCurrentSession, 30_000);
