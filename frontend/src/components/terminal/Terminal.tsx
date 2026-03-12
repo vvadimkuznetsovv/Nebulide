@@ -244,9 +244,13 @@ function createXterm(instanceId: string): TermSession {
       for (const ch of data) {
         if (ch === '\r' || ch === '\n') {
           const text = session.inputBuffer.trim();
+          if (text) {
+            log(`[Terminal] inputBuffer ENTER id=${instanceId} text="${text}" matchesClaude=${/^claude\b/.test(text)}`);
+          }
 
           // Detect claude command launch from any terminal
           if (text && /^claude\b/.test(text) && !/^claude\s+(-h|--help|--version|-v)$/.test(text)) {
+            log(`[Terminal] CLAUDE DETECTED id=${instanceId} — emitting claude_launched`);
             emitActivity({ type: 'claude_launched', instanceId });
             sendSyncMessage({ type: 'pet_event', pet_action: 'launched', instance_id: instanceId });
           }
