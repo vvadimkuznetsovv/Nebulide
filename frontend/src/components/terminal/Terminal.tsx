@@ -1408,6 +1408,10 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
                 className="terminal-joystick-base"
                 ref={(el) => {
                   if (!el) return;
+                  // Prevent duplicate listeners on React re-render
+                  if ((el as HTMLElement & { _joystickInit?: boolean })._joystickInit) return;
+                  (el as HTMLElement & { _joystickInit?: boolean })._joystickInit = true;
+
                   const knob = el.querySelector('.terminal-joystick-knob') as HTMLElement;
                   if (!knob) return;
 
@@ -1416,7 +1420,6 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
                   let repeatTimer = 0;
                   let lastDir = '';
                   let repeatCount = 0;
-                  let firedOnDown = false; // prevent double-fire on tap
 
                   const getModeFromDom = () => {
                     const activeBtn = el.parentElement?.querySelector('.terminal-joystick-mode .active');
@@ -1438,7 +1441,6 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
                     repeatCount = 0;
                   };
 
-                  // Only repeat timer calls fire() — pointermove NEVER fires directly
                   const scheduleRepeat = () => {
                     repeatTimer = window.setTimeout(() => {
                       if (!lastDir) return;
@@ -1460,7 +1462,6 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
                     const rect = el.getBoundingClientRect();
                     const cx = rect.left + rect.width / 2;
                     const cy = rect.top + rect.height / 2;
-                    firedOnDown = false;
 
                     const updateKnob = (clientX: number, clientY: number) => {
                       let dx = clientX - cx;
@@ -1479,8 +1480,6 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
                     lastDir = dir;
                     if (dir) {
                       fire(dir);
-                      firedOnDown = true;
-                      // Hold repeat: 350ms delay then accelerating
                       repeatTimer = window.setTimeout(() => {
                         if (!lastDir) return;
                         repeatCount++;
@@ -1493,12 +1492,9 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
                       const pos = updateKnob(ev.clientX, ev.clientY);
                       const d = getDir(pos.dx, pos.dy);
                       if (d !== lastDir) {
-                        // Direction changed — restart repeat for new direction
-                        // but do NOT fire() here, only update lastDir
                         stopRepeat();
                         lastDir = d;
                         if (d) {
-                          // Start repeat for new direction (first fire after 150ms)
                           repeatTimer = window.setTimeout(() => {
                             if (!lastDir) return;
                             fire(lastDir);
@@ -1510,16 +1506,6 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
                     };
 
                     const onUp = () => {
-                      // If tap landed in deadzone (no fire on down), fire once for closest direction
-                      if (!firedOnDown && !lastDir) {
-                        const pos = updateKnob(e.clientX, e.clientY);
-                        // Lower threshold for tap
-                        const adx = Math.abs(pos.dx), ady = Math.abs(pos.dy);
-                        if (adx > 5 || ady > 5) {
-                          const tapDir = adx > ady ? (pos.dx > 0 ? 'right' : 'left') : (pos.dy > 0 ? 'down' : 'up');
-                          fire(tapDir);
-                        }
-                      }
                       stopRepeat();
                       lastDir = '';
                       knob.style.transform = 'translate(0, 0)';
