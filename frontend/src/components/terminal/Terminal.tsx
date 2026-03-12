@@ -637,7 +637,7 @@ const TERM_ICONS = {
 
 // ── Mobile toolbar: shortcut keys for touch devices ──
 
-const TOOLBAR_KEYS: { label: string; data: string }[] = [
+const TOOLBAR_KEYS: { label: string; title?: string; data: string }[] = [
   { label: 'Tab', data: '\t' },
   { label: '\u2191', data: '\x1b[A' },
   { label: '\u2193', data: '\x1b[B' },
@@ -1217,6 +1217,7 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
                 key={k.label}
                 type="button"
                 className="terminal-toolbar-btn"
+                title={k.title}
                 onPointerDown={(e) => e.preventDefault()}
                 onClick={() => sendKey(k.data)}
               >
@@ -1295,6 +1296,9 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
           <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={pasteToTerminal}>
             Paste
           </button>
+          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => sendKey('\x1b[3~')}>
+            Del
+          </button>
           <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => sessions.get(instanceId)?.xterm.selectAll()}>
             Sel All
           </button>
@@ -1313,7 +1317,7 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
           </button>
           <div className="terminal-toolbar-sep" />
           <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => sendKey('\r')}>
-            ↵
+            Enter
           </button>
         </div>
       )}
