@@ -100,8 +100,16 @@ export default function Workspace() {
       }, 2000);
     };
 
-    const unsubLayout = useLayoutStore.subscribe(debouncedSave);
-    const unsubWorkspace = useWorkspaceStore.subscribe(debouncedSave);
+    const unsubLayout = useLayoutStore.subscribe((state, prev) => {
+      const changedKeys = Object.keys(state).filter(k => (state as Record<string, unknown>)[k] !== (prev as Record<string, unknown>)[k]);
+      console.log('[Workspace] layoutStore changed:', changedKeys);
+      debouncedSave();
+    });
+    const unsubWorkspace = useWorkspaceStore.subscribe((state, prev) => {
+      const changedKeys = Object.keys(state).filter(k => (state as Record<string, unknown>)[k] !== (prev as Record<string, unknown>)[k]);
+      console.log('[Workspace] workspaceStore changed:', changedKeys);
+      debouncedSave();
+    });
     const safetyInterval = setInterval(saveCurrentSession, 30_000);
 
     const handleBeforeUnload = () => {
