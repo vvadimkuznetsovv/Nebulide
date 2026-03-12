@@ -675,6 +675,9 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
   const [row3Open, setRow3Open] = useState(() =>
     localStorage.getItem('nebulide-terminal-toolbar-r3') === 'open',
   );
+  const [selBtnsOpen, setSelBtnsOpen] = useState(true);
+  const [joystickOpen, setJoystickOpen] = useState(false);
+  const [joystickMode, setJoystickMode] = useState<'start' | 'end'>('end');
   const [followMode, setFollowMode] = useState(() =>
     localStorage.getItem('nebulide-terminal-follow') !== 'off',
   );
@@ -1319,55 +1322,152 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
         </div>
       )}
 
-      {/* Row 3: copy mode — line & character selection (toggled by f-C) */}
+      {/* Row 3: copy mode — joystick + line & character selection (toggled by f-C) */}
       {copyMode && toolbarOpen && (
-        <div className="terminal-toolbar">
-          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => moveSelRow('start', -1)}>
-            S{'\u2191'}
-          </button>
-          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => moveSelRow('start', 1)}>
-            S{'\u2193'}
-          </button>
-          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => moveSelCol('start', -1)}>
-            S{'\u2190'}
-          </button>
-          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => moveSelCol('start', 1)}>
-            S{'\u2192'}
-          </button>
-          <div className="terminal-toolbar-sep" />
-          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => moveSelRow('end', -1)}>
-            E{'\u2191'}
-          </button>
-          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => moveSelRow('end', 1)}>
-            E{'\u2193'}
-          </button>
-          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => moveSelCol('end', -1)}>
-            E{'\u2190'}
-          </button>
-          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => moveSelCol('end', 1)}>
-            E{'\u2192'}
-          </button>
-          <div className="terminal-toolbar-sep" />
-          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={copySelection}>
-            Copy
-          </button>
-          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={selectAllLines}>
-            All
-          </button>
-          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={exitCopyMode}>
-            {'\u00d7'}
-          </button>
-          <div className="terminal-toolbar-sep" />
-          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => copyLines(5)}>
-            Cp5
-          </button>
-          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => copyLines(30)}>
-            Cp30
-          </button>
-          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => copyLines(0)}>
-            CpAll
-          </button>
-        </div>
+        <>
+          <div className="terminal-toolbar">
+            <button type="button" className={`terminal-toolbar-btn${joystickOpen ? ' active' : ''}`} onPointerDown={(e) => e.preventDefault()} onClick={() => setJoystickOpen((v) => !v)}>
+              Joy
+            </button>
+            <button type="button" className={`terminal-toolbar-btn${selBtnsOpen ? ' active' : ''}`} onPointerDown={(e) => e.preventDefault()} onClick={() => setSelBtnsOpen((v) => !v)}>
+              S/E
+            </button>
+            {selBtnsOpen && (
+              <>
+                <div className="terminal-toolbar-sep" />
+                <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => moveSelRow('start', -1)}>
+                  S{'\u2191'}
+                </button>
+                <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => moveSelRow('start', 1)}>
+                  S{'\u2193'}
+                </button>
+                <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => moveSelCol('start', -1)}>
+                  S{'\u2190'}
+                </button>
+                <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => moveSelCol('start', 1)}>
+                  S{'\u2192'}
+                </button>
+                <div className="terminal-toolbar-sep" />
+                <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => moveSelRow('end', -1)}>
+                  E{'\u2191'}
+                </button>
+                <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => moveSelRow('end', 1)}>
+                  E{'\u2193'}
+                </button>
+                <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => moveSelCol('end', -1)}>
+                  E{'\u2190'}
+                </button>
+                <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => moveSelCol('end', 1)}>
+                  E{'\u2192'}
+                </button>
+              </>
+            )}
+            <div className="terminal-toolbar-sep" />
+            <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={copySelection}>
+              Copy
+            </button>
+            <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={selectAllLines}>
+              All
+            </button>
+            <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={exitCopyMode}>
+              {'\u00d7'}
+            </button>
+            <div className="terminal-toolbar-sep" />
+            <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => copyLines(5)}>
+              Cp5
+            </button>
+            <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => copyLines(30)}>
+              Cp30
+            </button>
+            <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => copyLines(0)}>
+              CpAll
+            </button>
+          </div>
+          {/* Joystick overlay */}
+          {joystickOpen && (
+            <div className="terminal-joystick-container">
+              <button
+                type="button"
+                className={`terminal-toolbar-btn${joystickMode === 'start' ? ' active' : ''}`}
+                onPointerDown={(e) => e.preventDefault()}
+                onClick={() => setJoystickMode('start')}
+              >
+                S
+              </button>
+              <button
+                type="button"
+                className={`terminal-toolbar-btn${joystickMode === 'end' ? ' active' : ''}`}
+                onPointerDown={(e) => e.preventDefault()}
+                onClick={() => setJoystickMode('end')}
+              >
+                E
+              </button>
+              <div
+                className="terminal-joystick-pad"
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  const el = e.currentTarget;
+                  const rect = el.getBoundingClientRect();
+                  const cx = rect.left + rect.width / 2;
+                  const cy = rect.top + rect.height / 2;
+                  let lastDir = '';
+                  let repeatTimer = 0;
+
+                  const fire = (dir: string) => {
+                    if (dir === 'up') moveSelRow(joystickMode, -1);
+                    else if (dir === 'down') moveSelRow(joystickMode, 1);
+                    else if (dir === 'left') moveSelCol(joystickMode, -1);
+                    else if (dir === 'right') moveSelCol(joystickMode, 1);
+                  };
+
+                  const getDir = (clientX: number, clientY: number) => {
+                    const dx = clientX - cx;
+                    const dy = clientY - cy;
+                    const deadzone = 8;
+                    if (Math.abs(dx) < deadzone && Math.abs(dy) < deadzone) return '';
+                    if (Math.abs(dx) > Math.abs(dy)) return dx > 0 ? 'right' : 'left';
+                    return dy > 0 ? 'down' : 'up';
+                  };
+
+                  const dir = getDir(e.clientX, e.clientY);
+                  if (dir) {
+                    fire(dir);
+                    lastDir = dir;
+                    repeatTimer = window.setInterval(() => { if (lastDir) fire(lastDir); }, 120);
+                  }
+
+                  const onMove = (ev: PointerEvent) => {
+                    const d = getDir(ev.clientX, ev.clientY);
+                    if (d !== lastDir) {
+                      lastDir = d;
+                      if (d) fire(d);
+                    }
+                  };
+
+                  const onUp = () => {
+                    clearInterval(repeatTimer);
+                    window.removeEventListener('pointermove', onMove);
+                    window.removeEventListener('pointerup', onUp);
+                    window.removeEventListener('pointercancel', onUp);
+                  };
+
+                  window.addEventListener('pointermove', onMove);
+                  window.addEventListener('pointerup', onUp);
+                  window.addEventListener('pointercancel', onUp);
+                }}
+              >
+                <svg width="60" height="60" viewBox="0 0 60 60" fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth="1.5">
+                  <circle cx="30" cy="30" r="28" fill="rgba(127,0,255,0.08)" stroke="rgba(127,0,255,0.3)" />
+                  <path d="M30 8 L30 18" strokeLinecap="round" />
+                  <path d="M30 52 L30 42" strokeLinecap="round" />
+                  <path d="M8 30 L18 30" strokeLinecap="round" />
+                  <path d="M52 30 L42 30" strokeLinecap="round" />
+                  <circle cx="30" cy="30" r="6" fill="rgba(127,0,255,0.25)" stroke="rgba(127,0,255,0.5)" />
+                </svg>
+              </div>
+            </div>
+          )}
+        </>
       )}
 
       {/* Row 4: Ctrl keys + Paste (toggled by f-E) */}

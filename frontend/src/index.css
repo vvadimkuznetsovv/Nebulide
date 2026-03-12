@@ -1786,6 +1786,34 @@
   align-self: center;
 }
 
+/* ── Terminal joystick ── */
+.terminal-joystick-container {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: rgba(10, 10, 26, 0.95);
+  border-top: 1px solid rgba(var(--accent-rgb), 0.15);
+}
+.terminal-joystick-pad {
+  touch-action: none;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  border-radius: 50%;
+  border: 1px solid rgba(var(--accent-rgb), 0.3);
+  background: rgba(var(--accent-rgb), 0.05);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 64px;
+  height: 64px;
+}
+.terminal-joystick-pad:active {
+  background: rgba(var(--accent-rgb), 0.15);
+  border-color: rgba(var(--accent-rgb), 0.5);
+}
+
 /* ── Terminal search bar ── */
 .terminal-search-bar {
   position: absolute;
