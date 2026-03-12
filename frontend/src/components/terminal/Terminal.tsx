@@ -68,6 +68,8 @@ interface TermSession {
   streamEndTimer: number;
   /** Accumulated user input for Claude terminals (prompt sentiment analysis) */
   inputBuffer: string;
+  /** Escape sequence state: 0=normal, 1=saw ESC, 2=inside CSI/SS3 */
+  inEscape: number;
   /** Timer to auto-remove pet for non-claude-* terminals after inactivity */
   petInactivityTimer: number;
 }
@@ -183,6 +185,7 @@ function createXterm(instanceId: string): TermSession {
     streamActive: false,
     streamEndTimer: 0,
     inputBuffer: '',
+    inEscape: 0,
     petInactivityTimer: 0,
   };
 
@@ -241,7 +244,23 @@ function createXterm(instanceId: string): TermSession {
       emitActivity({ type: 'terminal_input', instanceId });
 
       // Accumulate input for ALL terminals (detect claude command + sentiment analysis)
+      // Skip escape sequences: ESC → '[' → params → final letter (A-Z, a-z, ~)
       for (const ch of data) {
+        // Escape sequence state machine
+        if (ch === '\x1b') { session.inEscape = 1; continue; }
+        if (session.inEscape === 1) {
+          // ESC followed by '[' = CSI sequence, 'O' = SS3, others = 2-char sequence
+          session.inEscape = (ch === '[' || ch === 'O') ? 2 : 0;
+          continue;
+        }
+        if (session.inEscape === 2) {
+          // Inside CSI/SS3 — skip until final byte (letter or ~)
+          if ((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || ch === '~') {
+            session.inEscape = 0;
+          }
+          continue;
+        }
+
         if (ch === '\r' || ch === '\n') {
           const text = session.inputBuffer.trim();
           if (text) {
