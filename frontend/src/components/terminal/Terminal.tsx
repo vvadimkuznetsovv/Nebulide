@@ -1412,11 +1412,15 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
                   if (!knob) return;
 
                   const KNOB_MAX = 30; // max knob travel
-                  const DEADZONE = 10;
+                  const DEADZONE = 18; // entry threshold
+                  const DEADZONE_EXIT = 8; // exit threshold (hysteresis)
                   let delayTimer = 0;
                   let repeatTimer = 0;
                   let lastDir = '';
-                  // Store joystickMode in a ref-like closure that reads from DOM
+                  let repeatCount = 0;
+                  let lastFireTime = 0;
+                  const FIRE_COOLDOWN = 120; // min ms between move-triggered fires
+
                   const getModeFromDom = () => {
                     const activeBtn = el.parentElement?.querySelector('.terminal-joystick-mode .active');
                     return activeBtn?.textContent === 'Start' ? 'start' as const : 'end' as const;
@@ -1428,11 +1432,42 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
                     else if (dir === 'down') moveSelRow(mode, 1);
                     else if (dir === 'left') moveSelCol(mode, -1);
                     else if (dir === 'right') moveSelCol(mode, 1);
+                    lastFireTime = Date.now();
                   };
 
-                  const getDir = (dx: number, dy: number) => {
-                    if (Math.abs(dx) < DEADZONE && Math.abs(dy) < DEADZONE) return '';
-                    if (Math.abs(dx) > Math.abs(dy)) return dx > 0 ? 'right' : 'left';
+                  const getRepeatDelay = () => Math.max(40, 250 - repeatCount * 30);
+
+                  const scheduleRepeat = () => {
+                    repeatTimer = window.setTimeout(() => {
+                      if (!lastDir) return;
+                      repeatCount++;
+                      fire(lastDir);
+                      scheduleRepeat();
+                    }, getRepeatDelay());
+                  };
+
+                  const startRepeat = () => {
+                    repeatCount = 0;
+                    delayTimer = window.setTimeout(() => {
+                      if (!lastDir) return;
+                      repeatCount++;
+                      fire(lastDir);
+                      scheduleRepeat();
+                    }, 300);
+                  };
+
+                  const stopRepeat = () => {
+                    clearTimeout(delayTimer);
+                    clearTimeout(repeatTimer);
+                    repeatCount = 0;
+                  };
+
+                  // Hysteresis: need DEADZONE to enter a direction, only DEADZONE_EXIT to leave
+                  const getDir = (dx: number, dy: number, current: string) => {
+                    const adx = Math.abs(dx), ady = Math.abs(dy);
+                    const threshold = current ? DEADZONE_EXIT : DEADZONE;
+                    if (adx < threshold && ady < threshold) return '';
+                    if (adx > ady) return dx > 0 ? 'right' : 'left';
                     return dy > 0 ? 'down' : 'up';
                   };
 
@@ -1456,36 +1491,31 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
                     };
 
                     const { dx, dy } = updateKnob(e.clientX, e.clientY);
-                    const dir = getDir(dx, dy);
+                    const dir = getDir(dx, dy, '');
                     if (dir) {
                       fire(dir);
                       lastDir = dir;
-                      // Initial delay 300ms, then repeat every 200ms
-                      delayTimer = window.setTimeout(() => {
-                        repeatTimer = window.setInterval(() => { if (lastDir) fire(lastDir); }, 200);
-                      }, 300);
+                      startRepeat();
                     }
 
                     const onMove = (ev: PointerEvent) => {
                       const pos = updateKnob(ev.clientX, ev.clientY);
-                      const d = getDir(pos.dx, pos.dy);
+                      const d = getDir(pos.dx, pos.dy, lastDir);
                       if (d !== lastDir) {
-                        // Direction changed — reset timers
-                        clearTimeout(delayTimer);
-                        clearInterval(repeatTimer);
+                        stopRepeat();
                         lastDir = d;
                         if (d) {
-                          fire(d);
-                          delayTimer = window.setTimeout(() => {
-                            repeatTimer = window.setInterval(() => { if (lastDir) fire(lastDir); }, 200);
-                          }, 300);
+                          // Throttle: don't fire if too soon after last fire
+                          if (Date.now() - lastFireTime >= FIRE_COOLDOWN) {
+                            fire(d);
+                          }
+                          startRepeat();
                         }
                       }
                     };
 
                     const onUp = () => {
-                      clearTimeout(delayTimer);
-                      clearInterval(repeatTimer);
+                      stopRepeat();
                       lastDir = '';
                       knob.style.transform = 'translate(0, 0)';
                       el.removeEventListener('pointermove', onMove);
