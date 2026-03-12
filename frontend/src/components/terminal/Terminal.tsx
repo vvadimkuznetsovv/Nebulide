@@ -145,9 +145,11 @@ function getWorkspaceSessionId(): string {
 
 /** Emit terminal_disconnect locally + broadcast to other devices for terminals with active pets */
 function emitDisconnect(instanceId: string) {
+  const hasPet = !!usePetStore.getState().pets[instanceId];
+  console.log(`[Terminal] emitDisconnect id=${instanceId} hasPet=${hasPet}`, new Error().stack?.split('\n').slice(1, 4).join(' ← '));
   emitActivity({ type: 'terminal_disconnect', instanceId });
   // Broadcast pet disconnect for any terminal that has an active pet
-  if (usePetStore.getState().pets[instanceId]) {
+  if (hasPet) {
     sendSyncMessage({ type: 'pet_event', pet_action: 'disconnected', instance_id: instanceId });
   }
 }
@@ -219,6 +221,11 @@ function createXterm(instanceId: string): TermSession {
 
   // onData closes over session.ws (mutable field on the session object)
   xterm.onData((data) => {
+    // Debug: log escape sequences going to PTY (DA responses, focus reports, etc.)
+    if (data.includes('\x1b')) {
+      const escaped = JSON.stringify(data).slice(1, -1);
+      console.log(`[Terminal] onData id=${instanceId} wsState=${session.ws?.readyState ?? 'null'} escape_seq="${escaped}"`);
+    }
     if (session.ws?.readyState === WebSocket.OPEN) {
       session.ws.send(new TextEncoder().encode(data));
       emitActivity({ type: 'terminal_input', instanceId });
@@ -305,6 +312,7 @@ async function connectWs(instanceId: string): Promise<void> {
 
   ws.onopen = () => {
     opened = true;
+    console.log(`[Terminal] ws.onopen id=${instanceId} url=${url.replace(/token=[^&]+/, 'token=***')}`);
     session.xterm.write(_green('[WS] Connected!') + '\r\n');
     session.reconnectAttempts = 0;
     emitActivity({ type: 'terminal_connect', instanceId });
@@ -329,9 +337,19 @@ async function connectWs(instanceId: string): Promise<void> {
 
   ws.onmessage = (event) => {
     if (event.data instanceof ArrayBuffer) {
+      // Debug: log small messages that may contain escape sequences (DA query, etc.)
+      if (event.data.byteLength < 200) {
+        const txt = new TextDecoder().decode(event.data);
+        if (txt.includes('\x1b[') || txt.includes('1;2c')) {
+          console.log(`[Terminal] ws.onmessage id=${instanceId} bytes=${event.data.byteLength} contains_escape_or_1;2c raw=${JSON.stringify(txt).slice(0, 300)}`);
+        }
+      }
       session.xterm.write(new Uint8Array(event.data));
       emitActivity({ type: 'terminal_data', instanceId, byteCount: event.data.byteLength });
     } else {
+      if (event.data.length < 200 && (event.data.includes('\x1b[') || event.data.includes('1;2c'))) {
+        console.log(`[Terminal] ws.onmessage id=${instanceId} bytes=${event.data.length} contains_escape_or_1;2c raw=${JSON.stringify(event.data).slice(0, 300)}`);
+      }
       session.xterm.write(event.data);
       emitActivity({ type: 'terminal_data', instanceId, byteCount: event.data.length });
     }
@@ -369,7 +387,8 @@ async function connectWs(instanceId: string): Promise<void> {
     }
   };
 
-  ws.onerror = () => {
+  ws.onerror = (ev) => {
+    console.error(`[Terminal] ws.onerror id=${instanceId}`, ev);
     session.xterm.write(_red('[WS] Connection error!') + '\r\n');
   };
 

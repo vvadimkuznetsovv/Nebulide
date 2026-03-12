@@ -77,10 +77,12 @@ export function useSyncWS() {
 
           switch (msg.type) {
             case 'register_ok':
+              console.log('[SyncWS] register_ok', { session_id: msg.session_id, active_claude_terminals: msg.active_claude_terminals, activeTerminals: getActiveTerminalInstanceIds() });
               if (msg.session_id) {
                 store.setLockState(msg.session_id, 'owner');
                 // Reconnect terminals that were disconnected by workspace_locked/force_disconnected.
                 // Soft reload — don't disconnect terminals again (they're already dead).
+                console.log('[SyncWS] calling reconnectAllTerminalSessions from register_ok');
                 reconnectAllTerminalSessions();
                 setTimeout(() => {
                   store.reloadActiveSession({ soft: true, skipSave: true }).then(() => {
@@ -105,11 +107,13 @@ export function useSyncWS() {
               break;
 
             case 'workspace_locked':
+              console.log('[SyncWS] workspace_locked', { session_id: msg.session_id, locked_by: msg.locked_by, myDeviceId: getDeviceId(), isMe: msg.locked_by?.device_id === getDeviceId() });
               if (msg.session_id && msg.locked_by) {
                 if (msg.locked_by.device_id === getDeviceId()) {
                   store.setLockState(msg.session_id, 'owner');
                 } else {
                   // Another device acquired the lock — disconnect terminals
+                  console.log('[SyncWS] workspace_locked by OTHER device — disconnecting all terminals');
                   disconnectAllTerminalSessions();
                   store.setLockState(msg.session_id, 'blocked', msg.locked_by);
                 }
@@ -128,6 +132,7 @@ export function useSyncWS() {
               break;
 
             case 'force_disconnected':
+              console.log('[SyncWS] force_disconnected', { session_id: msg.session_id, locked_by: msg.locked_by, myDeviceId: getDeviceId(), isMe: msg.locked_by?.device_id === getDeviceId() });
               // Another device took over — only react if it's not us
               if (msg.locked_by?.device_id !== getDeviceId() && msg.session_id) {
                 // Save current state immediately with keepalive fetch (reliable even if page is hiding)
@@ -146,6 +151,7 @@ export function useSyncWS() {
                   }
                 }
                 // Disconnect terminal WebSockets (PTY stays alive for new device)
+                console.log('[SyncWS] force_disconnected by OTHER device — disconnecting all terminals + saving state');
                 disconnectAllTerminalSessions();
                 store.setLockState(msg.session_id, 'blocked', msg.locked_by);
               }
@@ -203,14 +209,16 @@ export function useSyncWS() {
         } catch { /* ignore non-JSON */ }
       };
 
-      ws.onclose = () => {
+      ws.onclose = (e) => {
+        console.log(`[SyncWS] ws.onclose code=${e.code} reason=${e.reason} destroyed=${destroyed}`);
         setSyncWs(null);
         if (!destroyed) {
           reconnectTimerRef.current = window.setTimeout(connect, 3000);
         }
       };
 
-      ws.onerror = () => {
+      ws.onerror = (ev) => {
+        console.error('[SyncWS] ws.onerror', ev);
         ws.close();
       };
     }
