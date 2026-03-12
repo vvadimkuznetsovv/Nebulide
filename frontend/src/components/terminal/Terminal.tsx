@@ -1411,7 +1411,6 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
                   const knob = el.querySelector('.terminal-joystick-knob') as HTMLElement;
                   if (!knob) return;
 
-                  const RADIUS = 44; // base radius
                   const KNOB_MAX = 30; // max knob travel
                   const DEADZONE = 10;
                   let repeatTimer = 0;
