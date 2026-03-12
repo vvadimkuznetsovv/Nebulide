@@ -1296,11 +1296,8 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
           <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={pasteToTerminal}>
             Paste
           </button>
-          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => sendKey('\x1b[3~')}>
-            Del
-          </button>
           <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => sessions.get(instanceId)?.xterm.selectAll()}>
-            Sel All
+            Sel A
           </button>
           <div className="terminal-toolbar-sep" />
           <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => sendKey('\x1b[H')}>
@@ -1389,14 +1386,8 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
             </button>
           ))}
           <div className="terminal-toolbar-sep" />
-          <button
-            type="button"
-            className="terminal-toolbar-btn"
-            onPointerDown={(e) => e.preventDefault()}
-            onClick={pasteToTerminal}
-            title="Paste from clipboard"
-          >
-            Paste
+          <button type="button" className="terminal-toolbar-btn" title="Delete" onPointerDown={(e) => e.preventDefault()} onClick={() => sendKey('\x1b[3~')}>
+            Del
           </button>
         </div>
       )}
