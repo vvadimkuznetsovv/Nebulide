@@ -294,15 +294,15 @@ func (s *TerminalService) GetOrCreate(sessionKey string, workingDir string, sand
 		if alive {
 			return existing, nil
 		}
-		// Shell is dead — clean up and clear stale scrollback (new shell = fresh output).
+		// Shell is dead — clean up but keep scrollback for replay into new session.
 		log.Printf("[TerminalService] dead session, recreating key=%s", sessionKey)
-		existing.Close()
+		existing.CloseKeepScrollback()
 		delete(s.sessions, sessionKey)
 	} else {
 		// No in-memory session — scrollback file may exist from a previous
-		// container. Delete it — stale prompts from old containers are useless.
+		// container. Keep it so terminal output survives deploys/restarts.
+		// DA queries stripped in multiWriter.Add() prevent 1;2c on replay.
 		log.Printf("[TerminalService] no existing session, creating new key=%s", sessionKey)
-		os.Remove(scrollbackPath(sessionKey))
 	}
 
 	return s.createLocked(sessionKey, workingDir, sandboxed, username, extraEnv)
