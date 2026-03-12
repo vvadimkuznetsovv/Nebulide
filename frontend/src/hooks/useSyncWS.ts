@@ -79,14 +79,11 @@ export function useSyncWS() {
             case 'register_ok':
               if (msg.session_id) {
                 store.setLockState(msg.session_id, 'owner');
-                // Reload active session after registration.
-                // On fresh page load, initSession() may have fetched stale data
-                // (before force_disconnected made the other device save).
-                // 1500ms delay lets the displaced device finish saving via keepalive fetch.
+                // Soft reload — do NOT disconnect/reconnect terminals.
+                // Terminals manage their own WS connections; disconnecting causes
+                // DA response fragmentation (1;2c spam) on every reconnect.
                 setTimeout(() => {
-                  store.reloadActiveSession().then(() => {
-                    // Reconnect terminals — reloadActiveSession() disconnects all WS.
-                    reconnectAllTerminalSessions();
+                  store.reloadActiveSession({ soft: true, skipSave: true }).then(() => {
                     // Clean up phantom pets — terminals that exist in petStore but not
                     // in the module-level sessions Map (e.g. zombie PTY from crashed destroy)
                     const petIds = Object.keys(usePetStore.getState().pets);
