@@ -91,8 +91,10 @@ export default function Workspace() {
 
   useEffect(() => {
     const debouncedSave = () => {
+      console.log('[Workspace] debouncedSave triggered (store changed)');
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = window.setTimeout(() => {
+        console.log('[Workspace] debouncedSave FIRING (2s elapsed)');
         saveCurrentSession();
         debounceRef.current = null;
       }, 2000);

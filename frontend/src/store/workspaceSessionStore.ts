@@ -270,10 +270,14 @@ export const useWorkspaceSessionStore = create<WorkspaceSessionState>((set, get)
   },
 
   saveCurrentSession: async () => {
-    if (_restoringSnapshot) return; // suppress auto-save triggered by store subscribe during restore
+    if (_restoringSnapshot) {
+      console.log('[WorkspaceSession] saveCurrentSession BLOCKED — _restoringSnapshot=true');
+      return;
+    }
     const { activeSessionId } = get();
     if (!activeSessionId) return;
 
+    console.log('[WorkspaceSession] saveCurrentSession EXECUTING', { activeSessionId, stack: new Error().stack?.split('\n').slice(1, 4).join(' ← ') });
     try {
       const workspaceSnap = useWorkspaceStore.getState().getWorkspaceSnapshot();
       const layoutSnap = useLayoutStore.getState().getLayoutSnapshot();
@@ -358,13 +362,18 @@ export const useWorkspaceSessionStore = create<WorkspaceSessionState>((set, get)
             // Full reload (Take Over): disconnect terminals, restore layout, then caller reconnects
             disconnectAllTerminalSessions();
           }
+          console.log('[WorkspaceSession] restoreFromSnapshot START — _restoringSnapshot=true');
           _restoringSnapshot = true;
           try {
             const panelIdMapping = useWorkspaceStore.getState().restoreFromSnapshot(snap.workspace);
             useLayoutStore.getState().restoreLayoutFromSnapshot(snap.layout, panelIdMapping);
           } finally {
             // Delay reset so Zustand subscribe callbacks don't trigger save
-            setTimeout(() => { _restoringSnapshot = false; }, 3000);
+            console.log('[WorkspaceSession] restoreFromSnapshot DONE — holding _restoringSnapshot for 3s');
+            setTimeout(() => {
+              _restoringSnapshot = false;
+              console.log('[WorkspaceSession] _restoringSnapshot=false (3s elapsed)');
+            }, 3000);
           }
         }
       }

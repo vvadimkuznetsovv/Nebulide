@@ -186,13 +186,18 @@ export function useSyncWS() {
               break;
 
             case 'workspace_session_changed':
+              console.log('[Sync] workspace_session_changed', {
+                action: msg.action,
+                session_id: msg.session_id,
+                activeSessionId: store.activeSessionId,
+                isRecentSelfSave: isRecentSelfSave(),
+                device_id: msg.device_id,
+              });
               if (msg.action === 'updated' && msg.session_id === store.activeSessionId && !isRecentSelfSave()) {
-                // Active session updated by another device — reload snapshot.
-                // skipSave: true prevents ping-pong (reload→save→broadcast→reload→...)
-                // No reconnectAllTerminalSessions — terminals keep existing WS connections.
-                // Only register_ok (device takeover) needs full terminal reconnect.
+                console.log('[Sync] → RELOADING (skipSave: true)');
                 store.reloadActiveSession({ skipSave: true });
               } else {
+                console.log('[Sync] → SKIPPED (self-save or different session)');
                 getWorkspaceSessions().then(({ data }) => {
                   store.updateSessionsList(data || []);
                 }).catch(() => { /* ignore */ });
