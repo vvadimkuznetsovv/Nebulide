@@ -91,10 +91,15 @@ export default function Workspace() {
   const debounceRef = useRef<number | null>(null);
 
   useEffect(() => {
+    // Guard: don't save from background tab — prevents overwriting active device's snapshot
+    const shouldSave = () => document.visibilityState === 'visible';
+
     const debouncedSave = () => {
+      if (!shouldSave()) return;
       log('[Workspace] debouncedSave triggered (store changed)');
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = window.setTimeout(() => {
+        if (!shouldSave()) return;
         log('[Workspace] debouncedSave FIRING (2s elapsed)');
         saveCurrentSession();
         debounceRef.current = null;
@@ -102,6 +107,7 @@ export default function Workspace() {
     };
 
     const unsubLayout = useLayoutStore.subscribe((state, prev) => {
+      if (!shouldSave()) return;
       const s = state as unknown as Record<string, unknown>;
       const p = prev as unknown as Record<string, unknown>;
       const changed = Object.keys(s).filter(k => s[k] !== p[k]);
@@ -115,6 +121,7 @@ export default function Workspace() {
       debouncedSave();
     });
     const unsubWorkspace = useWorkspaceStore.subscribe((state, prev) => {
+      if (!shouldSave()) return;
       const s = state as unknown as Record<string, unknown>;
       const p = prev as unknown as Record<string, unknown>;
       const changed = Object.keys(s).filter(k => s[k] !== p[k]);
@@ -128,7 +135,10 @@ export default function Workspace() {
       }
       debouncedSave();
     });
-    const safetyInterval = setInterval(saveCurrentSession, 30_000);
+    const safetyInterval = setInterval(() => {
+      // Don't save from background tab — prevents overwriting active device's snapshot
+      if (document.visibilityState === 'visible') saveCurrentSession();
+    }, 30_000);
 
     const handleBeforeUnload = () => {
       // Use fetch with keepalive for reliability on tab close
@@ -166,7 +176,7 @@ export default function Workspace() {
         // Page becoming visible — pull latest snapshot from server (cross-device sync)
         // soft=true: update layout without disconnecting terminals (this device is active)
         syncThemeFromServer();
-        reloadActiveSession({ soft: true });
+        reloadActiveSession({ soft: true, skipSave: true });
       }
     };
     document.addEventListener('visibilitychange', handler);
