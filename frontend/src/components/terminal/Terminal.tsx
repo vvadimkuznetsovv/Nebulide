@@ -696,9 +696,13 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
   const [row3Open, setRow3Open] = useState(() =>
     localStorage.getItem('nebulide-terminal-toolbar-r3') === 'open',
   );
-  const [selBtnsOpen, setSelBtnsOpen] = useState(true);
-  const [joystickOpen, setJoystickOpen] = useState(false);
+  const [selBtnsOpen, setSelBtnsOpen] = useState(false);
+  const [arrowBtnsOpen, setArrowBtnsOpen] = useState(false);
+  const [joystickTarget, setJoystickTarget] = useState<'cursor' | 'copymode' | null>(null);
   const [joystickMode, setJoystickMode] = useState<'start' | 'end'>('end');
+  const [joystickPosition, setJoystickPosition] = useState<string>(() =>
+    localStorage.getItem('nebulide-joystick-pos') || 'bottom-right',
+  );
   const [followMode, setFollowMode] = useState(() =>
     localStorage.getItem('nebulide-terminal-follow') !== 'off',
   );
@@ -1247,18 +1251,28 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
         </button>
         {toolbarOpen && (
           <>
-            {TOOLBAR_KEYS.map((k) => (
-              <button
-                key={k.label}
-                type="button"
-                className="terminal-toolbar-btn"
-                title={k.title}
-                onPointerDown={(e) => e.preventDefault()}
-                onClick={() => sendKey(k.data)}
-              >
-                {k.label}
-              </button>
-            ))}
+            <button type="button" className={`terminal-toolbar-btn${joystickTarget === 'cursor' ? ' active' : ''}`} onPointerDown={(e) => e.preventDefault()} onClick={() => setJoystickTarget((v) => v === 'cursor' ? null : 'cursor')}>
+              Joy
+            </button>
+            <button type="button" className={`terminal-toolbar-btn${arrowBtnsOpen ? ' active' : ''}`} onPointerDown={(e) => e.preventDefault()} onClick={() => setArrowBtnsOpen((v) => !v)}>
+              {'\u2194'}
+            </button>
+            {arrowBtnsOpen && (
+              <>
+                {TOOLBAR_KEYS.map((k) => (
+                  <button
+                    key={k.label}
+                    type="button"
+                    className="terminal-toolbar-btn"
+                    title={k.title}
+                    onPointerDown={(e) => e.preventDefault()}
+                    onClick={() => sendKey(k.data)}
+                  >
+                    {k.label}
+                  </button>
+                ))}
+              </>
+            )}
             <div className="terminal-toolbar-sep" />
             <button
               type="button"
@@ -1358,7 +1372,7 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
       {copyMode && toolbarOpen && (
         <>
           <div className="terminal-toolbar">
-            <button type="button" className={`terminal-toolbar-btn${joystickOpen ? ' active' : ''}`} onPointerDown={(e) => e.preventDefault()} onClick={() => setJoystickOpen((v) => !v)}>
+            <button type="button" className={`terminal-toolbar-btn${joystickTarget === 'copymode' ? ' active' : ''}`} onPointerDown={(e) => e.preventDefault()} onClick={() => setJoystickTarget((v) => v === 'copymode' ? null : 'copymode')}>
               Joy
             </button>
             <button type="button" className={`terminal-toolbar-btn${selBtnsOpen ? ' active' : ''}`} onPointerDown={(e) => e.preventDefault()} onClick={() => setSelBtnsOpen((v) => !v)}>
@@ -1415,9 +1429,9 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
               CpAll
             </button>
           </div>
-          {/* Floating joystick overlay */}
-          {joystickOpen && (
-            <div className="terminal-joystick-overlay">
+          {/* Floating joystick overlay — copymode */}
+          {joystickTarget === 'copymode' && (
+            <div className={`terminal-joystick-overlay ${joystickPosition}`}>
               <div className="terminal-joystick-mode">
                 <button
                   type="button"
@@ -1434,6 +1448,20 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
                   onClick={() => setJoystickMode('end')}
                 >
                   End
+                </button>
+                <button
+                  type="button"
+                  className="terminal-toolbar-btn"
+                  onPointerDown={(e) => e.preventDefault()}
+                  onClick={() => {
+                    const positions = ['bottom-right', 'bottom-left', 'top-right', 'top-left'] as const;
+                    const idx = positions.indexOf(joystickPosition as typeof positions[number]);
+                    const next = positions[(idx + 1) % positions.length];
+                    setJoystickPosition(next);
+                    localStorage.setItem('nebulide-joystick-pos', next);
+                  }}
+                >
+                  {joystickPosition === 'bottom-right' ? 'BR' : joystickPosition === 'bottom-left' ? 'BL' : joystickPosition === 'top-right' ? 'TR' : 'TL'}
                 </button>
               </div>
               <div
@@ -1586,6 +1614,116 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
           <button type="button" className="terminal-toolbar-btn" title="Delete" onPointerDown={(e) => e.preventDefault()} onClick={() => sendKey('\x1b[3~')}>
             Del
           </button>
+        </div>
+      )}
+
+      {/* Floating cursor joystick — sends arrow escape sequences */}
+      {joystickTarget === 'cursor' && (
+        <div className={`terminal-joystick-overlay ${joystickPosition}`}>
+          <div className="terminal-joystick-mode">
+            <button
+              type="button"
+              className="terminal-toolbar-btn active"
+              onPointerDown={(e) => e.preventDefault()}
+              onClick={() => {
+                const positions = ['bottom-right', 'bottom-left', 'top-right', 'top-left'] as const;
+                const idx = positions.indexOf(joystickPosition as typeof positions[number]);
+                const next = positions[(idx + 1) % positions.length];
+                setJoystickPosition(next);
+                localStorage.setItem('nebulide-joystick-pos', next);
+              }}
+            >
+              {joystickPosition === 'bottom-right' ? 'BR' : joystickPosition === 'bottom-left' ? 'BL' : joystickPosition === 'top-right' ? 'TR' : 'TL'}
+            </button>
+          </div>
+          <div
+            className="terminal-joystick-base"
+            ref={(el) => {
+              if (!el) return;
+              if ((el as HTMLElement & { _joystickInit?: boolean })._joystickInit) return;
+              (el as HTMLElement & { _joystickInit?: boolean })._joystickInit = true;
+
+              const knob = el.querySelector('.terminal-joystick-knob') as HTMLElement;
+              if (!knob) return;
+
+              const KNOB_MAX = 30;
+              const DEADZONE = 20;
+              let repeatTimer = 0;
+              let lastDir = '';
+              let repeatCount = 0;
+
+              const fireCursor = (dir: string) => {
+                if (dir === 'up') sendKey('\x1b[A');
+                else if (dir === 'down') sendKey('\x1b[B');
+                else if (dir === 'left') sendKey('\x1b[D');
+                else if (dir === 'right') sendKey('\x1b[C');
+              };
+
+              const getRepeatDelay = () => Math.max(40, 250 - repeatCount * 30);
+              const stopRepeat = () => { clearTimeout(repeatTimer); repeatCount = 0; };
+              const scheduleRepeat = () => {
+                repeatTimer = window.setTimeout(() => {
+                  if (!lastDir) return;
+                  repeatCount++;
+                  fireCursor(lastDir);
+                  scheduleRepeat();
+                }, getRepeatDelay());
+              };
+              const getDir = (dx: number, dy: number) => {
+                if (Math.abs(dx) < DEADZONE && Math.abs(dy) < DEADZONE) return '';
+                if (Math.abs(dx) > Math.abs(dy)) return dx > 0 ? 'right' : 'left';
+                return dy > 0 ? 'down' : 'up';
+              };
+
+              el.addEventListener('pointerdown', (e) => {
+                e.preventDefault();
+                (el as HTMLElement).setPointerCapture(e.pointerId);
+                const rect = el.getBoundingClientRect();
+                const cx = rect.left + rect.width / 2;
+                const cy = rect.top + rect.height / 2;
+                const updateKnob = (clientX: number, clientY: number) => {
+                  let dx = clientX - cx; let dy = clientY - cy;
+                  const dist = Math.sqrt(dx * dx + dy * dy);
+                  if (dist > KNOB_MAX) { dx = (dx / dist) * KNOB_MAX; dy = (dy / dist) * KNOB_MAX; }
+                  knob.style.transform = `translate(${dx}px, ${dy}px)`;
+                  return { dx, dy };
+                };
+                const { dx, dy } = updateKnob(e.clientX, e.clientY);
+                const dir = getDir(dx, dy);
+                lastDir = dir;
+                if (dir) {
+                  fireCursor(dir);
+                  repeatTimer = window.setTimeout(() => { if (!lastDir) return; repeatCount++; fireCursor(lastDir); scheduleRepeat(); }, 350);
+                }
+                const onMove = (ev: PointerEvent) => {
+                  const pos = updateKnob(ev.clientX, ev.clientY);
+                  const d = getDir(pos.dx, pos.dy);
+                  if (d !== lastDir) {
+                    stopRepeat(); lastDir = d;
+                    if (d) { repeatTimer = window.setTimeout(() => { if (!lastDir) return; fireCursor(lastDir); repeatCount = 1; scheduleRepeat(); }, 150); }
+                  }
+                };
+                const onUp = () => {
+                  stopRepeat(); lastDir = '';
+                  knob.style.transform = 'translate(0, 0)';
+                  el.removeEventListener('pointermove', onMove);
+                  el.removeEventListener('pointerup', onUp);
+                  el.removeEventListener('pointercancel', onUp);
+                };
+                el.addEventListener('pointermove', onMove);
+                el.addEventListener('pointerup', onUp);
+                el.addEventListener('pointercancel', onUp);
+              });
+            }}
+          >
+            <svg className="terminal-joystick-arrows" width="100" height="100" viewBox="0 0 100 100">
+              <path d="M50 15 L45 25 L55 25 Z" className="joystick-arrow" />
+              <path d="M50 85 L45 75 L55 75 Z" className="joystick-arrow" />
+              <path d="M15 50 L25 45 L25 55 Z" className="joystick-arrow" />
+              <path d="M85 50 L75 45 L75 55 Z" className="joystick-arrow" />
+            </svg>
+            <div className="terminal-joystick-knob" />
+          </div>
         </div>
       )}
 
