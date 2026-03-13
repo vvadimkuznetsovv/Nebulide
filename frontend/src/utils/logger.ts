@@ -30,17 +30,53 @@ export function setLoggingEnabled(on: boolean): void {
   } catch { /* ignore */ }
 }
 
+// ── Remote log buffer — batches and sends to /api/logs every 2s ──
+let _remoteBuffer: string[] = [];
+let _remoteTimer: ReturnType<typeof setTimeout> | null = null;
+
+function flushRemoteLogs() {
+  _remoteTimer = null;
+  if (_remoteBuffer.length === 0) return;
+  const lines = _remoteBuffer;
+  _remoteBuffer = [];
+  const token = localStorage.getItem('nebulide-token') || '';
+  fetch('/api/logs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+    body: JSON.stringify({ lines }),
+  }).catch(() => { /* ignore */ });
+}
+
+function sendRemote(level: string, args: unknown[]) {
+  try {
+    const msg = args.map(a =>
+      typeof a === 'string' ? a : JSON.stringify(a)
+    ).join(' ');
+    _remoteBuffer.push(`[${level}] ${msg}`);
+    if (!_remoteTimer) {
+      _remoteTimer = setTimeout(flushRemoteLogs, 2000);
+    }
+  } catch { /* ignore */ }
+}
+
 /** Debug log — only outputs when logging is enabled */
 export function log(...args: unknown[]): void {
-  if (_enabled) console.log(...args);
+  if (_enabled) {
+    console.log(...args);
+    sendRemote('LOG', args);
+  }
 }
 
 /** Debug warn — only outputs when logging is enabled */
 export function warn(...args: unknown[]): void {
-  if (_enabled) console.warn(...args);
+  if (_enabled) {
+    console.warn(...args);
+    sendRemote('WARN', args);
+  }
 }
 
 /** Error — ALWAYS outputs (never suppressed) */
 export function error(...args: unknown[]): void {
   console.error(...args);
+  sendRemote('ERROR', args);
 }

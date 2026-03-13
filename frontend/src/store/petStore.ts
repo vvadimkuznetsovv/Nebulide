@@ -189,16 +189,18 @@ export const usePetStore = create<PetStoreState>((set, get) => ({
 
       case 'claude_launched': {
         const id = event.instanceId;
+        log('[PetStore] claude_launched received id=', id, 'alreadyExists=', !!state.pets[id], 'currentPetIds=', Object.keys(state.pets));
         if (state.pets[id]) return; // already exists
         const newPet = createDefaultPetState();
         const selected = state.selectedPetId ?? id;
         set({ pets: { ...state.pets, [id]: newPet }, selectedPetId: selected });
-        log('[PetStore] Claude launched, pet created:', id);
+        log('[PetStore] pet CREATED id=', id, 'selectedPetId=', selected);
         break;
       }
 
       case 'terminal_disconnect': {
         const id = event.instanceId;
+        log('[PetStore] terminal_disconnect id=', id, 'hasPet=', !!state.pets[id], 'allPets=', Object.keys(state.pets));
         if (!state.pets[id]) return; // not a pet terminal
         const { [id]: _, ...rest } = state.pets;
         const timer = speechTimers.get(id);

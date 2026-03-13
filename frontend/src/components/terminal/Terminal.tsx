@@ -269,8 +269,11 @@ function createXterm(instanceId: string): TermSession {
 
           // Detect claude command launch from any terminal
           if (text && /^claude\b/.test(text) && !/^claude\s+(-h|--help|--version|-v)$/.test(text)) {
-            log(`[Terminal] CLAUDE DETECTED id=${instanceId} — emitting claude_launched`);
+            const petsBefore = Object.keys(usePetStore.getState().pets);
+            log(`[Terminal] CLAUDE DETECTED id=${instanceId} petsBefore=`, petsBefore);
             emitActivity({ type: 'claude_launched', instanceId });
+            const petsAfter = Object.keys(usePetStore.getState().pets);
+            log(`[Terminal] after emit petsAfter=`, petsAfter);
             sendSyncMessage({ type: 'pet_event', pet_action: 'launched', instance_id: instanceId });
           }
 

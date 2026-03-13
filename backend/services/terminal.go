@@ -182,6 +182,10 @@ func (mw *multiWriter) DeleteFile() {
 type TerminalService struct {
 	sessions map[string]*TerminalSession
 	mu       sync.RWMutex
+
+	// OnChildExited is called when a claude-* terminal's child process exits
+	// (e.g. user pressed Ctrl+C). Parameters: userID, instanceID.
+	OnChildExited func(userID, instanceID string)
 }
 
 type TerminalSession struct {
@@ -211,6 +215,7 @@ func NewTerminalService() *TerminalService {
 		sessions: make(map[string]*TerminalSession),
 	}
 	go ts.reapLoop()
+	go ts.childWatchLoop()
 	return ts
 }
 
@@ -250,6 +255,38 @@ func (s *TerminalService) reapLoop() {
 		if len(status) > 0 {
 			log.Printf("[TerminalService] status: %d sessions\n%s", len(status), strings.Join(status, "\n"))
 		}
+	}
+}
+
+// childWatchLoop checks every 5 seconds if claude-* terminals lost their child
+// processes (e.g. user pressed Ctrl+C). When detected, calls OnChildExited
+// so the frontend can remove the pet.
+func (s *TerminalService) childWatchLoop() {
+	prevState := make(map[string]bool) // session key → had children last check
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for range ticker.C {
+		s.mu.RLock()
+		for key, sess := range s.sessions {
+			if !strings.Contains(key, "claude-") || !sess.IsAlive() {
+				continue
+			}
+			hasChildren := sess.HasChildProcesses()
+			had := prevState[key]
+			if had && !hasChildren && s.OnChildExited != nil {
+				uid, iid := parseSessionKey(key)
+				log.Printf("[TerminalService] child exited: key=%s uid=%s iid=%s", key, uid, iid)
+				go s.OnChildExited(uid, iid)
+			}
+			prevState[key] = hasChildren
+		}
+		// Cleanup stale entries for removed sessions
+		for key := range prevState {
+			if _, exists := s.sessions[key]; !exists {
+				delete(prevState, key)
+			}
+		}
+		s.mu.RUnlock()
 	}
 }
 

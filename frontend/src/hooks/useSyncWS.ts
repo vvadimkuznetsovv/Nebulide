@@ -92,8 +92,10 @@ export function useSyncWS() {
                     // in the module-level sessions Map (e.g. zombie PTY from crashed destroy)
                     const petIds = Object.keys(usePetStore.getState().pets);
                     const activeIds = getActiveTerminalInstanceIds();
+                    log('[SyncWS] phantom cleanup: petIds=', petIds, 'activeIds=', activeIds);
                     for (const id of petIds) {
                       if (!activeIds.includes(id)) {
+                        log('[SyncWS] removing phantom pet:', id);
                         usePetStore.getState().processEvent({ type: 'terminal_disconnect', instanceId: id });
                       }
                     }

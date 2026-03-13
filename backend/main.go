@@ -1,9 +1,12 @@
 package main
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -41,6 +44,21 @@ func main() {
 	// Services
 	claudeService := services.NewClaudeService(cfg.ClaudeAllowedTools)
 	terminalService := services.NewTerminalService()
+	// When a claude-* terminal loses its child process (Ctrl+C), broadcast pet_event:disconnected
+	terminalService.OnChildExited = func(userID, instanceID string) {
+		iid := instanceID
+		if idx := strings.Index(iid, "@ws:"); idx >= 0 {
+			iid = iid[:idx]
+		}
+		log.Printf("[Main] child exited → broadcasting pet_event:disconnected user=%s instance=%s", userID, iid)
+		payload, _ := json.Marshal(map[string]string{
+			"type":        "pet_event",
+			"pet_action":  "disconnected",
+			"instance_id": iid,
+			"device_id":   "server",
+		})
+		database.RDB.Publish(context.Background(), "ws:user:"+userID, string(payload))
+	}
 	presenceService := services.NewPresenceService()
 
 	// Telegram bot (optional — only starts if TELEGRAM_BOT_TOKEN is set)
@@ -114,6 +132,22 @@ func main() {
 		protected.PUT("/auth/theme", authHandler.UpdateTheme)
 		protected.GET("/auth/preferences", authHandler.GetPreferences)
 		protected.PUT("/auth/preferences", authHandler.UpdatePreferences)
+
+		// Frontend logs → server stdout (visible in docker logs)
+		protected.POST("/logs", func(c *gin.Context) {
+			var body struct {
+				Lines []string `json:"lines"`
+			}
+			if err := c.ShouldBindJSON(&body); err != nil {
+				c.Status(400)
+				return
+			}
+			userID, _ := c.Get("user_id")
+			for _, line := range body.Lines {
+				log.Printf("[Frontend:%v] %s", userID, line)
+			}
+			c.Status(204)
+		})
 
 		// Sessions
 		protected.GET("/sessions", sessionsHandler.List)
