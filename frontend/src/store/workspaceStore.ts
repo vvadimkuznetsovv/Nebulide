@@ -72,6 +72,10 @@ interface WorkspaceState {
   devMode: boolean;
   setDevMode: (enabled: boolean) => void;
 
+  // File tree expanded folders (synced cross-device)
+  expandedFolders: string[];
+  setExpandedFolders: (folders: string[]) => void;
+
   // UI state
   sidebarOpen: boolean;
   toolbarOpen: boolean;
@@ -122,6 +126,18 @@ export interface WorkspaceSnapshot {
   fileTreeVisible: boolean;
   sidebarOpen: boolean;
   toolbarOpen: boolean;
+  // Terminal settings (synced cross-device)
+  terminalToolbarOpen?: boolean;
+  terminalRow2Open?: boolean;
+  terminalRow3Open?: boolean;
+  terminalFollow?: boolean;
+  terminalFontSize?: number;
+  joystickPosition?: string;
+  // Editor settings
+  editorToolbarOpen?: boolean;
+  editorSplit?: string;
+  // File tree
+  expandedFolders?: string[];
 }
 
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
@@ -143,6 +159,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
     localStorage.setItem('nebulide-dev-mode', enabled ? 'true' : 'false');
     set({ devMode: enabled });
   },
+  expandedFolders: [],
+  setExpandedFolders: (folders) => set({ expandedFolders: folders }),
   sidebarOpen: false,
   toolbarOpen: false,
 
@@ -412,6 +430,16 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       fileTreeVisible: state.fileTreeVisible,
       sidebarOpen: state.sidebarOpen,
       toolbarOpen: state.toolbarOpen,
+      // Terminal settings from localStorage
+      terminalToolbarOpen: localStorage.getItem('nebulide-terminal-toolbar') !== 'closed',
+      terminalRow2Open: localStorage.getItem('nebulide-terminal-toolbar-r2') === 'open',
+      terminalRow3Open: localStorage.getItem('nebulide-terminal-toolbar-r3') === 'open',
+      terminalFollow: localStorage.getItem('nebulide-terminal-follow') !== 'off',
+      terminalFontSize: parseInt(localStorage.getItem('nebulide-terminal-font-size') || '14'),
+      joystickPosition: localStorage.getItem('nebulide-joystick-pos') || 'bottom-right',
+      editorToolbarOpen: localStorage.getItem('nebulide-editor-toolbar') !== 'closed',
+      editorSplit: localStorage.getItem('nebulide-editor-split') || '20%',
+      expandedFolders: state.expandedFolders,
     };
   },
 
@@ -448,11 +476,25 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       fileTreeVisible: snap.fileTreeVisible,
       sidebarOpen: snap.sidebarOpen,
       toolbarOpen: snap.toolbarOpen,
+      expandedFolders: snap.expandedFolders || [],
       previewTabs: [],
       activePreviewTabId: null,
       previewUrl: null,
       previewFilePath: null,
     });
+
+    // Restore terminal/editor settings to localStorage
+    if (snap.terminalToolbarOpen !== undefined) localStorage.setItem('nebulide-terminal-toolbar', snap.terminalToolbarOpen ? 'open' : 'closed');
+    if (snap.terminalRow2Open !== undefined) localStorage.setItem('nebulide-terminal-toolbar-r2', snap.terminalRow2Open ? 'open' : 'closed');
+    if (snap.terminalRow3Open !== undefined) localStorage.setItem('nebulide-terminal-toolbar-r3', snap.terminalRow3Open ? 'open' : 'closed');
+    if (snap.terminalFollow !== undefined) localStorage.setItem('nebulide-terminal-follow', snap.terminalFollow ? 'on' : 'off');
+    if (snap.terminalFontSize !== undefined) localStorage.setItem('nebulide-terminal-font-size', String(snap.terminalFontSize));
+    if (snap.joystickPosition) localStorage.setItem('nebulide-joystick-pos', snap.joystickPosition);
+    if (snap.editorToolbarOpen !== undefined) localStorage.setItem('nebulide-editor-toolbar', snap.editorToolbarOpen ? 'open' : 'closed');
+    if (snap.editorSplit) localStorage.setItem('nebulide-editor-split', snap.editorSplit);
+    if (snap.expandedFolders && snap.expandedFolders.length > 0) {
+      try { localStorage.setItem('nebulide-expanded-folders', JSON.stringify(snap.expandedFolders)); } catch { /* ignore */ }
+    }
 
     return panelIdMapping;
   },

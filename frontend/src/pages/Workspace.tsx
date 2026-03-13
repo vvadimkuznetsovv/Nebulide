@@ -106,6 +106,12 @@ export default function Workspace() {
       const p = prev as unknown as Record<string, unknown>;
       const changed = Object.keys(s).filter(k => s[k] !== p[k]);
       log('[Workspace] layoutStore changed:', changed);
+      // Visibility/layout tree changed = panel opened/closed/moved — save immediately
+      if (state.visibility !== prev.visibility || state.layout !== prev.layout) {
+        if (debounceRef.current) clearTimeout(debounceRef.current);
+        saveCurrentSession();
+        return;
+      }
       debouncedSave();
     });
     const unsubWorkspace = useWorkspaceStore.subscribe((state, prev) => {
@@ -113,6 +119,13 @@ export default function Workspace() {
       const p = prev as unknown as Record<string, unknown>;
       const changed = Object.keys(s).filter(k => s[k] !== p[k]);
       log('[Workspace] workspaceStore changed:', changed);
+      // Tab closed or detached editors changed — save immediately
+      if (state.openTabs.length < prev.openTabs.length ||
+          Object.keys(state.detachedEditors).length !== Object.keys(prev.detachedEditors).length) {
+        if (debounceRef.current) clearTimeout(debounceRef.current);
+        saveCurrentSession();
+        return;
+      }
       debouncedSave();
     });
     const safetyInterval = setInterval(saveCurrentSession, 30_000);

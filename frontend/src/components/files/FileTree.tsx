@@ -172,8 +172,17 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree({ r
   const [creatingType, setCreatingType] = useState<'file' | 'folder' | null>(null);
   const [renamingFile, setRenamingFile] = useState<FileEntry | null>(null);
 
-  // Tree state
-  const [expandedFolders, setExpandedFolders] = useState<Set<string>>(new Set());
+  // Tree state — initialize from workspaceStore (cross-device sync)
+  const storeExpandedFolders = useWorkspaceStore((s) => s.expandedFolders);
+  const setStoreExpandedFolders = useWorkspaceStore((s) => s.setExpandedFolders);
+  const [expandedFolders, setExpandedFoldersLocal] = useState<Set<string>>(() => new Set(storeExpandedFolders));
+  const setExpandedFolders = useCallback((updater: Set<string> | ((prev: Set<string>) => Set<string>)) => {
+    setExpandedFoldersLocal((prev) => {
+      const next = typeof updater === 'function' ? updater(prev) : updater;
+      setStoreExpandedFolders([...next]);
+      return next;
+    });
+  }, [setStoreExpandedFolders]);
   const [childrenCache, setChildrenCache] = useState<Map<string, FileEntry[]>>(new Map());
   const [loadingFolders, setLoadingFolders] = useState<Set<string>>(new Set());
   const [creatingInFolder, setCreatingInFolder] = useState<string | null>(null);

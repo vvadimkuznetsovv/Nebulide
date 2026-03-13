@@ -1,9 +1,7 @@
 import { getPreferences, updatePreferences } from '../api/auth';
-import { useLayoutStore } from '../store/layoutStore';
 import { useWorkspaceStore } from '../store/workspaceStore';
 
 const SPLIT_KEY = 'nebulide-editor-split';
-const LAYOUT_KEY = 'nebulide-layout-v6';
 
 export function getEditorSplit(): string {
   try { return localStorage.getItem(SPLIT_KEY) || '20%'; }
@@ -14,40 +12,24 @@ export function setEditorSplit(value: string) {
   try { localStorage.setItem(SPLIT_KEY, value); } catch { /* ignore */ }
 }
 
-/** Collect current UI preferences from stores + localStorage */
+/** Collect current UI preferences from stores + localStorage.
+ * Layout/visibility/mobilePanels are saved via workspace-sessions snapshot — not here. */
 function collectPreferences(): Record<string, unknown> {
-  const layoutState = useLayoutStore.getState();
   const wsState = useWorkspaceStore.getState();
   return {
     editor_split: getEditorSplit(),
     file_tree_visible: wsState.fileTreeVisible,
-    layout: layoutState.layout,
-    visibility: layoutState.visibility,
-    mobile_panels: layoutState.mobilePanels,
   };
 }
 
-/** Apply server preferences to local stores */
+/** Apply server preferences to local stores.
+ * Layout/visibility are handled by workspace-sessions — not here. */
 function applyPreferences(prefs: Record<string, unknown>) {
-  // Editor split
   if (typeof prefs.editor_split === 'string') {
     setEditorSplit(prefs.editor_split);
   }
-
-  // File tree visibility
   if (typeof prefs.file_tree_visible === 'boolean') {
     useWorkspaceStore.getState().setFileTreeVisible(prefs.file_tree_visible);
-  }
-
-  // Layout (save to localStorage — layoutStore reads from it on init)
-  if (prefs.layout && prefs.visibility) {
-    try {
-      localStorage.setItem(LAYOUT_KEY, JSON.stringify({
-        layout: prefs.layout,
-        visibility: prefs.visibility,
-        mobilePanels: prefs.mobile_panels || ['chat'],
-      }));
-    } catch { /* ignore */ }
   }
 }
 
