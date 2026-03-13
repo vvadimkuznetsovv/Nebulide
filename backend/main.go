@@ -59,6 +59,21 @@ func main() {
 		})
 		database.RDB.Publish(context.Background(), "ws:user:"+userID, string(payload))
 	}
+	// When a claude-* terminal gains a child process (claude started), broadcast pet_event:launched
+	terminalService.OnChildStarted = func(userID, instanceID string) {
+		iid := instanceID
+		if idx := strings.Index(iid, "@ws:"); idx >= 0 {
+			iid = iid[:idx]
+		}
+		log.Printf("[Main] child started → broadcasting pet_event:launched user=%s instance=%s", userID, iid)
+		payload, _ := json.Marshal(map[string]string{
+			"type":        "pet_event",
+			"pet_action":  "launched",
+			"instance_id": iid,
+			"device_id":   "server",
+		})
+		database.RDB.Publish(context.Background(), "ws:user:"+userID, string(payload))
+	}
 	presenceService := services.NewPresenceService()
 
 	// Telegram bot (optional — only starts if TELEGRAM_BOT_TOKEN is set)

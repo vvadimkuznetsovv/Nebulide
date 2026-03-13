@@ -186,6 +186,10 @@ type TerminalService struct {
 	// OnChildExited is called when a claude-* terminal's child process exits
 	// (e.g. user pressed Ctrl+C). Parameters: userID, instanceID.
 	OnChildExited func(userID, instanceID string)
+
+	// OnChildStarted is called when a claude-* terminal gains a child process
+	// (e.g. user ran `claude` command). Parameters: userID, instanceID.
+	OnChildStarted func(userID, instanceID string)
 }
 
 type TerminalSession struct {
@@ -277,6 +281,11 @@ func (s *TerminalService) childWatchLoop() {
 				uid, iid := parseSessionKey(key)
 				log.Printf("[TerminalService] child exited: key=%s uid=%s iid=%s", key, uid, iid)
 				go s.OnChildExited(uid, iid)
+			}
+			if !had && hasChildren && s.OnChildStarted != nil {
+				uid, iid := parseSessionKey(key)
+				log.Printf("[TerminalService] child started: key=%s uid=%s iid=%s", key, uid, iid)
+				go s.OnChildStarted(uid, iid)
 			}
 			prevState[key] = hasChildren
 		}
