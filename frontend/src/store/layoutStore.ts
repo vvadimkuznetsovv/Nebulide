@@ -104,7 +104,7 @@ export interface LayoutSnapshot {
 
 const STORAGE_KEY = 'nebulide-layout-v7';
 
-function loadFromStorage(): { layout?: LayoutNode; visibility?: PanelVisibility; mobilePanels?: PanelId[] } {
+function loadFromStorage(): { layout?: LayoutNode; visibility?: PanelVisibility; mobilePanels?: PanelId[]; terminalNames?: Record<string, string>; terminalNumbers?: Record<string, number> } {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
@@ -113,6 +113,8 @@ function loadFromStorage(): { layout?: LayoutNode; visibility?: PanelVisibility;
         layout: data.layout,
         visibility: data.visibility,
         mobilePanels: data.mobilePanels,
+        terminalNames: data.terminalNames,
+        terminalNumbers: data.terminalNumbers,
       };
     }
   } catch { /* ignore */ }
@@ -125,6 +127,8 @@ function saveToStorage(state: LayoutState) {
       layout: state.layout,
       visibility: state.visibility,
       mobilePanels: state.mobilePanels,
+      terminalNames: getCustomNamesSnapshot(),
+      terminalNumbers: getRegistrySnapshot(),
     }));
   } catch { /* ignore */ }
   // Debounced sync to server
@@ -141,6 +145,14 @@ const defaultVisibility: PanelVisibility = {
 };
 
 const stored = loadFromStorage();
+
+// Restore terminal names/numbers from localStorage on cold load
+if (stored.terminalNames && Object.keys(stored.terminalNames).length > 0) {
+  setCustomNames(stored.terminalNames);
+}
+if (stored.terminalNumbers && Object.keys(stored.terminalNumbers).length > 0) {
+  setPendingNumbers(stored.terminalNumbers);
+}
 
 export const useLayoutStore = create<LayoutState>((set, get) => ({
   layout: stored.layout || cloneTree(DEFAULT_LAYOUT),
