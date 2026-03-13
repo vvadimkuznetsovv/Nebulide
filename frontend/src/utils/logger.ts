@@ -39,7 +39,7 @@ function flushRemoteLogs() {
   if (_remoteBuffer.length === 0) return;
   const lines = _remoteBuffer;
   _remoteBuffer = [];
-  const token = localStorage.getItem('nebulide-token') || '';
+  const token = localStorage.getItem('access_token') || '';
   fetch('/api/logs', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
