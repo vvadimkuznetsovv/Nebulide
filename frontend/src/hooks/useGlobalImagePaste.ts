@@ -19,8 +19,8 @@ async function getClipboardImage(): Promise<File | null> {
         }
       }
     }
-  } catch {
-    // Clipboard API denied or not available
+  } catch (err) {
+    log('[ImagePaste] clipboard.read() failed:', err);
   }
   return null;
 }

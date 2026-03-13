@@ -243,8 +243,8 @@ function createXterm(instanceId: string): TermSession {
   const searchAddon = new SearchAddon();
   xterm.loadAddon(searchAddon);
 
-  // Track which terminal has focus for image paste targeting
-  xterm.textarea?.addEventListener('focus', () => { lastFocusedInstanceId = instanceId; });
+  // NOTE: focus listener for lastFocusedInstanceId is attached in useEffect
+  // AFTER xterm.open(), because xterm.textarea doesn't exist until then.
 
   // onData closes over session.ws (mutable field on the session object)
   xterm.onData((data) => {
@@ -775,6 +775,14 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
       // Refresh viewport after re-attachment to prevent visual artifacts
       s.xterm.refresh(0, s.xterm.rows - 1);
     }
+
+    // Track which terminal has focus for image paste targeting.
+    // Must be after open() — xterm.textarea doesn't exist before that.
+    if (s.xterm.textarea) {
+      s.xterm.textarea.addEventListener('focus', () => { lastFocusedInstanceId = instanceId; });
+    }
+    // Set as default target immediately (last opened terminal)
+    lastFocusedInstanceId = instanceId;
 
     // Delay fit to let DOM settle (especially on mobile tab switches)
     setTimeout(fit, 600);
