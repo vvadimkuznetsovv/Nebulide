@@ -75,6 +75,7 @@ interface TermSession {
 }
 
 const sessions = new Map<string, TermSession>();
+let lastFocusedInstanceId: string | null = null;
 
 /** Check all active terminal instances for selected text */
 export function getAnyTerminalSelection(): string | null {
@@ -92,8 +93,22 @@ export function focusTerminal(instanceId: string): void {
   sessions.get(instanceId)?.xterm.focus();
 }
 
-/** Send text to the first connected terminal session. Returns true if sent. */
+/** Send text to a specific terminal by instanceId. */
+export function sendToTerminal(instanceId: string, text: string): boolean {
+  const sess = sessions.get(instanceId);
+  if (sess?.ws?.readyState === WebSocket.OPEN) {
+    sess.ws.send(new TextEncoder().encode(text));
+    return true;
+  }
+  return false;
+}
+
+/** Get the instanceId of the last focused terminal. */
+export function getLastFocusedInstanceId(): string | null { return lastFocusedInstanceId; }
+
+/** Send text to the last focused terminal, fallback to first open. */
 export function sendToActiveTerminal(text: string): boolean {
+  if (lastFocusedInstanceId && sendToTerminal(lastFocusedInstanceId, text)) return true;
   for (const sess of sessions.values()) {
     if (sess.ws?.readyState === WebSocket.OPEN) {
       sess.ws.send(new TextEncoder().encode(text));
@@ -227,6 +242,9 @@ function createXterm(instanceId: string): TermSession {
 
   const searchAddon = new SearchAddon();
   xterm.loadAddon(searchAddon);
+
+  // Track which terminal has focus for image paste targeting
+  xterm.textarea?.addEventListener('focus', () => { lastFocusedInstanceId = instanceId; });
 
   // onData closes over session.ws (mutable field on the session object)
   xterm.onData((data) => {

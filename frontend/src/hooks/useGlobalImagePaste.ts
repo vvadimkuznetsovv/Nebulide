@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { uploadFile } from '../api/files';
-import { sendToActiveTerminal } from '../components/terminal/Terminal';
+import { sendToTerminal, sendToActiveTerminal, getLastFocusedInstanceId } from '../components/terminal/Terminal';
 import toast from 'react-hot-toast';
 import { log } from '../utils/logger';
 
@@ -25,17 +25,20 @@ async function getClipboardImage(): Promise<File | null> {
   return null;
 }
 
-async function handleImageUpload(file: File, isXterm: boolean) {
+async function handleImageUpload(file: File, isXterm: boolean, targetInstanceId: string | null) {
   const ext = file.type.split('/')[1]?.replace('jpeg', 'jpg') || 'png';
   const name = `clipboard_${Date.now()}.${ext}`;
-  log('[ImagePaste] uploading', { name, type: file.type, size: file.size, isXterm });
+  log('[ImagePaste] uploading', { name, type: file.type, size: file.size, isXterm, targetInstanceId });
 
   const toastId = toast.loading('Uploading image...');
 
   try {
     const { data } = await uploadFile(file, undefined, name);
     log('[ImagePaste] uploaded:', data.path);
-    const sent = sendToActiveTerminal(data.path);
+    // Send to the terminal that was focused at paste time
+    const sent = targetInstanceId
+      ? sendToTerminal(targetInstanceId, data.path) || sendToActiveTerminal(data.path)
+      : sendToActiveTerminal(data.path);
     if (sent) {
       toast.success('Image uploaded & sent to terminal', { id: toastId });
     } else {
@@ -94,8 +97,10 @@ export function useGlobalImagePaste() {
       e.stopImmediatePropagation();
       keydownHandled = true;
 
-      log('[ImagePaste] keydown: intercepted Ctrl+V with image');
-      await handleImageUpload(imageFile, isXtermTextarea);
+      // Capture target terminal NOW, before async upload
+      const targetInstanceId = getLastFocusedInstanceId();
+      log('[ImagePaste] keydown: intercepted Ctrl+V with image, target=', targetInstanceId);
+      await handleImageUpload(imageFile, isXtermTextarea, targetInstanceId);
     };
 
     // Layer 2: paste event capture — fallback for non-keyboard pastes
@@ -144,7 +149,8 @@ export function useGlobalImagePaste() {
         return;
       }
 
-      await handleImageUpload(blob, isXtermTextarea);
+      const targetInstanceId = getLastFocusedInstanceId();
+      await handleImageUpload(blob, isXtermTextarea, targetInstanceId);
     };
 
     document.addEventListener('keydown', keydownHandler, true);
