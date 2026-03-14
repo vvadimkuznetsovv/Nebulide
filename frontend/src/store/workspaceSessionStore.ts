@@ -106,24 +106,13 @@ export const useWorkspaceSessionStore = create<WorkspaceSessionState>((set, get)
       if (activeSessionId) {
         const exists = sessions.find((s) => s.id === activeSessionId);
         if (exists) {
-          // localStorage has layout = same device reload → don't overwrite with potentially stale server snapshot.
-          // Cross-device sync is handled by visibilitychange → reloadActiveSession.
-          const hasLocalLayout = !!localStorage.getItem('nebulide-layout-v7');
+          // Always restore from server — it's the source of truth
           try {
             const snap = exists.snapshot as unknown as FullSnapshot;
             if (snap?.layout && snap?.workspace) {
-              if (!hasLocalLayout) {
-                // New device/browser — restore everything from server
-                log('[WorkspaceSession] initSession: no localStorage, restoring from server');
-                const panelIdMapping = useWorkspaceStore.getState().restoreFromSnapshot(snap.workspace);
-                useLayoutStore.getState().restoreLayoutFromSnapshot(snap.layout, panelIdMapping);
-              } else {
-                // Same device — only restore workspace tabs if empty (cold load)
-                log('[WorkspaceSession] initSession: localStorage exists, restoring only workspace tabs');
-                if (!useWorkspaceStore.getState().openTabs?.length) {
-                  useWorkspaceStore.getState().restoreFromSnapshot(snap.workspace);
-                }
-              }
+              log('[WorkspaceSession] initSession: restoring from server');
+              const panelIdMapping = useWorkspaceStore.getState().restoreFromSnapshot(snap.workspace);
+              useLayoutStore.getState().restoreLayoutFromSnapshot(snap.layout, panelIdMapping);
             }
           } catch {
             warn('[WorkspaceSession] Failed to restore snapshot');
@@ -143,14 +132,10 @@ export const useWorkspaceSessionStore = create<WorkspaceSessionState>((set, get)
           // Restore snapshot from latest (tolerate malformed snapshots)
           try {
             const snap = data.snapshot as unknown as FullSnapshot;
-            const hasLocalLayout = !!localStorage.getItem('nebulide-layout-v7');
             if (snap?.layout && snap?.workspace) {
-              if (!hasLocalLayout) {
-                const panelIdMapping = useWorkspaceStore.getState().restoreFromSnapshot(snap.workspace);
-                useLayoutStore.getState().restoreLayoutFromSnapshot(snap.layout, panelIdMapping);
-              } else if (!useWorkspaceStore.getState().openTabs?.length) {
-                useWorkspaceStore.getState().restoreFromSnapshot(snap.workspace);
-              }
+              log('[WorkspaceSession] initSession: restoring from latest server session');
+              const panelIdMapping = useWorkspaceStore.getState().restoreFromSnapshot(snap.workspace);
+              useLayoutStore.getState().restoreLayoutFromSnapshot(snap.layout, panelIdMapping);
             }
           } catch {
             warn('[WorkspaceSession] Failed to restore snapshot, using default layout');
