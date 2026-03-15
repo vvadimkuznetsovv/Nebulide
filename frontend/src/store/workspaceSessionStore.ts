@@ -32,6 +32,32 @@ export function isRecentSelfSave(): boolean {
 let _restoringSnapshot = false;
 export function isRestoringSnapshot(): boolean { return _restoringSnapshot; }
 
+/** Track when page was last visible — stale background tabs don't overwrite fresh data. */
+let _lastVisibleAt = Date.now();
+export function markVisible() { _lastVisibleAt = Date.now(); }
+
+/** Synchronous keepalive save — works during beforeunload/pagehide/visibilitychange:hidden. */
+export function forceSaveSnapshot() {
+  const state = useWorkspaceSessionStore.getState();
+  const activeId = state.activeSessionId;
+  if (!activeId) return;
+  // Don't save from stale background tab (hidden > 10s)
+  if (Date.now() - _lastVisibleAt > 10_000) return;
+  // Don't overwrite if another device owns the session
+  if (state.lockStatus[activeId] === 'blocked') return;
+
+  const workspaceSnap = useWorkspaceStore.getState().getWorkspaceSnapshot();
+  const layoutSnap = useLayoutStore.getState().getLayoutSnapshot();
+  const token = localStorage.getItem('access_token');
+  lastSaveTs = Date.now();
+  fetch(`/api/workspace-sessions/${activeId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: JSON.stringify({ snapshot: { workspace: workspaceSnap, layout: layoutSnap } }),
+    keepalive: true,
+  });
+}
+
 function detectDeviceTag(): string {
   const w = window.innerWidth;
   if (w <= 640) return 'Phone';
@@ -102,13 +128,7 @@ export const useWorkspaceSessionStore = create<WorkspaceSessionState>((set, get)
     // data to server before server restore completes.
     _restoringSnapshot = true;
 
-    // Helper: schedule _restoringSnapshot reset after restore
-    const scheduleUnblock = () => {
-      setTimeout(() => {
-        _restoringSnapshot = false;
-        log('[WorkspaceSession] initSession: _restoringSnapshot=false (3s elapsed)');
-      }, 3000);
-    };
+    const unblock = () => { _restoringSnapshot = false; };
 
     try {
       await state.loadSessions();
@@ -125,7 +145,7 @@ export const useWorkspaceSessionStore = create<WorkspaceSessionState>((set, get)
               log('[WorkspaceSession] initSession: restoring from server');
               const panelIdMapping = useWorkspaceStore.getState().restoreFromSnapshot(snap.workspace);
               useLayoutStore.getState().restoreLayoutFromSnapshot(snap.layout, panelIdMapping);
-              scheduleUnblock();
+              unblock();
             } else {
               _restoringSnapshot = false;
             }
@@ -151,7 +171,7 @@ export const useWorkspaceSessionStore = create<WorkspaceSessionState>((set, get)
               log('[WorkspaceSession] initSession: restoring from latest server session');
               const panelIdMapping = useWorkspaceStore.getState().restoreFromSnapshot(snap.workspace);
               useLayoutStore.getState().restoreLayoutFromSnapshot(snap.layout, panelIdMapping);
-              scheduleUnblock();
+              unblock();
             } else {
               _restoringSnapshot = false;
             }
@@ -294,10 +314,6 @@ export const useWorkspaceSessionStore = create<WorkspaceSessionState>((set, get)
   },
 
   saveCurrentSession: async () => {
-    if (_restoringSnapshot) {
-      log('[WorkspaceSession] saveCurrentSession BLOCKED — _restoringSnapshot=true');
-      return;
-    }
     const { activeSessionId } = get();
     if (!activeSessionId) return;
 
@@ -386,18 +402,12 @@ export const useWorkspaceSessionStore = create<WorkspaceSessionState>((set, get)
             // Full reload (Take Over): disconnect terminals, restore layout, then caller reconnects
             disconnectAllTerminalSessions();
           }
-          log('[WorkspaceSession] restoreFromSnapshot START — _restoringSnapshot=true');
           _restoringSnapshot = true;
           try {
             const panelIdMapping = useWorkspaceStore.getState().restoreFromSnapshot(snap.workspace);
             useLayoutStore.getState().restoreLayoutFromSnapshot(snap.layout, panelIdMapping);
           } finally {
-            // Delay reset so Zustand subscribe callbacks don't trigger save
-            log('[WorkspaceSession] restoreFromSnapshot DONE — holding _restoringSnapshot for 3s');
-            setTimeout(() => {
-              _restoringSnapshot = false;
-              log('[WorkspaceSession] _restoringSnapshot=false (3s elapsed)');
-            }, 3000);
+            _restoringSnapshot = false;
           }
         }
       }

@@ -21,7 +21,7 @@ import { useAuthStore } from '../store/authStore';
 import { useLayoutStore, type PanelId } from '../store/layoutStore';
 import { findPanelNode, isDetachedEditor } from '../store/layoutUtils';
 import { useWorkspaceStore } from '../store/workspaceStore';
-import { useWorkspaceSessionStore } from '../store/workspaceSessionStore';
+import { useWorkspaceSessionStore, isRestoringSnapshot, forceSaveSnapshot, markVisible } from '../store/workspaceSessionStore';
 import { setReorderHover, clearReorderHover, getReorderHover } from '../hooks/useTabReorder';
 import { useSyncWS } from '../hooks/useSyncWS';
 import { syncThemeFromServer } from '../utils/theme';
@@ -105,18 +105,21 @@ export default function Workspace() {
 
     const debouncedSave = () => {
       if (!shouldSave()) return;
+      if (isRestoringSnapshot()) return;
       log('[Workspace] debouncedSave triggered (store changed)');
       if (debounceRef.current) clearTimeout(debounceRef.current);
       debounceRef.current = window.setTimeout(() => {
         if (!shouldSave()) return;
-        log('[Workspace] debouncedSave FIRING (2s elapsed)');
+        if (isRestoringSnapshot()) return;
+        log('[Workspace] debouncedSave FIRING (500ms elapsed)');
         saveCurrentSession();
         debounceRef.current = null;
-      }, 2000);
+      }, 500);
     };
 
     const unsubLayout = useLayoutStore.subscribe((state, prev) => {
       if (!shouldSave()) return;
+      if (isRestoringSnapshot()) return;
       const s = state as unknown as Record<string, unknown>;
       const p = prev as unknown as Record<string, unknown>;
       const changed = Object.keys(s).filter(k => s[k] !== p[k]);
@@ -131,6 +134,7 @@ export default function Workspace() {
     });
     const unsubWorkspace = useWorkspaceStore.subscribe((state, prev) => {
       if (!shouldSave()) return;
+      if (isRestoringSnapshot()) return;
       const s = state as unknown as Record<string, unknown>;
       const p = prev as unknown as Record<string, unknown>;
       const changed = Object.keys(s).filter(k => s[k] !== p[k]);
@@ -149,20 +153,7 @@ export default function Workspace() {
       if (document.visibilityState === 'visible') saveCurrentSession();
     }, 30_000);
 
-    const handleBeforeUnload = () => {
-      // Use fetch with keepalive for reliability on tab close
-      const activeId = useWorkspaceSessionStore.getState().activeSessionId;
-      if (!activeId) return;
-      const workspaceSnap = useWorkspaceStore.getState().getWorkspaceSnapshot();
-      const layoutSnap = useLayoutStore.getState().getLayoutSnapshot();
-      const token = localStorage.getItem('access_token');
-      fetch(`/api/workspace-sessions/${activeId}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', ...(token ? { 'Authorization': `Bearer ${token}` } : {}) },
-        body: JSON.stringify({ snapshot: { workspace: workspaceSnap, layout: layoutSnap } }),
-        keepalive: true,
-      });
-    };
+    const handleBeforeUnload = () => forceSaveSnapshot();
     window.addEventListener('beforeunload', handleBeforeUnload);
 
     return () => {
@@ -179,18 +170,16 @@ export default function Workspace() {
   useEffect(() => {
     const handler = () => {
       if (document.visibilityState === 'hidden') {
-        // Page going away (mobile switch, tab switch) — save immediately
-        saveCurrentSession();
+        forceSaveSnapshot();
       } else if (document.visibilityState === 'visible') {
-        // Page becoming visible — pull latest snapshot from server (cross-device sync)
-        // soft=true: update layout without disconnecting terminals (this device is active)
+        markVisible();
         syncThemeFromServer();
         reloadActiveSession({ soft: true, skipSave: true });
       }
     };
     document.addEventListener('visibilitychange', handler);
     // pagehide is more reliable than beforeunload on mobile
-    const handlePageHide = () => saveCurrentSession();
+    const handlePageHide = () => forceSaveSnapshot();
     window.addEventListener('pagehide', handlePageHide);
     return () => {
       document.removeEventListener('visibilitychange', handler);
