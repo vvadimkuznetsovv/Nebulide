@@ -659,7 +659,6 @@ const TERM_ICONS = {
 // ── Mobile toolbar: shortcut keys for touch devices ──
 
 const TOOLBAR_KEYS: { label: string; title?: string; data: string }[] = [
-  { label: 'Tab', data: '\t' },
   { label: '\u2191', data: '\x1b[A' },
   { label: '\u2193', data: '\x1b[B' },
   { label: '\u2190', data: '\x1b[D' },
@@ -698,6 +697,8 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
   );
   const [selBtnsOpen, setSelBtnsOpen] = useState(false);
   const [arrowBtnsOpen, setArrowBtnsOpen] = useState(false);
+  const [shiftActive, setShiftActive] = useState(false);
+  const [navKeysOpen, setNavKeysOpen] = useState(false);
   const [joystickTarget, setJoystickTarget] = useState<'cursor' | 'copymode' | null>(null);
   const [joystickMode, setJoystickMode] = useState<'start' | 'end'>('end');
   const [joystickPosition, setJoystickPosition] = useState<string>(() =>
@@ -1306,6 +1307,15 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
             <div className="terminal-toolbar-sep" />
             <button
               type="button"
+              className={`terminal-toolbar-btn${shiftActive ? ' active' : ''}`}
+              onPointerDown={(e) => e.preventDefault()}
+              onClick={() => setShiftActive((v) => !v)}
+              title="Shift modifier (sticky toggle)"
+            >
+              {'\u21E7'}
+            </button>
+            <button
+              type="button"
               className={`terminal-toolbar-btn${row2Open ? ' active' : ''}`}
               onPointerDown={(e) => e.preventDefault()}
               onClick={() => setRow2Open((v) => {
@@ -1346,6 +1356,9 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
           <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => sendKey('\x1b')}>
             Esc
           </button>
+          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => sendKey(shiftActive ? '\x1b[Z' : '\t')} title={shiftActive ? 'Shift+Tab' : 'Tab'}>
+            Tab
+          </button>
           <div className="terminal-toolbar-sep" />
           <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={copyTermSelection}>
             Copy
@@ -1357,18 +1370,28 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
             Sel A
           </button>
           <div className="terminal-toolbar-sep" />
-          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => sendKey('\x1b[H')}>
-            Home
+          <button type="button" className={`terminal-toolbar-btn${navKeysOpen ? ' active' : ''}`} onPointerDown={(e) => e.preventDefault()} onClick={() => setNavKeysOpen((v) => !v)} title="Navigation keys">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+              <polyline points="9 22 9 12 15 12 15 22" />
+            </svg>
           </button>
-          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => sendKey('\x1b[F')}>
-            End
-          </button>
-          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => sendKey('\x1b[5~')}>
-            PgUp
-          </button>
-          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => sendKey('\x1b[6~')}>
-            PgDn
-          </button>
+          {navKeysOpen && (
+            <>
+              <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => sendKey('\x1b[H')}>
+                Home
+              </button>
+              <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => sendKey('\x1b[F')}>
+                End
+              </button>
+              <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => sendKey('\x1b[5~')}>
+                PgUp
+              </button>
+              <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => sendKey('\x1b[6~')}>
+                PgDn
+              </button>
+            </>
+          )}
           <div className="terminal-toolbar-sep" />
           <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => sendKey('\r')}>
             Enter
