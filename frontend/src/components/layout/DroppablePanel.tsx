@@ -117,10 +117,6 @@ export default function DroppablePanel({ node, isFirst = false }: DroppablePanel
     >
       <div
         className="workspace-glass-panel h-full"
-        style={{
-          opacity: isAnyTabDragging ? 0.3 : 1,
-          transition: 'opacity 0.2s ease',
-        }}
       >
         <div className="workspace-glass-panel-shimmer" />
         <div className="workspace-glass-panel-content flex flex-col h-full">
@@ -132,7 +128,11 @@ export default function DroppablePanel({ node, isFirst = false }: DroppablePanel
 
           {/* Render all visible tabs but hide inactive ones — keeps iframes (chat/preview)
               alive in the DOM so they don't reload on tab switch. */}
-          <div className="flex-1 overflow-hidden" style={{ position: 'relative' }}>
+          <div className="flex-1 overflow-hidden" style={{
+            position: 'relative',
+            opacity: isAnyTabDragging ? 0.3 : 1,
+            transition: 'opacity 0.2s ease',
+          }}>
             {visiblePanelIds.map((id) => {
               const isActive = id === (visiblePanelIds.includes(activePanelId) ? activePanelId : visiblePanelIds[0] || activePanelId);
               return (
