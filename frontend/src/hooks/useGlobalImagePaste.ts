@@ -10,17 +10,21 @@ import { log } from '../utils/logger';
  */
 async function getClipboardImage(): Promise<File | null> {
   try {
+    log('[ImagePaste] clipboard.read() calling...');
     const clipItems = await navigator.clipboard.read();
+    log('[ImagePaste] clipboard.read() got', clipItems.length, 'items, types=', clipItems.map(i => i.types));
     for (const item of clipItems) {
       for (const type of item.types) {
         if (type.startsWith('image/')) {
           const blob = await item.getType(type);
+          log('[ImagePaste] clipboard.read() found image:', type, 'size=', blob.size);
           return new File([blob], 'clipboard.png', { type });
         }
       }
     }
+    log('[ImagePaste] clipboard.read() no image types found');
   } catch (err) {
-    log('[ImagePaste] clipboard.read() failed:', err);
+    log('[ImagePaste] clipboard.read() FAILED:', err);
   }
   return null;
 }
@@ -56,9 +60,12 @@ async function handleImageUpload(file: File, targetInstanceId: string | null) {
  * Captures Ctrl+V with image data anywhere on the page.
  * Uploads image to ~/uploads/, sends path to active terminal or shows toast.
  *
- * For xterm terminals: SYNCHRONOUSLY blocks the event before async clipboard check.
- * This prevents xterm from handling Ctrl+V (which sends raw keystroke to PTY).
- * If no image found, manually pastes clipboard text into terminal.
+ * Two layers:
+ * - Layer 1 (keydown capture): For xterm targets — SYNCHRONOUSLY blocks Ctrl+V
+ *   before xterm's bubble-phase handler sends raw keystroke to PTY.
+ *   Then async checks clipboard for image. If no image → manually pastes text.
+ * - Layer 2 (paste capture): For non-keyboard pastes (context menu, toolbar).
+ *   clipboardData is synchronous — no race condition.
  */
 export function useGlobalImagePaste() {
   useEffect(() => {
@@ -136,11 +143,17 @@ export function useGlobalImagePaste() {
     };
 
     // Layer 2: paste event capture — fallback for non-keyboard pastes (context menu, etc.)
+    // clipboardData is synchronous here — no async race.
     const pasteHandler = (e: ClipboardEvent) => {
+      const target = e.target as HTMLElement;
+      const targetTag = target.tagName + (target.className ? '.' + target.className.split(' ')[0] : '');
+      const itemTypes = Array.from(e.clipboardData?.items ?? []).map(i => i.type);
+      log('[ImagePaste] paste event fired, target=', targetTag, 'defaultPrevented=', e.defaultPrevented, 'itemTypes=', itemTypes);
+
       if (e.defaultPrevented) return;
 
       const items = e.clipboardData?.items;
-      if (!items) return;
+      if (!items) { log('[ImagePaste] paste: no clipboardData.items'); return; }
 
       let imageItem: DataTransferItem | null = null;
       for (let i = 0; i < items.length; i++) {
@@ -149,10 +162,10 @@ export function useGlobalImagePaste() {
           break;
         }
       }
-      if (!imageItem) return;
+      if (!imageItem) { log('[ImagePaste] paste: no image item in clipboardData'); return; }
 
-      const target = e.target as HTMLElement;
       const isXtermTextarea = target.classList?.contains('xterm-helper-textarea');
+      log('[ImagePaste] paste: image found, type=', imageItem.type, 'isXterm=', isXtermTextarea);
 
       if (!isXtermTextarea) {
         const isTextInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA'
@@ -163,7 +176,8 @@ export function useGlobalImagePaste() {
           for (let i = 0; i < items.length; i++) {
             if (items[i].type === 'text/plain') { hasText = true; break; }
           }
-          if (hasText) return;
+          if (hasText) { log('[ImagePaste] paste: SKIP — text input with text data'); return; }
+          log('[ImagePaste] paste: SKIP — text input without text data');
           return;
         }
       }
@@ -177,8 +191,10 @@ export function useGlobalImagePaste() {
 
       e.preventDefault();
       e.stopPropagation();
+      log('[ImagePaste] paste: event blocked, blob size=', blob.size);
 
       const targetInstanceId = getLastFocusedInstanceId();
+      log('[ImagePaste] paste: targetInstanceId=', targetInstanceId);
       handleImageUpload(blob, targetInstanceId);
     };
 
