@@ -386,7 +386,24 @@ async function connectWs(instanceId: string): Promise<void> {
     } catch { /* xterm may not be attached yet */ }
     // Unlock resize after layout settles — 1500ms accommodates slow
     // mobile devices where CSS transitions / tab switches take longer.
-    setTimeout(() => { session.resizeLocked = false; }, 1500);
+    // One final fit to catch correct dimensions after layout settled.
+    setTimeout(() => {
+      session.resizeLocked = false;
+      try {
+        session.fitAddon.fit();
+        const dims = session.fitAddon.proposeDimensions();
+        if (dims && dims.cols >= 1 && dims.rows >= 1) {
+          if (Math.abs(dims.cols - session.lastCols) > 1 || Math.abs(dims.rows - session.lastRows) > 1) {
+            session.lastCols = dims.cols;
+            session.lastRows = dims.rows;
+            session.lastResizeSent = Date.now();
+            if (ws.readyState === WebSocket.OPEN) {
+              ws.send(JSON.stringify({ type: 'resize', rows: dims.rows, cols: dims.cols }));
+            }
+          }
+        }
+      } catch { /* ignore */ }
+    }, 1500);
   };
 
   ws.onmessage = (event) => {
@@ -727,7 +744,7 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
       s.fitAddon.fit();
       const dims = s.fitAddon.proposeDimensions();
       if (!dims || dims.cols < 1 || dims.rows < 1) return;
-      if (dims.cols !== s.lastCols || dims.rows !== s.lastRows) {
+      if (Math.abs(dims.cols - s.lastCols) > 1 || Math.abs(dims.rows - s.lastRows) > 1) {
         s.lastCols = dims.cols;
         s.lastRows = dims.rows;
         // Rate-limit: max 1 resize per RESIZE_COOLDOWN ms
@@ -784,11 +801,6 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
     }
     // Set as default target immediately (last opened terminal)
     lastFocusedInstanceId = instanceId;
-
-    // Delay fit to let DOM settle (especially on mobile tab switches)
-    setTimeout(fit, 600);
-    // Safety re-fit: mobile layout may not have stabilized by 600ms
-    setTimeout(fit, 1500);
 
     // Debounced ResizeObserver — 150ms absorbs secondary fires from scrollbar
     // toggle (fit() can change scrollbar visibility → 16px width change →
@@ -859,11 +871,9 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
         sessions.get(instanceId)?.xterm.focus();
       }, 50);
       const fitTimer = window.setTimeout(fit, 300);
-      const fitTimer2 = window.setTimeout(fit, 1000);
       return () => {
         clearTimeout(focusTimer);
         clearTimeout(fitTimer);
-        clearTimeout(fitTimer2);
       };
     }
   }, [active, fit, instanceId]);
