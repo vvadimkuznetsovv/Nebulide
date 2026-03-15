@@ -79,7 +79,7 @@ export function useGlobalImagePaste() {
     // Must block xterm's Ctrl+V BEFORE any await, otherwise xterm sends
     // keystroke to PTY and Claude CLI tries its own clipboard read.
     const keydownHandler = (e: KeyboardEvent) => {
-      if (!((e.ctrlKey || e.metaKey) && (e.key === 'v' || e.key === 'V' || e.code === 'KeyV'))) return;
+      if (!((e.ctrlKey || e.metaKey) && (e.key === 'v' || e.key === 'V' || e.key === 'м' || e.key === 'М' || e.code === 'KeyV'))) return;
 
       const target = e.target as HTMLElement;
       const isXtermTextarea = target.classList?.contains('xterm-helper-textarea');
