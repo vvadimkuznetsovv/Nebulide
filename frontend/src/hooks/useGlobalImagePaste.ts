@@ -70,6 +70,8 @@ async function handleImageUpload(file: File, targetInstanceId: string | null) {
  */
 export function useGlobalImagePaste() {
   useEffect(() => {
+    log('[ImagePaste] useEffect MOUNTED — attaching listeners');
+
     // Flag to prevent double-handling (keydown already handled → skip paste event)
     let keydownHandled = false;
 
@@ -77,7 +79,7 @@ export function useGlobalImagePaste() {
     // Must block xterm's Ctrl+V BEFORE any await, otherwise xterm sends
     // keystroke to PTY and Claude CLI tries its own clipboard read.
     const keydownHandler = (e: KeyboardEvent) => {
-      if (!((e.ctrlKey || e.metaKey) && e.key === 'v')) return;
+      if (!((e.ctrlKey || e.metaKey) && (e.key === 'v' || e.key === 'V' || e.code === 'KeyV'))) return;
 
       const target = e.target as HTMLElement;
       const isXtermTextarea = target.classList?.contains('xterm-helper-textarea');
