@@ -208,6 +208,7 @@ func main() {
 		protected.GET("/files/download", filesHandler.Download)
 		protected.GET("/files/search", filesHandler.SearchFiles)
 		protected.POST("/files/extract", filesHandler.Extract)
+		protected.GET("/files/convert-pdf", filesHandler.ConvertToPDF)
 
 		// Terminal management (user kills own sessions)
 		protected.DELETE("/terminals/:instanceId", terminalHandler.KillTerminal)

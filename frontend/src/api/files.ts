@@ -97,3 +97,11 @@ export function getRawFileUrl(path: string): string {
 // Fetch raw binary content as ArrayBuffer (for DOCX preview, etc.)
 export const readFileRaw = (path: string) =>
   api.get<ArrayBuffer>('/files/raw', { params: { path }, responseType: 'arraybuffer' });
+
+// Build URL for DOCX→PDF conversion via LibreOffice (server-side)
+export function getConvertPdfUrl(path: string): string {
+  const token = localStorage.getItem('access_token');
+  const params = new URLSearchParams({ path });
+  if (token) params.set('token', token);
+  return `/api/files/convert-pdf?${params.toString()}`;
+}

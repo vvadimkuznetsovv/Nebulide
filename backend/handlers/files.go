@@ -2,12 +2,14 @@ package handlers
 
 import (
 	"archive/zip"
+	"crypto/md5"
 	"errors"
 	"fmt"
 	"io"
 	"io/fs"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"syscall"
@@ -437,6 +439,112 @@ func (h *FilesHandler) ReadRaw(c *gin.Context) {
 	}, filename)
 	c.Header("Content-Disposition", fmt.Sprintf(`inline; filename="%s"`, sanitized))
 	c.File(fullPath)
+}
+
+// ConvertToPDF converts a DOCX file to PDF using LibreOffice and serves the result.
+// Uses caching based on file modification time to avoid re-conversion.
+func (h *FilesHandler) ConvertToPDF(c *gin.Context) {
+	requestedPath := c.Query("path")
+	if requestedPath == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Path required"})
+		return
+	}
+
+	fullPath, err := h.safePathForUser(requestedPath, c)
+	if err != nil {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	ext := strings.ToLower(filepath.Ext(fullPath))
+	if ext != ".docx" && ext != ".doc" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Only .docx/.doc files supported"})
+		return
+	}
+
+	info, err := os.Stat(fullPath)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "File not found"})
+		return
+	}
+
+	if info.Size() > 50*1024*1024 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "File too large (max 50MB)"})
+		return
+	}
+
+	// Cache key based on file path + mod time
+	cacheDir := "/tmp/nebulide-pdf-cache"
+	os.MkdirAll(cacheDir, 0755)
+	cacheKey := md5Hash(fullPath + info.ModTime().String())
+	cachedPdf := filepath.Join(cacheDir, cacheKey+".pdf")
+
+	// Check cache
+	if _, err := os.Stat(cachedPdf); err == nil {
+		servePDF(c, cachedPdf, filepath.Base(fullPath))
+		return
+	}
+
+	// Convert using LibreOffice
+	tmpDir, err := os.MkdirTemp("", "lo-convert-*")
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create temp dir"})
+		return
+	}
+	defer os.RemoveAll(tmpDir)
+
+	cmd := exec.Command("libreoffice", "--headless", "--norestore", "--convert-to", "pdf", "--outdir", tmpDir, fullPath)
+	cmd.Env = append(os.Environ(), "HOME=/tmp")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Conversion failed: %s", string(output))})
+		return
+	}
+
+	// Find generated PDF
+	baseName := strings.TrimSuffix(filepath.Base(fullPath), filepath.Ext(fullPath)) + ".pdf"
+	generatedPdf := filepath.Join(tmpDir, baseName)
+	if _, err := os.Stat(generatedPdf); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Converted PDF not found"})
+		return
+	}
+
+	// Move to cache
+	if err := copyFileContents(generatedPdf, cachedPdf); err != nil {
+		// Serve from tmp if cache write fails
+		servePDF(c, generatedPdf, filepath.Base(fullPath))
+		return
+	}
+
+	servePDF(c, cachedPdf, filepath.Base(fullPath))
+}
+
+func servePDF(c *gin.Context, pdfPath, origName string) {
+	pdfName := strings.TrimSuffix(origName, filepath.Ext(origName)) + ".pdf"
+	c.Header("Content-Type", "application/pdf")
+	c.Header("Content-Security-Policy", "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data: blob:")
+	c.Header("Content-Disposition", fmt.Sprintf(`inline; filename="%s"`, pdfName))
+	c.File(pdfPath)
+}
+
+func copyFileContents(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	_, err = io.Copy(out, in)
+	return err
+}
+
+func md5Hash(s string) string {
+	h := md5.Sum([]byte(s))
+	return fmt.Sprintf("%x", h)
 }
 
 // ---------- Copy ----------

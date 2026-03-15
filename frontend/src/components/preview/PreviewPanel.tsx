@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useWorkspaceStore } from '../../store/workspaceStore';
-import { getRawFileUrl } from '../../api/files';
+import { getRawFileUrl, getConvertPdfUrl } from '../../api/files';
 import DocxViewer from './DocxViewer';
 import ImageViewer from './ImageViewer';
 
@@ -15,6 +15,7 @@ export default function PreviewPanel() {
     setActivePreviewTab,
   } = useWorkspaceStore();
   const [urlInput, setUrlInput] = useState(previewUrl || '');
+  const [pdfMode, setPdfMode] = useState<Record<string, boolean>>({});
 
   const activeTab = previewTabs.find((t) => t.id === activePreviewTabId) || null;
   const showUrlMode = !activeTab;
@@ -167,7 +168,44 @@ export default function PreviewPanel() {
         )}
 
         {activeTab?.type === 'docx' && (
-          <DocxViewer filePath={activeTab.filePath} />
+          <div className="h-full flex flex-col">
+            <div className="flex items-center gap-2 px-3 py-1.5" style={{ borderBottom: '1px solid var(--glass-border)' }}>
+              <button
+                type="button"
+                className="btn-glass px-2.5 py-1 rounded text-[11px] font-medium flex items-center gap-1.5"
+                style={{
+                  background: pdfMode[activeTab.id]
+                    ? 'rgba(127, 0, 255, 0.25)'
+                    : 'rgba(255, 255, 255, 0.05)',
+                  border: pdfMode[activeTab.id]
+                    ? '1px solid var(--accent)'
+                    : '1px solid var(--glass-border)',
+                }}
+                onClick={() => setPdfMode(prev => ({ ...prev, [activeTab.id]: !prev[activeTab.id] }))}
+                title={pdfMode[activeTab.id] ? 'Switch to DOCX preview' : 'Convert to PDF (LibreOffice)'}
+              >
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                </svg>
+                PDF
+              </button>
+              <span className="text-[10px]" style={{ color: 'var(--text-tertiary)' }}>
+                {pdfMode[activeTab.id] ? 'LibreOffice PDF' : 'DOCX Preview'}
+              </span>
+            </div>
+            <div className="flex-1 overflow-hidden">
+              {pdfMode[activeTab.id] ? (
+                <iframe
+                  src={getConvertPdfUrl(activeTab.filePath)}
+                  className="w-full h-full border-0"
+                  title={`PDF: ${activeTab.filePath.split('/').pop()}`}
+                />
+              ) : (
+                <DocxViewer filePath={activeTab.filePath} />
+              )}
+            </div>
+          </div>
         )}
 
         {activeTab?.type === 'image' && (

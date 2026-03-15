@@ -138,6 +138,9 @@ export interface WorkspaceSnapshot {
   editorSplit?: string;
   // File tree
   expandedFolders?: string[];
+  // Preview tabs
+  previewTabs?: Array<{ filePath: string; type: 'pdf' | 'docx' | 'image' }>;
+  activePreviewTabFilePath?: string | null;
 }
 
 export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
@@ -440,6 +443,10 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       editorToolbarOpen: localStorage.getItem('nebulide-editor-toolbar') !== 'closed',
       editorSplit: localStorage.getItem('nebulide-editor-split') || '20%',
       expandedFolders: state.expandedFolders,
+      previewTabs: state.previewTabs.map(t => ({ filePath: t.filePath, type: t.type })),
+      activePreviewTabFilePath: state.activePreviewTabId
+        ? state.previewTabs.find(t => t.id === state.activePreviewTabId)?.filePath ?? null
+        : null,
     };
   },
 
@@ -468,6 +475,16 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       panelIdMapping[de.panelId] = `editor:${newTabId}`;
     }
 
+    // Restore preview tabs
+    const restoredPreviewTabs: PreviewTab[] = (snap.previewTabs || []).map(t => ({
+      id: generateTabId(),
+      filePath: t.filePath,
+      type: t.type,
+    }));
+    const activePreviewTab = snap.activePreviewTabFilePath
+      ? restoredPreviewTabs.find(t => t.filePath === snap.activePreviewTabFilePath)
+      : null;
+
     set({
       openTabs: newTabs,
       activeTabId,
@@ -477,8 +494,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       sidebarOpen: snap.sidebarOpen,
       toolbarOpen: snap.toolbarOpen,
       expandedFolders: snap.expandedFolders || [],
-      previewTabs: [],
-      activePreviewTabId: null,
+      previewTabs: restoredPreviewTabs,
+      activePreviewTabId: activePreviewTab?.id ?? null,
       previewUrl: null,
       previewFilePath: null,
     });
