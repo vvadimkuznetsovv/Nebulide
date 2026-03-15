@@ -61,18 +61,18 @@ async function handleImageUpload(file: File, targetInstanceId: string | null) {
  * Uploads image to ~/uploads/, sends path to active terminal or shows toast.
  *
  * Two layers:
- * - Layer 1 (keydown capture): For xterm targets — SYNCHRONOUSLY blocks Ctrl+V
- *   before xterm's bubble-phase handler sends raw keystroke to PTY.
- *   Then async checks clipboard for image. If no image → manually pastes text.
- * - Layer 2 (paste capture): For non-keyboard pastes (context menu, toolbar).
- *   clipboardData is synchronous — no race condition.
+ * - Layer 1 (keydown capture): async check clipboard for image via Clipboard API.
+ *   If image found → upload + send path. Sets keydownHandled flag to prevent Layer 2.
+ * - Layer 2 (paste capture): fallback for non-keyboard pastes (context menu, etc.)
+ *   Skips if keydownHandled flag is set. clipboardData is synchronous — no race.
  */
 export function useGlobalImagePaste() {
   useEffect(() => {
-    // Layer 1: keydown capture — catches Ctrl+V before xterm's keydown handler.
-    // CRITICAL: for xterm targets, must preventDefault SYNCHRONOUSLY before any await,
-    // otherwise xterm's bubble-phase handler fires first and sends keystroke to PTY.
-    const keydownHandler = (e: KeyboardEvent) => {
+    // Flag to prevent double-handling (keydown already handled → skip paste event)
+    let keydownHandled = false;
+
+    // Layer 1: keydown capture — catches Ctrl+V before xterm's keydown handler
+    const keydownHandler = async (e: KeyboardEvent) => {
       if (!((e.ctrlKey || e.metaKey) && e.key === 'v')) return;
 
       const target = e.target as HTMLElement;
@@ -83,6 +83,8 @@ export function useGlobalImagePaste() {
         log('[ImagePaste] keydown: SKIP — defaultPrevented=true, target=', targetTag);
         return;
       }
+
+      keydownHandled = false;
 
       if (!isXtermTextarea) {
         const isTextInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA'
@@ -96,50 +98,27 @@ export function useGlobalImagePaste() {
 
       log('[ImagePaste] keydown: Ctrl+V intercepted, target=', targetTag, 'isXterm=', isXtermTextarea);
 
-      // For xterm: SYNCHRONOUSLY block event propagation to prevent xterm from
-      // handling Ctrl+V. We'll check clipboard async and either upload image
-      // or manually paste text into terminal.
-      if (isXtermTextarea) {
-        e.preventDefault();
-        e.stopPropagation();
-        e.stopImmediatePropagation();
-        log('[ImagePaste] keydown: xterm event BLOCKED synchronously');
-      }
+      // SYNCHRONOUSLY set flag BEFORE any await — prevents paste handler from
+      // double-processing while we're waiting for async clipboard read.
+      keydownHandled = true;
 
       // Capture target terminal NOW, before async work
       const targetInstanceId = getLastFocusedInstanceId();
-      log('[ImagePaste] keydown: targetInstanceId=', targetInstanceId);
 
-      // Async clipboard check + upload
-      (async () => {
-        const imageFile = await getClipboardImage();
-        if (imageFile) {
-          log('[ImagePaste] keydown: image found, size=', imageFile.size, 'type=', imageFile.type, 'target=', targetInstanceId);
-          await handleImageUpload(imageFile, targetInstanceId);
-          return;
-        }
-
+      // Check clipboard for image via async API
+      const imageFile = await getClipboardImage();
+      if (!imageFile) {
         log('[ImagePaste] keydown: no image in clipboard');
+        keydownHandled = false; // No image — let paste handler work if needed
+        return;
+      }
 
-        // For xterm: we blocked the event, so xterm didn't paste text.
-        // Manually read clipboard text and send to terminal.
-        if (isXtermTextarea) {
-          try {
-            const text = await navigator.clipboard.readText();
-            if (text) {
-              log('[ImagePaste] keydown: pasting text to terminal, len=', text.length);
-              const sent = targetInstanceId
-                ? sendToTerminal(targetInstanceId, text) || sendToActiveTerminal(text)
-                : sendToActiveTerminal(text);
-              if (!sent) log('[ImagePaste] keydown: FAILED to send clipboard text to terminal');
-            } else {
-              log('[ImagePaste] keydown: clipboard text is empty');
-            }
-          } catch (err) {
-            log('[ImagePaste] keydown: clipboard.readText() FAILED:', err);
-          }
-        }
-      })();
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+
+      log('[ImagePaste] keydown: image found, size=', imageFile.size, 'type=', imageFile.type, 'target=', targetInstanceId);
+      await handleImageUpload(imageFile, targetInstanceId);
     };
 
     // Layer 2: paste event capture — fallback for non-keyboard pastes (context menu, etc.)
@@ -148,9 +127,14 @@ export function useGlobalImagePaste() {
       const target = e.target as HTMLElement;
       const targetTag = target.tagName + (target.className ? '.' + target.className.split(' ')[0] : '');
       const itemTypes = Array.from(e.clipboardData?.items ?? []).map(i => i.type);
-      log('[ImagePaste] paste event fired, target=', targetTag, 'defaultPrevented=', e.defaultPrevented, 'itemTypes=', itemTypes);
+      log('[ImagePaste] paste event fired, target=', targetTag, 'defaultPrevented=', e.defaultPrevented, 'itemTypes=', itemTypes, 'keydownHandled=', keydownHandled);
 
       if (e.defaultPrevented) return;
+      if (keydownHandled) {
+        log('[ImagePaste] paste: SKIP — already handled by keydown');
+        keydownHandled = false;
+        return;
+      }
 
       const items = e.clipboardData?.items;
       if (!items) { log('[ImagePaste] paste: no clipboardData.items'); return; }
