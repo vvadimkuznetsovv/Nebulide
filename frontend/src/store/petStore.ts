@@ -119,6 +119,19 @@ function addEmotion(
   return next;
 }
 
+// Soft version: adds emotion WITHOUT suppressing the opposite one.
+// Used for automatic events (streaming_end, Stop, file_save, etc.)
+// so that user's negative sentiment isn't wiped by auto-happy.
+function addEmotionSoft(
+  scores: { happy: number; sad: number },
+  type: 'happy' | 'sad',
+  intensity: number,
+): { happy: number; sad: number } {
+  const next = { ...scores };
+  next[type] = Math.min(1, next[type] + intensity * EMOTION_DAMPENING);
+  return next;
+}
+
 const SPEECH_PHRASES: Record<PetTask, string[]> = {
   idle: ['...', 'Hey!', ':)', 'Bored...'],
   working: ['Coding!', 'Busy...', 'Almost done!', 'On it!'],
@@ -208,7 +221,7 @@ export const usePetStore = create<PetStoreState>((set, get) => ({
         // Remaining pets get sad when a companion leaves
         const sadRest: Record<string, IndividualPetState> = {};
         for (const [rid, rpet] of Object.entries(rest)) {
-          const scores = addEmotion(rpet.emotionScores, 'sad', 0.2);
+          const scores = addEmotionSoft(rpet.emotionScores, 'sad', 0.2);
           sadRest[rid] = { ...rpet, emotionScores: scores, emotion: resolveEmotion(scores) };
         }
         const ids = Object.keys(sadRest);
@@ -264,7 +277,7 @@ export const usePetStore = create<PetStoreState>((set, get) => ({
         const id = event.instanceId;
         const pet = state.pets[id];
         if (!pet) return;
-        const scores = addEmotion(pet.emotionScores, 'happy', 0.3);
+        const scores = addEmotionSoft(pet.emotionScores, 'happy', 0.3);
         set({ pets: updatePet(state.pets, id, {
           task: 'idle',
           claudeStreaming: false,
@@ -325,7 +338,7 @@ export const usePetStore = create<PetStoreState>((set, get) => ({
       case 'claude_stream_end': {
         if (Object.keys(state.pets).length === 0) break;
         const newPets = updateAllPets(state.pets, (pet) => {
-          const scores = addEmotion(pet.emotionScores, 'happy', 0.3);
+          const scores = addEmotionSoft(pet.emotionScores, 'happy', 0.3);
           return {
             claudeStreaming: false,
             lastActivity: now,
@@ -340,7 +353,7 @@ export const usePetStore = create<PetStoreState>((set, get) => ({
       case 'claude_error': {
         if (Object.keys(state.pets).length === 0) break;
         const newPets = updateAllPets(state.pets, (pet) => {
-          const scores = addEmotion(pet.emotionScores, 'sad', 0.3);
+          const scores = addEmotionSoft(pet.emotionScores, 'sad', 0.3);
           return {
             lastActivity: now,
             emotionScores: scores,
@@ -413,7 +426,7 @@ export const usePetStore = create<PetStoreState>((set, get) => ({
           case 'SubagentStop': {
             // Claude finished → idle
             if (pet) {
-              const scores = addEmotion(pet.emotionScores, 'happy', 0.15);
+              const scores = addEmotionSoft(pet.emotionScores, 'happy', 0.15);
               set({ pets: updatePet(state.pets, id, {
                 task: 'idle', claudeStreaming: false, lastActivity: now,
                 emotionScores: scores, emotion: resolveEmotion(scores),
@@ -444,7 +457,7 @@ export const usePetStore = create<PetStoreState>((set, get) => ({
       case 'file_save': {
         if (Object.keys(state.pets).length === 0) break;
         const newPets = updateAllPets(state.pets, (pet) => {
-          const scores = addEmotion(pet.emotionScores, 'happy', 0.4);
+          const scores = addEmotionSoft(pet.emotionScores, 'happy', 0.4);
           return {
             lastActivity: now,
             emotionScores: scores,
@@ -461,7 +474,7 @@ export const usePetStore = create<PetStoreState>((set, get) => ({
     const state = get();
     const pet = state.pets[id];
     if (!pet) return;
-    const scores = addEmotion(pet.emotionScores, 'happy', 0.2);
+    const scores = addEmotionSoft(pet.emotionScores, 'happy', 0.2);
     const emotionList = EMOTION_PHRASES[pet.emotion];
     const list = emotionList || SPEECH_PHRASES[pet.task];
     const bubble = list[Math.floor(Math.random() * list.length)];
