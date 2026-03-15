@@ -9,6 +9,7 @@ import {
   pointerWithin,
   type DragStartEvent,
   type DragEndEvent,
+  type DragOverEvent,
   type Modifier,
   type CollisionDetection,
 } from '@dnd-kit/core';
@@ -21,6 +22,7 @@ import { useLayoutStore, type PanelId } from '../store/layoutStore';
 import { findPanelNode, isDetachedEditor } from '../store/layoutUtils';
 import { useWorkspaceStore } from '../store/workspaceStore';
 import { useWorkspaceSessionStore } from '../store/workspaceSessionStore';
+import { setReorderHover, clearReorderHover, getReorderHover } from '../hooks/useTabReorder';
 import { useSyncWS } from '../hooks/useSyncWS';
 import { syncThemeFromServer } from '../utils/theme';
 import { useGlobalImagePaste } from '../hooks/useGlobalImagePaste';
@@ -39,6 +41,13 @@ import { log } from '../utils/logger';
 const fileTreeAwareCollision: CollisionDetection = (args) => {
   const collisions = pointerWithin(args);
   const dragId = args.active?.id ? String(args.active.id) : '';
+
+  // Tab drags: prioritize tab-drop zones over large panel split/merge zones
+  if (dragId.startsWith('editor-tab:') || (!dragId.startsWith('file:') && !dragId.startsWith('editor-tab:') && collisions.some(c => String(c.id).startsWith('tab-drop:')))) {
+    const tabCollisions = collisions.filter(c => String(c.id).startsWith('tab-drop:'));
+    if (tabCollisions.length > 0) return tabCollisions;
+  }
+
   if (dragId.startsWith('file:')) {
     // Toolbar buttons (toolbar:) have priority over FileTree zones (folder:/filezone:)
     const toolbarCollisions = collisions.filter(c => String(c.id).startsWith('toolbar:'));
@@ -230,6 +239,8 @@ export default function Workspace() {
     detachEditorTabToEdge,
     detachEditorTabToMerge,
     reattachEditor,
+    reorderPanelTab,
+    movePanelTabToNode,
   } = useLayoutStore();
 
   const {
@@ -287,6 +298,41 @@ export default function Workspace() {
     }
   }, [setDragging, setDraggingEditorTab]);
 
+  // Track tab reorder hover for animated gap
+  const handleDragOver = useCallback((event: DragOverEvent) => {
+    const { over, active } = event;
+    if (!over || !active) { clearReorderHover(); return; }
+
+    const overId = String(over.id);
+    if (!overId.startsWith('tab-drop:')) { clearReorderHover(); return; }
+
+    // Parse over data
+    const data = over.data?.current as { type?: string; index?: number; containerId?: string } | undefined;
+    if (!data?.containerId || data.index == null) { clearReorderHover(); return; }
+
+    // Compute left/right edge: pointer position vs over element center
+    const overRect = over.rect;
+    // @dnd-kit provides active.rect.current.translated with pointer position
+    const translated = active.rect.current.translated;
+    if (!overRect || !translated) { clearReorderHover(); return; }
+
+    const pointerX = translated.left + translated.width / 2;
+    const midX = overRect.left + overRect.width / 2;
+    const insertBefore = pointerX < midX;
+
+    // Get dragged tab width for gap sizing
+    const draggedWidth = active.rect.current.initial?.width ?? 100;
+
+    const insertIndex = insertBefore ? data.index : data.index + 1;
+
+    setReorderHover({
+      containerId: data.containerId,
+      insertIndex,
+      draggedWidth,
+      draggedId: String(active.id),
+    });
+  }, []);
+
   const handleDragEnd = useCallback((event: DragEndEvent) => {
     const dragId = String(event.active.id);
     setActiveDragId(null);
@@ -294,9 +340,42 @@ export default function Workspace() {
     const currentDraggedFiles = draggedFiles;
     setDraggedFiles([]);
 
+    // Clear reorder hover state
+    const reorderInfo = getReorderHover();
+    clearReorderHover();
+
     const { over } = event;
     if (!over) return;
     const targetId = String(over.id);
+
+    // === Tab reorder/move ===
+    if (targetId.startsWith('tab-drop:') && reorderInfo) {
+      const { containerId, insertIndex } = reorderInfo;
+
+      // Editor tab reorder
+      if (dragId.startsWith('editor-tab:')) {
+        const tabId = dragId.slice('editor-tab:'.length);
+        if (containerId === 'editor-main') {
+          useWorkspaceStore.getState().reorderTab(tabId, insertIndex);
+        }
+        setDraggingEditorTab(null);
+        return;
+      }
+
+      // Panel tab reorder/move
+      const panelId = dragId as PanelId;
+      const sourceNode = findPanelNode(layout, panelId);
+      if (sourceNode) {
+        if (sourceNode.id === containerId) {
+          // Same node — reorder
+          reorderPanelTab(containerId, panelId, insertIndex);
+        } else {
+          // Different node — move
+          movePanelTabToNode(panelId, containerId, insertIndex);
+        }
+      }
+      return;
+    }
 
     // === File tree DnD: move file/folder into target folder ===
     // toolbar: = EditorPanel toolbar buttons, folder: = FileTree folders, filezone: = file's parent
@@ -408,12 +487,13 @@ export default function Workspace() {
       if (sourceNode && sourceNode.id === nodeId) return;
       mergePanels(draggedPanelId, nodeId);
     }
-  }, [layout, mergePanels, splitPanel, movePanelToEdge, setDragging, detachEditorTabToSplit, detachEditorTabToEdge, detachEditorTabToMerge, reattachEditor, draggedFiles]);
+  }, [layout, mergePanels, splitPanel, movePanelToEdge, setDragging, setDraggingEditorTab, detachEditorTabToSplit, detachEditorTabToEdge, detachEditorTabToMerge, reattachEditor, reorderPanelTab, movePanelTabToNode, draggedFiles]);
 
   const handleDragCancel = useCallback(() => {
     setActiveDragId(null);
     setDraggedFiles([]);
     setDragging(null);
+    clearReorderHover();
   }, [setDragging]);
 
   // Get drag overlay content
@@ -485,7 +565,7 @@ export default function Workspace() {
       <LavaLamp />
 
       {/* === UNIFIED LAYOUT — same on mobile and desktop === */}
-      <DndContext sensors={sensors} collisionDetection={fileTreeAwareCollision} onDragStart={handleDragStart} onDragEnd={handleDragEnd} onDragCancel={handleDragCancel}>
+      <DndContext sensors={sensors} collisionDetection={fileTreeAwareCollision} onDragStart={handleDragStart} onDragOver={handleDragOver} onDragEnd={handleDragEnd} onDragCancel={handleDragCancel}>
         <div className="flex flex-col h-full relative z-10 p-2 lg:p-4">
           {/* Edge drop zone — top */}
           <EdgeDropZone edge="top" />

@@ -23,6 +23,8 @@ import {
   getAllPanelIds,
   remapPanelIds,
   remapVisibility,
+  reorderPanelIds,
+  movePanelToNodeAtIndex,
 } from './layoutUtils';
 import { useWorkspaceStore } from './workspaceStore';
 import { destroyTerminalSession, getActiveTerminalInstanceIds } from '../components/terminal/Terminal';
@@ -65,6 +67,10 @@ interface LayoutState {
   toggleVisibility: (panelId: PanelId) => void;
   showPanel: (panelId: PanelId) => void;
   resetLayout: () => void;
+
+  // Tab reorder within panel nodes
+  reorderPanelTab: (nodeId: string, panelId: PanelId, newIndex: number) => void;
+  movePanelTabToNode: (panelId: PanelId, targetNodeId: string, insertIndex: number) => void;
 
   // Detached editors
   detachEditorTab: (tabId: string) => void;
@@ -325,6 +331,25 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
       };
       saveToStorage(next);
       return { layout: next.layout, visibility: next.visibility };
+    });
+  },
+
+  reorderPanelTab: (nodeId, panelId, newIndex) => {
+    set((state) => {
+      const newLayout = reorderPanelIds(state.layout, nodeId, panelId, newIndex);
+      const next = { ...state, layout: newLayout };
+      saveToStorage(next);
+      return { layout: newLayout };
+    });
+  },
+
+  movePanelTabToNode: (panelId, targetNodeId, insertIndex) => {
+    set((state) => {
+      const newLayout = movePanelToNodeAtIndex(state.layout, panelId, targetNodeId, insertIndex);
+      if (!newLayout) return {};
+      const next = { ...state, layout: newLayout };
+      saveToStorage(next);
+      return { layout: newLayout };
     });
   },
 

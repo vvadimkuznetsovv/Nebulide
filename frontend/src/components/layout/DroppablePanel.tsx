@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react';
 import { useDraggable, useDroppable } from '@dnd-kit/core';
 import type { PanelId, PanelNode } from '../../store/layoutStore';
 import { useLayoutStore } from '../../store/layoutStore';
-import { isDetachedEditor, getDetachedTabId, isDetachedTerminal, getDetachedTerminalId } from '../../store/layoutUtils';
+import { isDetachedEditor, getDetachedTabId, isDetachedTerminal, getDetachedTerminalId, findPanelNode } from '../../store/layoutUtils';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 import { useTerminalRegistryVersion, getTerminalCustomName, getTerminalLabel, setTerminalName } from '../../utils/terminalRegistry';
 import { sendSyncMessage } from '../../utils/syncBridge';
@@ -10,6 +10,7 @@ import PanelContent, { getPanelIcon, getPanelTitle } from './PanelContent';
 import { focusTerminal } from '../terminal/Terminal';
 import ContextMenu from '../files/ContextMenu';
 import { useLongPress, mergeEventHandlers } from '../../hooks/useLongPress';
+import { useReorderHover, getTabShift } from '../../hooks/useTabReorder';
 
 interface DroppablePanelProps {
   node: PanelNode;
@@ -387,32 +388,57 @@ function TabBar({ node, visiblePanelIds, showSidebarBtn }: { node: PanelNode; vi
   return (
     <div className="panel-tab-bar">
       {showSidebarBtn && <SidebarToggleBtn />}
-      {visiblePanelIds.map((pid) => (
+      {visiblePanelIds.map((pid, index) => (
         <DraggableTab
           key={pid}
           panelId={pid}
+          tabIndex={index}
           isActive={pid === node.panelIds[node.activeIndex]}
           onActivate={() => setNodeActiveTab(node.id, pid)}
           nodeId={node.id}
         />
       ))}
+      <PanelTabEndZone nodeId={node.id} tabCount={visiblePanelIds.length} />
     </div>
   );
 }
 
 function DraggableTab({
   panelId,
+  tabIndex,
   isActive,
   onActivate,
   nodeId,
 }: {
   panelId: PanelId;
+  tabIndex: number;
   isActive: boolean;
   onActivate: () => void;
   nodeId: string;
 }) {
   const { toggleVisibility, removeDetachedPanel, reattachEditor, splitPanel, resetLayout } = useLayoutStore();
-  const { attributes, listeners, setNodeRef, isDragging } = useDraggable({ id: panelId });
+  const { attributes, listeners, setNodeRef: setDragRef, isDragging } = useDraggable({ id: panelId });
+
+  // Make tab a drop target for reorder
+  const { setNodeRef: setDropRef } = useDroppable({
+    id: `tab-drop:panel:${nodeId}:${tabIndex}`,
+    data: { type: 'panel-tab-slot', index: tabIndex, containerId: nodeId },
+  });
+
+  // Merge drag + drop refs
+  const setNodeRef = useCallback((el: HTMLElement | null) => {
+    setDragRef(el);
+    setDropRef(el);
+  }, [setDragRef, setDropRef]);
+
+  // Animated gap shift
+  const hover = useReorderHover();
+  const layout = useLayoutStore.getState().layout;
+  const panelNode = findPanelNode(layout, panelId);
+  const draggedIndex = hover?.draggedId && panelNode
+    ? panelNode.panelIds.indexOf(hover.draggedId as PanelId)
+    : -1;
+  const shift = getTabShift(hover, nodeId, tabIndex, draggedIndex);
   useTerminalRegistryVersion(); // re-render when terminal numbering changes
 
   const title = getPanelTitle(panelId);
@@ -455,8 +481,12 @@ function DraggableTab({
     <>
       <div
         ref={setNodeRef}
-        className={`panel-tab ${isActive ? 'active' : ''}`}
-        style={{ opacity: isDragging ? 0.3 : 1 }}
+        className={`panel-tab ${isActive ? 'active' : ''}${isDragging ? ' drag-source' : ''}`}
+        style={{
+          opacity: isDragging ? 0.3 : 1,
+          transform: shift ? `translateX(${shift}px)` : undefined,
+          transition: 'transform 200ms cubic-bezier(0.2, 0, 0, 1)',
+        }}
         onClick={() => {
           if (longPressedRef.current) { longPressedRef.current = false; return; }
           onActivate();
@@ -497,4 +527,13 @@ function DraggableTab({
       )}
     </>
   );
+}
+
+/** Drop zone after the last panel tab — for appending */
+function PanelTabEndZone({ nodeId, tabCount }: { nodeId: string; tabCount: number }) {
+  const { setNodeRef } = useDroppable({
+    id: `tab-drop:panel:${nodeId}:${tabCount}`,
+    data: { type: 'panel-tab-slot', index: tabCount, containerId: nodeId },
+  });
+  return <div ref={setNodeRef} style={{ flex: '1 1 0', minWidth: 20, minHeight: '100%' }} />;
 }

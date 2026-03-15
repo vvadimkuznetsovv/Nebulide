@@ -3,6 +3,7 @@ import { useDraggable, useDroppable, useDndContext } from '@dnd-kit/core';
 import { Panel, Group, Separator, usePanelRef, useGroupRef } from 'react-resizable-panels';
 import { useWorkspaceStore, isPreviewableFile, type EditorTab } from '../../store/workspaceStore';
 import { useLayoutStore } from '../../store/layoutStore';
+import { useReorderHover, getTabShift } from '../../hooks/useTabReorder';
 import { useAuthStore } from '../../store/authStore';
 import FileTree, { type FileTreeHandle } from '../files/FileTree';
 import FileSearch from '../files/FileSearch';
@@ -142,10 +143,11 @@ export default function EditorPanel() {
         </button>
 
         <div className="editor-tabs-scroll">
-          {openTabs.map((tab) => (
+          {openTabs.map((tab, index) => (
             <EditorTabButton
               key={tab.id}
               tab={tab}
+              tabIndex={index}
               isActive={tab.id === activeTabId}
               isTemp={tab.id === tempTabId}
               onSelect={() => { setActiveTab(tab.id); ensureEditorVisible(); }}
@@ -153,6 +155,7 @@ export default function EditorPanel() {
               onPin={() => pinTab(tab.id)}
             />
           ))}
+          <EditorTabEndZone tabCount={openTabs.length} />
         </div>
       </div>
 
@@ -378,6 +381,7 @@ export default function EditorPanel() {
 
 function EditorTabButton({
   tab,
+  tabIndex,
   isActive,
   isTemp,
   onSelect,
@@ -385,6 +389,7 @@ function EditorTabButton({
   onPin,
 }: {
   tab: EditorTab;
+  tabIndex: number;
   isActive: boolean;
   isTemp?: boolean;
   onSelect: () => void;
@@ -398,9 +403,28 @@ function EditorTabButton({
   // NOTE: we intentionally DON'T spread `attributes` — it applies CSS transform
   // to the original element, which gets clipped by overflow:auto parent
   // (.editor-tabs-scroll). DragOverlay in Workspace.tsx handles the visual ghost.
-  const { listeners, setNodeRef, isDragging } = useDraggable({
+  const { listeners, setNodeRef: setDragRef, isDragging } = useDraggable({
     id: `editor-tab:${tab.id}`,
   });
+
+  // Make tab a drop target for reorder
+  const { setNodeRef: setDropRef } = useDroppable({
+    id: `tab-drop:editor:${tabIndex}`,
+    data: { type: 'editor-tab-slot', index: tabIndex, containerId: 'editor-main' },
+  });
+
+  // Merge drag + drop refs
+  const setNodeRef = useCallback((el: HTMLElement | null) => {
+    setDragRef(el);
+    setDropRef(el);
+  }, [setDragRef, setDropRef]);
+
+  // Animated gap shift
+  const hover = useReorderHover();
+  const draggedIndex = hover?.draggedId
+    ? useWorkspaceStore.getState().openTabs.findIndex((t) => `editor-tab:${t.id}` === hover.draggedId)
+    : -1;
+  const shift = getTabShift(hover, 'editor-main', tabIndex, draggedIndex);
 
   // Context menu state
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number } | null>(null);
@@ -452,8 +476,12 @@ function EditorTabButton({
     <>
       <div
         ref={setNodeRef}
-        className={`editor-tab ${isActive ? 'active' : ''}${isTemp ? ' preview' : ''}`}
-        style={{ opacity: isDragging ? 0.3 : 1 }}
+        className={`editor-tab ${isActive ? 'active' : ''}${isTemp ? ' preview' : ''}${isDragging ? ' drag-source' : ''}`}
+        style={{
+          opacity: isDragging ? 0.3 : 1,
+          transform: shift ? `translateX(${shift}px)` : undefined,
+          transition: 'transform 200ms cubic-bezier(0.2, 0, 0, 1)',
+        }}
         onClick={() => {
           if (longPressedRef.current) { longPressedRef.current = false; return; }
           onSelect();
@@ -501,4 +529,13 @@ function EditorTabButton({
       )}
     </>
   );
+}
+
+/** Drop zone after the last editor tab — for appending */
+function EditorTabEndZone({ tabCount }: { tabCount: number }) {
+  const { setNodeRef } = useDroppable({
+    id: `tab-drop:editor:${tabCount}`,
+    data: { type: 'editor-tab-slot', index: tabCount, containerId: 'editor-main' },
+  });
+  return <div ref={setNodeRef} style={{ flex: '1 1 0', minWidth: 20, minHeight: '100%' }} />;
 }

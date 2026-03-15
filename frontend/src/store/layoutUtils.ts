@@ -497,6 +497,72 @@ export function remapVisibility(
   return result;
 }
 
+// Reorder a panelId within a PanelNode (same node, different position)
+export function reorderPanelIds(
+  tree: LayoutNode,
+  nodeId: string,
+  panelId: PanelId,
+  newIndex: number,
+): LayoutNode {
+  if (tree.type === 'panel') {
+    if (tree.id !== nodeId) return tree;
+    const ids = [...tree.panelIds];
+    const oldIdx = ids.indexOf(panelId);
+    if (oldIdx === -1 || oldIdx === newIndex) return tree;
+    const adjusted = newIndex > oldIdx ? newIndex - 1 : newIndex;
+    ids.splice(oldIdx, 1);
+    ids.splice(adjusted, 0, panelId);
+    // Keep activeIndex pointing to the same panel
+    const activePanel = tree.panelIds[tree.activeIndex];
+    return { ...tree, panelIds: ids, activeIndex: ids.indexOf(activePanel) };
+  }
+  return {
+    ...tree,
+    children: tree.children.map((c) => reorderPanelIds(c, nodeId, panelId, newIndex)),
+  };
+}
+
+// Move a panelId from its current node to a different node at insertIndex
+export function movePanelToNodeAtIndex(
+  tree: LayoutNode,
+  panelId: PanelId,
+  targetNodeId: string,
+  insertIndex: number,
+): LayoutNode | null {
+  // Remove from source
+  const treeWithout = removePanelFromTree(tree, panelId);
+  if (!treeWithout) return null;
+  // Insert into target at specific index
+  return addPanelToNodeAtIndex(treeWithout, panelId, targetNodeId, insertIndex);
+}
+
+function addPanelToNodeAtIndex(
+  tree: LayoutNode,
+  panelId: PanelId,
+  targetNodeId: string,
+  insertIndex: number,
+): LayoutNode {
+  if (tree.type === 'panel') {
+    if (tree.id === targetNodeId) {
+      const newPanelIds = [...tree.panelIds];
+      const clampedIndex = Math.min(insertIndex, newPanelIds.length);
+      newPanelIds.splice(clampedIndex, 0, panelId);
+      return {
+        ...tree,
+        panelIds: newPanelIds,
+        activeIndex: clampedIndex,
+      };
+    }
+    return tree;
+  }
+  return {
+    ...tree,
+    children: tree.children.map((child) =>
+      addPanelToNodeAtIndex(child, panelId, targetNodeId, insertIndex),
+    ),
+  };
+}
+
 // Update sizes for a specific group node
 export function updateGroupSizes(tree: LayoutNode, groupId: string, sizes: number[]): LayoutNode {
   if (tree.type === 'panel') return tree;

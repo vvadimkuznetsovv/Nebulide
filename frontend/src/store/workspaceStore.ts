@@ -89,6 +89,7 @@ interface WorkspaceState {
   closeTab: (tabId: string) => void;
   setActiveTab: (tabId: string) => void;
   setTabModified: (tabId: string, modified: boolean) => void;
+  reorderTab: (tabId: string, newIndex: number) => void;
 
   // Detached editor actions
   detachTab: (tabId: string) => string | null;
@@ -276,6 +277,17 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
       }
       return updates;
     });
+  },
+
+  reorderTab: (tabId, newIndex) => {
+    const { openTabs } = get();
+    const oldIndex = openTabs.findIndex((t) => t.id === tabId);
+    if (oldIndex === -1 || oldIndex === newIndex) return;
+    const adjusted = newIndex > oldIndex ? newIndex - 1 : newIndex;
+    const newTabs = [...openTabs];
+    const [moved] = newTabs.splice(oldIndex, 1);
+    newTabs.splice(adjusted, 0, moved);
+    set({ openTabs: newTabs });
   },
 
   // Detach a tab from File Manager → becomes a standalone panel
