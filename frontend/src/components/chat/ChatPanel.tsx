@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from 'react';
-import { listClaudeSessions, listClaudePlans, readClaudePlan, readClaudeSession, searchClaudeSessions, deleteClaudeSession } from '../../api/claudeSessions';
-import type { ClaudeProject, ClaudeSession, ClaudePlan, ClaudeSessionMessage, ClaudeSearchResult } from '../../api/claudeSessions';
+import { listClaudeSessions, listClaudePlans, readClaudePlan, readClaudeSession, searchClaudeSessions, deleteClaudeSession, listBranches } from '../../api/claudeSessions';
+import type { ClaudeProject, ClaudeSession, ClaudePlan, ClaudeSessionMessage, ClaudeSearchResult, ClaudeBranch } from '../../api/claudeSessions';
 import { useLayoutStore } from '../../store/layoutStore';
 import { typeCommandInTerminal } from '../terminal/Terminal';
 import { emitActivity } from '../../utils/activityBus';
@@ -169,6 +169,11 @@ export default function ChatPanel(_props: ChatPanelProps) {
   const [searching, setSearching] = useState(false);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const searchVersionRef = useRef(0); // Guards against stale API responses
+
+  // Branch explorer state
+  const [expandedBranches, setExpandedBranches] = useState<string | null>(null);
+  const [branches, setBranches] = useState<ClaudeBranch[]>([]);
+  const [branchesLoading, setBranchesLoading] = useState(false);
 
   // Folder explorer state
   const [selectedFolder, setSelectedFolder] = useState<string | null>(null);
@@ -360,6 +365,24 @@ export default function ChatPanel(_props: ChatPanelProps) {
   const handleOpenSearchResult = useCallback(async (result: ClaudeSearchResult) => {
     handleOpenSession({ session_id: result.session_id, cwd: result.cwd });
   }, [handleOpenSession]);
+
+  const handleToggleBranches = useCallback(async (session: ClaudeSession & { project: string }) => {
+    const key = session.session_id;
+    if (expandedBranches === key) {
+      setExpandedBranches(null);
+      return;
+    }
+    setBranchesLoading(true);
+    try {
+      const { data } = await listBranches(session.project, session.session_id);
+      setBranches(data.branches || []);
+      setExpandedBranches(key);
+    } catch {
+      toast.error('Failed to load branches');
+    } finally {
+      setBranchesLoading(false);
+    }
+  }, [expandedBranches]);
 
   const toggleExpanded = useCallback((pathPrefix: string) => {
     setExpandedNodes(prev => {
@@ -757,16 +780,25 @@ export default function ChatPanel(_props: ChatPanelProps) {
                         <span>{projectDisplayName(session.project)}</span>
                         <span>{formatSize(session.size_mb)}</span>
                         {(session.branch_count ?? 0) > 1 && (
-                          <span style={{
-                            background: 'rgba(127, 0, 255, 0.15)',
-                            color: 'var(--accent)',
-                            padding: '0 4px',
-                            borderRadius: 3,
-                            fontSize: 9,
-                            fontWeight: 600,
-                          }}>
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); handleToggleBranches(session); }}
+                            style={{
+                              background: expandedBranches === session.session_id
+                                ? 'rgba(127, 0, 255, 0.25)' : 'rgba(127, 0, 255, 0.15)',
+                              color: 'var(--accent)',
+                              padding: '0 4px',
+                              borderRadius: 3,
+                              fontSize: 9,
+                              fontWeight: 600,
+                              border: 'none',
+                              cursor: 'pointer',
+                              fontFamily: 'inherit',
+                              transition: 'background 0.15s',
+                            }}
+                          >
                             {session.branch_count} branches
-                          </span>
+                          </button>
                         )}
                         <span>{timeAgo(session.updated_at)}</span>
                         <span
@@ -854,6 +886,83 @@ export default function ChatPanel(_props: ChatPanelProps) {
                       </div>
                     </div>
                   </div>
+
+                  {/* Expanded branches */}
+                  {expandedBranches === session.session_id && (
+                    <div style={{
+                      margin: '4px 16px 4px 40px',
+                      borderRadius: 6,
+                      background: 'rgba(var(--accent-rgb), 0.04)',
+                      border: '1px solid var(--glass-border)',
+                      overflow: 'hidden',
+                    }}>
+                      {branchesLoading ? (
+                        <div style={{ padding: 8, color: 'var(--text-muted)', fontSize: 11, textAlign: 'center' }}>
+                          Loading branches...
+                        </div>
+                      ) : branches.length === 0 ? (
+                        <div style={{ padding: 8, color: 'var(--text-muted)', fontSize: 11, textAlign: 'center' }}>
+                          No branches found
+                        </div>
+                      ) : (
+                        branches.map((branch, idx) => (
+                          <div
+                            key={branch.branch_id}
+                            style={{
+                              padding: '6px 10px',
+                              display: 'flex', alignItems: 'center', gap: 8,
+                              borderBottom: idx < branches.length - 1 ? '1px solid var(--glass-border)' : 'none',
+                              transition: 'background 0.15s',
+                            }}
+                            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--glass-hover)'; }}
+                            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                          >
+                            {/* Branch icon */}
+                            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2"
+                              strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, opacity: 0.7 }}>
+                              <line x1="6" y1="3" x2="6" y2="15" />
+                              <circle cx="18" cy="6" r="3" />
+                              <circle cx="6" cy="18" r="3" />
+                              <path d="M18 9a9 9 0 0 1-9 9" />
+                            </svg>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{
+                                fontSize: 11, color: 'var(--text-primary)',
+                                overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                              }}>
+                                {branch.first_message || `Branch ${idx + 1}`}
+                              </div>
+                              <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2 }}>
+                                {branch.message_count} msgs · {timeAgo(branch.created_at)}
+                              </div>
+                            </div>
+                            {/* Open branch button */}
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleOpenSession({ session_id: session.session_id, cwd: session.cwd });
+                              }}
+                              disabled={!!launching}
+                              style={{
+                                background: 'rgba(var(--accent-rgb), 0.12)',
+                                border: '1px solid var(--glass-border)',
+                                borderRadius: 4, padding: '2px 6px',
+                                cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 3,
+                                color: 'var(--accent)', fontSize: 9, fontFamily: 'inherit',
+                                transition: 'all 0.15s',
+                              }}
+                            >
+                              <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <polygon points="5 3 19 12 5 21 5 3" />
+                              </svg>
+                              Open
+                            </button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  )}
 
                   {/* Expanded preview */}
                   {isExpanded && (
