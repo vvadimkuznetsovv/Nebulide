@@ -97,6 +97,18 @@ export const useWorkspaceSessionStore = create<WorkspaceSessionState>((set, get)
     const state = get();
     if (state.loading) return;
     set({ loading: true });
+    // Block saves while loading + restoring server snapshot.
+    // Prevents Workspace.tsx subscribe callbacks from saving stale localStorage
+    // data to server before server restore completes.
+    _restoringSnapshot = true;
+
+    // Helper: schedule _restoringSnapshot reset after restore
+    const scheduleUnblock = () => {
+      setTimeout(() => {
+        _restoringSnapshot = false;
+        log('[WorkspaceSession] initSession: _restoringSnapshot=false (3s elapsed)');
+      }, 3000);
+    };
 
     try {
       await state.loadSessions();
@@ -113,8 +125,12 @@ export const useWorkspaceSessionStore = create<WorkspaceSessionState>((set, get)
               log('[WorkspaceSession] initSession: restoring from server');
               const panelIdMapping = useWorkspaceStore.getState().restoreFromSnapshot(snap.workspace);
               useLayoutStore.getState().restoreLayoutFromSnapshot(snap.layout, panelIdMapping);
+              scheduleUnblock();
+            } else {
+              _restoringSnapshot = false;
             }
           } catch {
+            _restoringSnapshot = false;
             warn('[WorkspaceSession] Failed to restore snapshot');
           }
           syncThemeFromServer();
@@ -129,23 +145,26 @@ export const useWorkspaceSessionStore = create<WorkspaceSessionState>((set, get)
           const { data } = await getLatestWorkspaceSession();
           localStorage.setItem(ACTIVE_WS_KEY, data.id);
           set({ activeSessionId: data.id, loading: false });
-          // Restore snapshot from latest (tolerate malformed snapshots)
           try {
             const snap = data.snapshot as unknown as FullSnapshot;
             if (snap?.layout && snap?.workspace) {
               log('[WorkspaceSession] initSession: restoring from latest server session');
               const panelIdMapping = useWorkspaceStore.getState().restoreFromSnapshot(snap.workspace);
               useLayoutStore.getState().restoreLayoutFromSnapshot(snap.layout, panelIdMapping);
+              scheduleUnblock();
+            } else {
+              _restoringSnapshot = false;
             }
           } catch {
+            _restoringSnapshot = false;
             warn('[WorkspaceSession] Failed to restore snapshot, using default layout');
           }
           return;
         } catch {
-          // Fallback: use first session
           const first = sessions[0];
           localStorage.setItem(ACTIVE_WS_KEY, first.id);
           set({ activeSessionId: first.id, loading: false });
+          _restoringSnapshot = false;
           return;
         }
       }
@@ -159,7 +178,9 @@ export const useWorkspaceSessionStore = create<WorkspaceSessionState>((set, get)
         activeSessionId: data.id,
         loading: false,
       });
+      _restoringSnapshot = false;
     } catch {
+      _restoringSnapshot = false;
       set({ loading: false });
     }
   },
