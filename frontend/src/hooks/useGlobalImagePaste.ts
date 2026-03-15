@@ -61,18 +61,22 @@ async function handleImageUpload(file: File, targetInstanceId: string | null) {
  * Uploads image to ~/uploads/, sends path to active terminal or shows toast.
  *
  * Two layers:
- * - Layer 1 (keydown capture): async check clipboard for image via Clipboard API.
- *   If image found → upload + send path. Sets keydownHandled flag to prevent Layer 2.
- * - Layer 2 (paste capture): fallback for non-keyboard pastes (context menu, etc.)
- *   Skips if keydownHandled flag is set. clipboardData is synchronous — no race.
+ * - Layer 1 (keydown capture): SYNCHRONOUSLY blocks Ctrl+V for xterm targets
+ *   (prevents Claude CLI from receiving keystroke and trying its own clipboard read).
+ *   Then async checks clipboard for image. If no image → manually pastes text.
+ *   Sets keydownHandled flag to prevent Layer 2 from double-processing.
+ * - Layer 2 (paste capture): For non-keyboard pastes (context menu, toolbar).
+ *   Skips if keydownHandled. clipboardData is synchronous — no race.
  */
 export function useGlobalImagePaste() {
   useEffect(() => {
     // Flag to prevent double-handling (keydown already handled → skip paste event)
     let keydownHandled = false;
 
-    // Layer 1: keydown capture — catches Ctrl+V before xterm's keydown handler
-    const keydownHandler = async (e: KeyboardEvent) => {
+    // Layer 1: keydown capture — SYNCHRONOUS handler (not async!)
+    // Must block xterm's Ctrl+V BEFORE any await, otherwise xterm sends
+    // keystroke to PTY and Claude CLI tries its own clipboard read.
+    const keydownHandler = (e: KeyboardEvent) => {
       if (!((e.ctrlKey || e.metaKey) && e.key === 'v')) return;
 
       const target = e.target as HTMLElement;
@@ -83,8 +87,6 @@ export function useGlobalImagePaste() {
         log('[ImagePaste] keydown: SKIP — defaultPrevented=true, target=', targetTag);
         return;
       }
-
-      keydownHandled = false;
 
       if (!isXtermTextarea) {
         const isTextInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA'
@@ -98,27 +100,54 @@ export function useGlobalImagePaste() {
 
       log('[ImagePaste] keydown: Ctrl+V intercepted, target=', targetTag, 'isXterm=', isXtermTextarea);
 
-      // SYNCHRONOUSLY set flag BEFORE any await — prevents paste handler from
-      // double-processing while we're waiting for async clipboard read.
+      // For xterm: SYNCHRONOUSLY block event BEFORE any async work.
+      // This prevents xterm from sending Ctrl+V to PTY (which would make
+      // Claude CLI try its own clipboard read and show "No image found").
+      if (isXtermTextarea) {
+        e.preventDefault();
+        e.stopPropagation();
+        e.stopImmediatePropagation();
+        log('[ImagePaste] keydown: xterm event BLOCKED synchronously');
+      }
+
+      // Set flag SYNCHRONOUSLY to prevent Layer 2 (paste handler) from
+      // also processing this paste event.
       keydownHandled = true;
 
       // Capture target terminal NOW, before async work
       const targetInstanceId = getLastFocusedInstanceId();
+      log('[ImagePaste] keydown: targetInstanceId=', targetInstanceId);
 
-      // Check clipboard for image via async API
-      const imageFile = await getClipboardImage();
-      if (!imageFile) {
+      // Async clipboard check + upload (in IIFE, not making handler async)
+      (async () => {
+        const imageFile = await getClipboardImage();
+        if (imageFile) {
+          log('[ImagePaste] keydown: image found, size=', imageFile.size, 'type=', imageFile.type, 'target=', targetInstanceId);
+          await handleImageUpload(imageFile, targetInstanceId);
+          return;
+        }
+
         log('[ImagePaste] keydown: no image in clipboard');
-        keydownHandled = false; // No image — let paste handler work if needed
-        return;
-      }
 
-      e.preventDefault();
-      e.stopPropagation();
-      e.stopImmediatePropagation();
-
-      log('[ImagePaste] keydown: image found, size=', imageFile.size, 'type=', imageFile.type, 'target=', targetInstanceId);
-      await handleImageUpload(imageFile, targetInstanceId);
+        // For xterm: we blocked the event, so xterm didn't paste text.
+        // Manually read clipboard text and send to terminal.
+        if (isXtermTextarea) {
+          try {
+            const text = await navigator.clipboard.readText();
+            if (text) {
+              log('[ImagePaste] keydown: pasting text to terminal, len=', text.length);
+              const sent = targetInstanceId
+                ? sendToTerminal(targetInstanceId, text) || sendToActiveTerminal(text)
+                : sendToActiveTerminal(text);
+              if (!sent) log('[ImagePaste] keydown: FAILED to send clipboard text to terminal');
+            } else {
+              log('[ImagePaste] keydown: clipboard text is empty');
+            }
+          } catch (err) {
+            log('[ImagePaste] keydown: clipboard.readText() FAILED:', err);
+          }
+        }
+      })();
     };
 
     // Layer 2: paste event capture — fallback for non-keyboard pastes (context menu, etc.)
