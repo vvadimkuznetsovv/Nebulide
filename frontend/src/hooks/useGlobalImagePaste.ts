@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { uploadFile } from '../api/files';
-import { sendToTerminal, sendToActiveTerminal, getLastFocusedInstanceId } from '../components/terminal/Terminal';
+import { sendToTerminal, sendToActiveTerminal, getLastFocusedInstanceId, focusTerminal } from '../components/terminal/Terminal';
 import toast from 'react-hot-toast';
 import { log } from '../utils/logger';
 
@@ -45,6 +45,8 @@ async function handleImageUpload(file: File, targetInstanceId: string | null) {
       : sendToActiveTerminal(data.path);
     if (sent) {
       toast.success('Image uploaded & sent to terminal', { id: toastId });
+      // Restore focus to terminal (clipboard API steals focus)
+      if (targetInstanceId) focusTerminal(targetInstanceId);
     } else {
       try { await navigator.clipboard.writeText(data.path); } catch { /* noop */ }
       toast.success(`Image uploaded: ${data.path}`, { id: toastId, duration: 4000 });
@@ -141,6 +143,7 @@ export function useGlobalImagePaste() {
               const sent = targetInstanceId
                 ? sendToTerminal(targetInstanceId, text) || sendToActiveTerminal(text)
                 : sendToActiveTerminal(text);
+              if (sent && targetInstanceId) focusTerminal(targetInstanceId);
               if (!sent) log('[ImagePaste] keydown: FAILED to send clipboard text to terminal');
             } else {
               log('[ImagePaste] keydown: clipboard text is empty');
