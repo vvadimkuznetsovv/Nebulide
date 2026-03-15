@@ -127,7 +127,7 @@ func truncate(s string, max int) string {
 	return s
 }
 
-// countBranches scans a JSONL file and counts conversation branches.
+// countBranches scans a JSONL file and counts conversation branches (leaf nodes).
 // Reads up to maxLines lines (0 = unlimited). Returns 1 for linear conversations.
 func countBranches(fullPath string, maxLines int) int {
 	file, err := os.Open(fullPath)
@@ -136,8 +136,9 @@ func countBranches(fullPath string, maxLines int) int {
 	}
 	defer file.Close()
 
-	// parentUUID → number of children
-	childCount := map[string]int{}
+	// Collect all UUIDs and which UUIDs are referenced as parents
+	allUUIDs := map[string]bool{}
+	hasChildren := map[string]bool{}
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 0, 64*1024), 256*1024)
 	lineCount := 0
@@ -149,10 +150,6 @@ func countBranches(fullPath string, maxLines int) int {
 		lineCount++
 		line := scanner.Text()
 		if line == "" {
-			continue
-		}
-		// Fast check — only parse lines that have parentUuid
-		if !strings.Contains(line, `"parentUuid"`) {
 			continue
 		}
 		var meta struct {
@@ -167,22 +164,23 @@ func countBranches(fullPath string, maxLines int) int {
 		if meta.Type != "user" && meta.Type != "assistant" {
 			continue
 		}
+		allUUIDs[meta.UUID] = true
 		if meta.ParentUUID != "" {
-			childCount[meta.ParentUUID]++
+			hasChildren[meta.ParentUUID] = true
 		}
 	}
 
-	// Count branch points (parents with >1 child)
-	branchPoints := 0
-	for _, count := range childCount {
-		if count > 1 {
-			branchPoints++
+	// Count leaf nodes (nodes that are not parents of anyone)
+	leaves := 0
+	for uuid := range allUUIDs {
+		if !hasChildren[uuid] {
+			leaves++
 		}
 	}
-	if branchPoints == 0 {
+	if leaves <= 1 {
 		return 1
 	}
-	return branchPoints + 1
+	return leaves
 }
 
 type sessionInfo struct {
@@ -887,24 +885,23 @@ func (h *ClaudeSessionsHandler) ListBranches(c *gin.Context) {
 		}
 	}
 
-	// For each leaf, trace back to find the branch point and first user message
+	// For each leaf, trace back to find the branch point and first user message on this branch
 	var branches []branchDetail
 	for _, leafUUID := range leafUUIDs {
-		// Walk back to root, counting messages and finding first user msg
+		// Walk back to root, counting messages
 		msgCount := 0
-		var firstUserMsg, firstTimestamp, branchParent string
+		var branchParent string
+		// Collect path from leaf to root
+		var path []string
 		current := leafUUID
 		for current != "" {
 			n := nodes[current]
 			if n == nil {
 				break
 			}
+			path = append(path, current)
 			msgCount++
-			if n.msgType == "user" && n.text != "" {
-				firstUserMsg = n.text
-				firstTimestamp = n.timestamp
-			}
-			// Check if this node's parent has >1 child (branch point)
+			// Find the deepest branch point (closest to leaf)
 			if n.parentUUID != "" {
 				parent := nodes[n.parentUUID]
 				if parent != nil && len(parent.children) > 1 && branchParent == "" {
@@ -912,6 +909,35 @@ func (h *ClaudeSessionsHandler) ListBranches(c *gin.Context) {
 				}
 			}
 			current = n.parentUUID
+		}
+
+		// Find the first user message AFTER the branch point (unique to this branch).
+		// Walk from branch point toward leaf (reverse of path order).
+		var firstUserMsg, firstTimestamp string
+		foundBranchPoint := branchParent == "" // if no branch point, take first user msg overall
+		for i := len(path) - 1; i >= 0; i-- {
+			n := nodes[path[i]]
+			if n == nil {
+				continue
+			}
+			if !foundBranchPoint {
+				if n.parentUUID == branchParent {
+					foundBranchPoint = true
+				}
+			}
+			if foundBranchPoint && n.msgType == "user" && n.text != "" {
+				firstUserMsg = n.text
+				firstTimestamp = n.timestamp
+				break
+			}
+		}
+
+		// Fallback: if no user message found after branch point, use leaf's timestamp
+		if firstTimestamp == "" {
+			leaf := nodes[leafUUID]
+			if leaf != nil {
+				firstTimestamp = leaf.timestamp
+			}
 		}
 
 		branches = append(branches, branchDetail{
