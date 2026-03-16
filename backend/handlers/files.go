@@ -522,6 +522,7 @@ func (h *FilesHandler) ConvertToPDF(c *gin.Context) {
 func servePDF(c *gin.Context, pdfPath, origName string) {
 	pdfName := strings.TrimSuffix(origName, filepath.Ext(origName)) + ".pdf"
 	c.Header("Content-Type", "application/pdf")
+	c.Header("Cache-Control", "no-store, no-cache, must-revalidate")
 	c.Header("Content-Security-Policy", "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data: blob:")
 	c.Header("Content-Disposition", fmt.Sprintf(`inline; filename="%s"`, pdfName))
 	c.File(pdfPath)

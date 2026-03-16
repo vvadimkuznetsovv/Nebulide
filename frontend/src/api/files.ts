@@ -89,7 +89,7 @@ export function getDownloadUrl(path: string): string {
 // Build URL for raw binary file serving (PDF iframe, etc.)
 export function getRawFileUrl(path: string): string {
   const token = localStorage.getItem('access_token');
-  const params = new URLSearchParams({ path });
+  const params = new URLSearchParams({ path, _t: Date.now().toString() });
   if (token) params.set('token', token);
   return `/api/files/raw?${params.toString()}`;
 }
@@ -101,7 +101,7 @@ export const readFileRaw = (path: string) =>
 // Build URL for DOCX→PDF conversion via LibreOffice (server-side)
 export function getConvertPdfUrl(path: string): string {
   const token = localStorage.getItem('access_token');
-  const params = new URLSearchParams({ path });
+  const params = new URLSearchParams({ path, _t: Date.now().toString() });
   if (token) params.set('token', token);
   return `/api/files/convert-pdf?${params.toString()}`;
 }

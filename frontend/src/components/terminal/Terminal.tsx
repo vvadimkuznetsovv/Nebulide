@@ -77,9 +77,19 @@ interface TermSession {
 const sessions = new Map<string, TermSession>();
 let lastFocusedInstanceId: string | null = null;
 
-/** Check all active terminal instances for selected text */
+/** Check terminal instances for selected text (prioritizes last focused terminal) */
 export function getAnyTerminalSelection(): string | null {
-  for (const sess of sessions.values()) {
+  // Check last focused terminal first
+  if (lastFocusedInstanceId) {
+    const focused = sessions.get(lastFocusedInstanceId);
+    if (focused?.xterm) {
+      const sel = focused.xterm.getSelection();
+      if (sel) return sel;
+    }
+  }
+  // Fallback: check all other terminals
+  for (const [id, sess] of sessions.entries()) {
+    if (id === lastFocusedInstanceId) continue;
     if (sess.xterm) {
       const sel = sess.xterm.getSelection();
       if (sel) return sel;

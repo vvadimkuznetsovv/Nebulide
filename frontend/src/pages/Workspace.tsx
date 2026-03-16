@@ -32,6 +32,7 @@ import LayoutRenderer from '../components/layout/LayoutRenderer';
 import EdgeDropZone from '../components/layout/EdgeDropZone';
 import { panelIcons, getPanelIcon, getPanelTitle } from '../components/layout/PanelContent';
 import { useTerminalRegistryVersion } from '../utils/terminalRegistry';
+import { getAnyTerminalSelection } from '../components/terminal/Terminal';
 import { log } from '../utils/logger';
 
 // Custom collision detection: when dragging file tree items, prioritize
@@ -191,26 +192,44 @@ export default function Workspace() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (!e.ctrlKey || !e.shiftKey || e.code !== 'KeyC') return;
-      if (useWorkspaceStore.getState().devMode) return; // Let DevTools open
+      log('[Copy] Ctrl+Shift+C detected', { key: e.key, code: e.code, ctrlKey: e.ctrlKey, shiftKey: e.shiftKey });
+
+      const devMode = useWorkspaceStore.getState().devMode;
+      if (devMode) {
+        log('[Copy] devMode=true, skipping (letting DevTools open)');
+        return;
+      }
 
       e.preventDefault();
+
       // Check text selection (works for Monaco, preview, etc.)
       const textSel = document.getSelection()?.toString();
+      log('[Copy] DOM selection:', JSON.stringify(textSel || ''));
+
       if (textSel) {
         navigator.clipboard.writeText(textSel).then(() => {
+          log('[Copy] DOM text copied to clipboard, length:', textSel.length);
           import('react-hot-toast').then(m => m.default.success('Copied'));
+        }).catch(err => {
+          log('[Copy] clipboard.writeText FAILED for DOM selection:', err);
         });
         return;
       }
-      // Check terminal selection
-      import('../components/terminal/Terminal').then(m => {
-        const termSel = m.getAnyTerminalSelection?.();
-        if (termSel) {
-          navigator.clipboard.writeText(termSel).then(() => {
-            import('react-hot-toast').then(t => t.default.success('Copied'));
-          });
-        }
-      });
+
+      // Check terminal selection (SYNC — static import, keeps user-gesture context)
+      const termSel = getAnyTerminalSelection();
+      log('[Copy] Terminal selection:', JSON.stringify(termSel || ''));
+
+      if (termSel) {
+        navigator.clipboard.writeText(termSel).then(() => {
+          log('[Copy] Terminal text copied to clipboard, length:', termSel.length);
+          import('react-hot-toast').then(m => m.default.success('Copied'));
+        }).catch(err => {
+          log('[Copy] clipboard.writeText FAILED for terminal selection:', err);
+        });
+      } else {
+        log('[Copy] No selection found (neither DOM nor terminal)');
+      }
     };
     window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);
