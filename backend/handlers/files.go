@@ -9,8 +9,10 @@ import (
 	"io/fs"
 	"net/http"
 	"os"
+	"log"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"syscall"
 
@@ -476,6 +478,7 @@ func (h *FilesHandler) ConvertToPDF(c *gin.Context) {
 	// Cache key based on file path + mod time
 	cacheDir := "/tmp/nebulide-pdf-cache"
 	os.MkdirAll(cacheDir, 0755)
+	evictPdfCache(cacheDir, 500<<20, 300<<20) // max 500 MiB, shrink to 300 MiB
 	cacheKey := md5Hash(fullPath + info.ModTime().String())
 	cachedPdf := filepath.Join(cacheDir, cacheKey+".pdf")
 
@@ -546,6 +549,59 @@ func copyFileContents(src, dst string) error {
 func md5Hash(s string) string {
 	h := md5.Sum([]byte(s))
 	return fmt.Sprintf("%x", h)
+}
+
+// evictPdfCache removes oldest cached PDFs when total size exceeds maxBytes,
+// shrinking down to targetBytes.
+func evictPdfCache(cacheDir string, maxBytes, targetBytes int64) {
+	entries, err := os.ReadDir(cacheDir)
+	if err != nil {
+		return
+	}
+
+	type cachedFile struct {
+		path    string
+		size    int64
+		modTime int64 // UnixNano
+	}
+
+	var files []cachedFile
+	var totalSize int64
+	for _, e := range entries {
+		if e.IsDir() {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		f := cachedFile{
+			path:    filepath.Join(cacheDir, e.Name()),
+			size:    info.Size(),
+			modTime: info.ModTime().UnixNano(),
+		}
+		files = append(files, f)
+		totalSize += f.size
+	}
+
+	if totalSize <= maxBytes {
+		return
+	}
+
+	// Sort by modTime ascending (oldest first)
+	sort.Slice(files, func(i, j int) bool {
+		return files[i].modTime < files[j].modTime
+	})
+
+	for _, f := range files {
+		if totalSize <= targetBytes {
+			break
+		}
+		if err := os.Remove(f.path); err == nil {
+			totalSize -= f.size
+			log.Printf("[PdfCache] evicted %s (%d bytes), remaining %d bytes", f.path, f.size, totalSize)
+		}
+	}
 }
 
 // ---------- Copy ----------

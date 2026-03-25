@@ -40,3 +40,6 @@ _ssh_check.js
 
 # Claude Code (contains credentials)
 CLAUDE.md
+
+# Backups
+backups/

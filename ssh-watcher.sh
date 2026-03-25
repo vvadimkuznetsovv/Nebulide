@@ -40,13 +40,14 @@ tail -n 0 -F "$LOG" 2>/dev/null | while read -r line; do
     IP=$(echo "$line" | grep -oP 'from \K[\d.]+')
     PORT=$(echo "$line" | grep -oP 'port \K\d+')
     if should_notify "$IP"; then
-      send_tg "❌ <b>SSH попытка входа</b>
-🟧🟧🟧🟧🟧🟧🟧🟧🟧🟧
+      send_tg "❌ <b>SSH ОТКЛОНЕНО — неверный пароль</b>
+⬛⬛⬛⬛⬛⬛⬛⬛⬛⬛
+🚫 Вход НЕ выполнен
 👤 <code>${USER:-unknown}</code>
 🌐 <code>${IP:-unknown}</code>
 🔌 ${PORT:-?}
 🕐 $(date '+%Y-%m-%d %H:%M:%S %Z')
-🟧🟧🟧🟧🟧🟧🟧🟧🟧🟧"
+⬛⬛⬛⬛⬛⬛⬛⬛⬛⬛"
     fi
   fi
 
@@ -54,12 +55,13 @@ tail -n 0 -F "$LOG" 2>/dev/null | while read -r line; do
     USER=$(echo "$line" | grep -oP 'Invalid user \K\S+')
     IP=$(echo "$line" | grep -oP 'from \K[\d.]+')
     if should_notify "$IP"; then
-      send_tg "⚠️ <b>SSH неизвестный пользователь</b>
-🟧🟧🟧🟧🟧🟧🟧🟧🟧🟧
+      send_tg "⚠️ <b>SSH ОТКЛОНЕНО — неизвестный пользователь</b>
+⬛⬛⬛⬛⬛⬛⬛⬛⬛⬛
+🚫 Вход НЕ выполнен
 👻 <code>${USER:-unknown}</code>
 🌐 <code>${IP:-unknown}</code>
 🕐 $(date '+%Y-%m-%d %H:%M:%S %Z')
-🟧🟧🟧🟧🟧🟧🟧🟧🟧🟧"
+⬛⬛⬛⬛⬛⬛⬛⬛⬛⬛"
     fi
   fi
 
@@ -67,12 +69,13 @@ tail -n 0 -F "$LOG" 2>/dev/null | while read -r line; do
     IP=$(echo "$line" | grep -oP 'from \K[\d.]+')
     USER=$(echo "$line" | grep -oP 'for \K\S+' | head -1)
     if should_notify "brute_${IP}"; then
-      send_tg "🚨 <b>SSH брутфорс</b>
+      send_tg "🚨 <b>SSH ОТКЛОНЕНО — брутфорс</b>
 🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥
+🚫 Вход НЕ выполнен
 👤 <code>${USER:-unknown}</code>
 🌐 <code>${IP:-unknown}</code>
 🕐 $(date '+%Y-%m-%d %H:%M:%S %Z')
-⛔ Превышен лимит попыток
+⛔ Превышен лимит попыток — IP забанен
 🟥🟥🟥🟥🟥🟥🟥🟥🟥🟥"
     fi
   fi

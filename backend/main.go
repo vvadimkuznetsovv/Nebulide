@@ -194,6 +194,7 @@ func main() {
 		admin.DELETE("/users/:id/workspace", adminHandler.DeleteWorkspace)
 		admin.GET("/stats", adminHandler.Stats)
 		admin.GET("/monitoring", adminHandler.Monitoring)
+		admin.DELETE("/kill-process/:pid", adminHandler.KillProcess)
 
 		// Files
 		protected.GET("/files", filesHandler.List)

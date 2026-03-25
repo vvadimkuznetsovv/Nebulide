@@ -8,6 +8,7 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
+	"syscall"
 	"os/exec"
 	"time"
 
@@ -246,15 +247,22 @@ func (h *AdminHandler) KillTerminal(c *gin.Context) {
 
 	userID := c.Param("id")
 	instanceID := c.Param("instanceId")
+	force := c.Query("force") == "true"
 
-	// Block kill if user is currently online (browser open)
-	if h.presence.IsOnline(userID) {
-		c.JSON(http.StatusConflict, gin.H{"error": "User is currently online"})
-		return
+	if !force {
+		if h.presence.IsOnline(userID) {
+			c.JSON(http.StatusConflict, gin.H{"error": "User is currently online"})
+			return
+		}
 	}
 
 	prefix := "term:" + userID + ":" + instanceID
-	killed, _ := h.terminal.AdminKillSessionsByPrefix(prefix)
+	var killed int
+	if force {
+		killed = h.terminal.KillSessionsByPrefix(prefix)
+	} else {
+		killed, _ = h.terminal.AdminKillSessionsByPrefix(prefix)
+	}
 	if killed > 0 {
 		c.JSON(http.StatusOK, gin.H{"message": "Terminal killed", "killed": killed})
 	} else {
@@ -359,14 +367,17 @@ func (h *AdminHandler) Stats(c *gin.Context) {
 // ── Monitoring ──
 
 type processInfo struct {
-	PID        int     `json:"pid"`
-	Username   string  `json:"username"`
-	SessionKey string  `json:"session_key"`
-	InstanceID string  `json:"instance_id"`
-	Alive      bool    `json:"alive"`
-	CPUPercent float64 `json:"cpu_percent"`
-	MemoryRSS  int64   `json:"memory_rss_bytes"`
-	Command    string  `json:"command"`
+	PID         int     `json:"pid"`
+	UserID      string  `json:"user_id"`
+	Username    string  `json:"username"`
+	SessionKey  string  `json:"session_key"`
+	InstanceID  string  `json:"instance_id"`
+	Alive       bool    `json:"alive"`
+	CPUPercent  float64 `json:"cpu_percent"`
+	MemoryRSS   int64   `json:"memory_rss_bytes"`
+	Command     string  `json:"command"`
+	WriterCount int     `json:"writer_count"`
+	Status      string  `json:"status"` // "active", "hidden", "offline"
 }
 
 type monitoringResponse struct {
@@ -437,12 +448,21 @@ func (h *AdminHandler) Monitoring(c *gin.Context) {
 		if username == "" {
 			username = s.UserID
 		}
+		status := "offline"
+		if s.WriterCount > 0 {
+			status = "active"
+		} else if s.Alive {
+			status = "hidden"
+		}
 		pi := processInfo{
-			PID:        s.PID,
-			Username:   username,
-			SessionKey: s.Key,
-			InstanceID: s.InstanceID,
-			Alive:      s.Alive,
+			PID:         s.PID,
+			UserID:      s.UserID,
+			Username:    username,
+			SessionKey:  s.Key,
+			InstanceID:  s.InstanceID,
+			Alive:       s.Alive,
+			WriterCount: s.WriterCount,
+			Status:      status,
 		}
 		if runtime.GOOS == "linux" && s.PID > 0 {
 			pi.MemoryRSS, pi.Command = readProcInfo(s.PID)
@@ -455,6 +475,29 @@ func (h *AdminHandler) Monitoring(c *gin.Context) {
 		System:    sys,
 		Processes: processes,
 	})
+}
+
+// KillProcess kills a process by PID (admin only, force kill).
+func (h *AdminHandler) KillProcess(c *gin.Context) {
+	if !requireAdmin(c) {
+		return
+	}
+	pidStr := c.Param("pid")
+	pid, err := strconv.Atoi(pidStr)
+	if err != nil || pid <= 1 {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid PID"})
+		return
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Process not found"})
+		return
+	}
+	if err := proc.Signal(syscall.SIGKILL); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": fmt.Sprintf("Failed to kill: %v", err)})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"message": "Process killed", "pid": pid})
 }
 
 // readProcInfo reads RSS and command from /proc/{pid} (no CPU — handled by measureAllCPU).

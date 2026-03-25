@@ -54,6 +54,8 @@ export const deleteUser = (id: string) => api.delete(`/admin/users/${id}`);
 export const getUserTerminals = (id: string) => api.get<TerminalSession[]>(`/admin/users/${id}/terminals`);
 export const killTerminal = (userId: string, instanceId: string) =>
   api.delete(`/admin/users/${userId}/terminals/${instanceId}`);
+export const forceKillTerminal = (userId: string, instanceId: string) =>
+  api.delete(`/admin/users/${userId}/terminals/${instanceId}?force=true`);
 
 // Sessions
 export interface WorkspaceSession {
@@ -84,6 +86,7 @@ export const getStats = () => api.get<Stats>('/admin/stats');
 // Monitoring
 export interface ProcessInfo {
   pid: number;
+  user_id: string;
   username: string;
   session_key: string;
   instance_id: string;
@@ -91,6 +94,8 @@ export interface ProcessInfo {
   cpu_percent: number;
   memory_rss_bytes: number;
   command: string;
+  writer_count: number;
+  status: 'active' | 'hidden' | 'offline';
 }
 
 export interface SystemInfo {
@@ -111,3 +116,4 @@ export interface MonitoringData {
 }
 
 export const getMonitoring = () => api.get<MonitoringData>('/admin/monitoring');
+export const killProcess = (pid: number) => api.delete(`/admin/kill-process/${pid}`);
