@@ -32,7 +32,7 @@ function ProgressBar({ percent, color }: { percent: number; color: string }) {
 
 type SortKey = 'pid' | 'username' | 'cpu_percent' | 'memory_rss_bytes' | 'command' | 'status' | 'writer_count';
 type FilterType = 'all' | 'user' | 'system';
-type StatusFilter = 'all' | 'active' | 'hidden' | 'offline';
+type StatusFilter = 'all' | 'active' | 'hidden' | 'offline' | 'system';
 
 const ACID_GREEN = '#39ff14';
 
@@ -163,6 +163,7 @@ export default function Monitoring() {
   const statusBadge = (p: ProcessInfo) => {
     if (p.status === 'active') return <span className="badge active">Active ({p.writer_count})</span>;
     if (p.status === 'hidden') return <span className="badge warning">Hidden</span>;
+    if (p.status === 'system') return <span className="badge" style={{ background: 'rgba(100,100,255,0.15)', color: '#8888ff' }}>System</span>;
     return <span style={{ color: 'var(--text-muted)' }}>Offline</span>;
   };
 
@@ -294,6 +295,7 @@ export default function Monitoring() {
               <button style={filterBtnStyle(statusFilter === 'active')} onClick={() => setStatusFilter('active')}>Active</button>
               <button style={filterBtnStyle(statusFilter === 'hidden')} onClick={() => setStatusFilter('hidden')}>Hidden</button>
               <button style={filterBtnStyle(statusFilter === 'offline')} onClick={() => setStatusFilter('offline')}>Offline</button>
+              <button style={filterBtnStyle(statusFilter === 'system')} onClick={() => setStatusFilter('system')}>System</button>
 
               {/* Search */}
               <div style={{ position: 'relative' }}>

@@ -95,7 +95,7 @@ export interface ProcessInfo {
   memory_rss_bytes: number;
   command: string;
   writer_count: number;
-  status: 'active' | 'hidden' | 'offline';
+  status: 'active' | 'hidden' | 'offline' | 'system';
 }
 
 export interface SystemInfo {

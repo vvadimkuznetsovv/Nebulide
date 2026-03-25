@@ -1336,6 +1336,15 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
             </button>
             <button
               type="button"
+              className="terminal-toolbar-btn"
+              onPointerDown={(e) => e.preventDefault()}
+              onClick={() => { const s = sessions.get(instanceId); if (s) { s.xterm.reset(); sendKey('\x0c'); } }}
+              title="Redraw terminal"
+            >
+              ↻
+            </button>
+            <button
+              type="button"
               className={`terminal-toolbar-btn${row2Open ? ' active' : ''}`}
               onPointerDown={(e) => e.preventDefault()}
               onClick={() => setRow2Open((v) => {
@@ -1388,6 +1397,9 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
           </button>
           <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => sessions.get(instanceId)?.xterm.selectAll()}>
             Sel A
+          </button>
+          <button type="button" className="terminal-toolbar-btn" onPointerDown={(e) => e.preventDefault()} onClick={() => sendKey('\x0a')} title="Ctrl+J — Newline/Enter">
+            C-J
           </button>
           <div className="terminal-toolbar-sep" />
           <button type="button" className={`terminal-toolbar-btn${navKeysOpen ? ' active' : ''}`} onPointerDown={(e) => e.preventDefault()} onClick={() => setNavKeysOpen((v) => !v)} title="Navigation keys">

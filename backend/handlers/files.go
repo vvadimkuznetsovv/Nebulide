@@ -425,11 +425,12 @@ func (h *FilesHandler) ReadRaw(c *gin.Context) {
 	}
 
 	c.Header("Content-Type", contentType)
-	// Images are safe (rendered via <img> which blocks scripts) — no CSP sandbox needed
-	isImage := ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".gif" ||
-		ext == ".webp" || ext == ".svg" || ext == ".bmp" || ext == ".ico"
-	if !isImage {
-		// Sandbox file preview — block scripts in PDFs/etc from accessing page context (localStorage tokens)
+	// Images and PDFs are safe in iframes — no CSP sandbox needed
+	// PDFs need script access for pdf.js viewer on mobile
+	isSafe := ext == ".jpg" || ext == ".jpeg" || ext == ".png" || ext == ".gif" ||
+		ext == ".webp" || ext == ".svg" || ext == ".bmp" || ext == ".ico" || ext == ".pdf"
+	if !isSafe {
+		// Sandbox file preview — block scripts from accessing page context (localStorage tokens)
 		c.Header("Content-Security-Policy", "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data: blob:")
 	}
 	filename := filepath.Base(fullPath)
@@ -526,7 +527,6 @@ func servePDF(c *gin.Context, pdfPath, origName string) {
 	pdfName := strings.TrimSuffix(origName, filepath.Ext(origName)) + ".pdf"
 	c.Header("Content-Type", "application/pdf")
 	c.Header("Cache-Control", "no-store, no-cache, must-revalidate")
-	c.Header("Content-Security-Policy", "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data: blob:")
 	c.Header("Content-Disposition", fmt.Sprintf(`inline; filename="%s"`, pdfName))
 	c.File(pdfPath)
 }

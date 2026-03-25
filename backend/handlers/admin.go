@@ -425,24 +425,35 @@ func (h *AdminHandler) Monitoring(c *gin.Context) {
 		GoRoutines: runtime.NumGoroutine(),
 	}
 
-	// Collect PIDs for CPU measurement
-	var pids []int
+	// Build terminal PID set + collect all /proc PIDs
+	terminalPIDs := make(map[int]bool)
 	for _, s := range sessions {
-		if runtime.GOOS == "linux" && s.PID > 0 {
-			pids = append(pids, s.PID)
+		if s.PID > 0 {
+			terminalPIDs[s.PID] = true
+		}
+	}
+
+	// Scan all processes from /proc
+	var allPIDs []int
+	if runtime.GOOS == "linux" {
+		entries, _ := os.ReadDir("/proc")
+		for _, e := range entries {
+			if pid, err := strconv.Atoi(e.Name()); err == nil && pid > 0 {
+				allPIDs = append(allPIDs, pid)
+			}
 		}
 	}
 
 	// Single 500ms measurement window for ALL CPU (system + per-process)
 	var procCPU map[int]float64
 	if runtime.GOOS == "linux" {
-		sys.CPUPercent, procCPU = measureAllCPU(pids)
+		sys.CPUPercent, procCPU = measureAllCPU(allPIDs)
 		sys.MemTotal, sys.MemUsed, sys.MemPercent = readMemInfo()
 		sys.DiskTotal, sys.DiskUsed, sys.DiskPercent = readDiskInfo("/")
 	}
 
-	// Build process list
-	processes := make([]processInfo, 0, len(sessions))
+	// Build process list — terminal sessions first
+	processes := make([]processInfo, 0, len(sessions)+len(allPIDs))
 	for _, s := range sessions {
 		username := userMap[s.UserID]
 		if username == "" {
@@ -469,6 +480,28 @@ func (h *AdminHandler) Monitoring(c *gin.Context) {
 			pi.CPUPercent = procCPU[s.PID]
 		}
 		processes = append(processes, pi)
+	}
+
+	// Add non-terminal system processes (skip PID 1, kernel threads, already-listed terminal PIDs)
+	if runtime.GOOS == "linux" {
+		for _, pid := range allPIDs {
+			if pid <= 1 || terminalPIDs[pid] {
+				continue
+			}
+			rss, cmd := readProcInfo(pid)
+			if cmd == "" || rss == 0 {
+				continue // skip kernel threads and empty processes
+			}
+			processes = append(processes, processInfo{
+				PID:       pid,
+				Username:  "system",
+				Alive:     true,
+				Status:    "system",
+				MemoryRSS: rss,
+				Command:   cmd,
+				CPUPercent: procCPU[pid],
+			})
+		}
 	}
 
 	c.JSON(http.StatusOK, monitoringResponse{

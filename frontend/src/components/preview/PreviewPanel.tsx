@@ -159,13 +159,21 @@ export default function PreviewPanel() {
         )}
 
         {/* Document mode content */}
-        {activeTab?.type === 'pdf' && (
-          <iframe
-            src={getRawFileUrl(activeTab.filePath)}
-            className="w-full h-full border-0"
-            title={`PDF: ${activeTab.filePath.split('/').pop()}`}
-          />
-        )}
+        {activeTab?.type === 'pdf' && (() => {
+          const rawUrl = getRawFileUrl(activeTab.filePath);
+          const isMobile = window.innerWidth <= 640;
+          const pdfSrc = isMobile
+            ? `https://mozilla.github.io/pdf.js/web/viewer.html?file=${encodeURIComponent(window.location.origin + rawUrl)}`
+            : rawUrl;
+          return (
+            <iframe
+              src={pdfSrc}
+              className="w-full h-full border-0"
+              title={`PDF: ${activeTab.filePath.split('/').pop()}`}
+              sandbox={isMobile ? 'allow-scripts allow-same-origin' : undefined}
+            />
+          );
+        })()}
 
         {activeTab?.type === 'docx' && (
           <div className="h-full flex flex-col">
@@ -195,12 +203,21 @@ export default function PreviewPanel() {
               </span>
             </div>
             <div className="flex-1 overflow-hidden">
-              {pdfMode[activeTab.id] ? (
-                <iframe
-                  src={getConvertPdfUrl(activeTab.filePath)}
-                  className="w-full h-full border-0"
-                  title={`PDF: ${activeTab.filePath.split('/').pop()}`}
-                />
+              {pdfMode[activeTab.id] ? (() => {
+                const convertUrl = getConvertPdfUrl(activeTab.filePath);
+                const isMob = window.innerWidth <= 640;
+                const src = isMob
+                  ? `https://mozilla.github.io/pdf.js/web/viewer.html?file=${encodeURIComponent(window.location.origin + convertUrl)}`
+                  : convertUrl;
+                return (
+                  <iframe
+                    src={src}
+                    className="w-full h-full border-0"
+                    title={`PDF: ${activeTab.filePath.split('/').pop()}`}
+                    sandbox={isMob ? 'allow-scripts allow-same-origin' : undefined}
+                  />
+                );
+              })()
               ) : (
                 <DocxViewer filePath={activeTab.filePath} />
               )}
