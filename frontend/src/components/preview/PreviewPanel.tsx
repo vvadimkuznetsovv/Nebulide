@@ -217,8 +217,7 @@ export default function PreviewPanel() {
                     sandbox={isMob ? 'allow-scripts allow-same-origin' : undefined}
                   />
                 );
-              })()
-              ) : (
+              })() : (
                 <DocxViewer filePath={activeTab.filePath} />
               )}
             </div>
