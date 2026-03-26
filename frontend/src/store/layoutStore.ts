@@ -41,6 +41,7 @@ interface PanelVisibility {
   preview: boolean;
   terminal: boolean;
   pet: boolean;
+  llm: boolean;
 }
 
 interface DndState {
@@ -139,6 +140,27 @@ function saveToStorage(state: LayoutState) {
   } catch { /* ignore */ }
   // Debounced sync to server
   import('../utils/preferences').then(m => m.savePreferencesToServer()).catch(() => {});
+  // Cleanup orphan terminals — sessions in Map but not in layout tree
+  cleanupOrphanTerminals(state);
+}
+
+/** Destroy terminal sessions that exist in module-level Map but have no panel in layout tree. */
+function cleanupOrphanTerminals(state: LayoutState) {
+  const allPanelIds = getAllPanelIds(state.layout);
+  const layoutTerminalIds = new Set<string>();
+  for (const pid of allPanelIds) {
+    if (pid === 'terminal') layoutTerminalIds.add('default');
+    else if (isDetachedTerminal(pid)) {
+      const id = getDetachedTerminalId(pid);
+      if (id) layoutTerminalIds.add(id);
+    }
+  }
+  for (const instanceId of getActiveTerminalInstanceIds()) {
+    if (!layoutTerminalIds.has(instanceId)) {
+      console.log(`[Layout] cleanupOrphanTerminals: destroying orphan terminal "${instanceId}"`);
+      destroyTerminalSession(instanceId);
+    }
+  }
 }
 
 const defaultVisibility: PanelVisibility = {
@@ -148,6 +170,7 @@ const defaultVisibility: PanelVisibility = {
   preview: false,
   terminal: true,
   pet: false,
+  llm: false,
 };
 
 const stored = loadFromStorage();

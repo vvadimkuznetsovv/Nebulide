@@ -15,6 +15,8 @@ func Migrate() {
 		&models.RefreshToken{},
 		&models.Invite{},
 		&models.WorkspaceSession{},
+		&models.LLMSession{},
+		&models.LLMMessage{},
 	)
 	if err != nil {
 		log.Fatalf("Failed to run migrations: %v", err)

@@ -726,6 +726,10 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
   const [arrowBtnsOpen, setArrowBtnsOpen] = useState(false);
   const [shiftActive, setShiftActive] = useState(false);
   const [navKeysOpen, setNavKeysOpen] = useState(false);
+  const [voiceActive, setVoiceActive] = useState(false);
+  const [voiceText, setVoiceText] = useState('');
+  const [voiceProcessing, setVoiceProcessing] = useState(false);
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
   const [joystickTarget, setJoystickTarget] = useState<'cursor' | 'copymode' | null>(null);
   const [joystickMode, setJoystickMode] = useState<'start' | 'end'>('end');
   const [joystickPosition, setJoystickPosition] = useState<string>(() =>
@@ -1030,6 +1034,29 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
       s.ws.send(new TextEncoder().encode(data));
     }
   }, [instanceId]);
+
+  const toggleVoice = useCallback(() => {
+    if (voiceActive) {
+      recognitionRef.current?.stop();
+      setVoiceActive(false);
+      return;
+    }
+    const SR = window.SpeechRecognition || (window as unknown as { webkitSpeechRecognition: typeof SpeechRecognition }).webkitSpeechRecognition;
+    if (!SR) { toast.error('Speech recognition not supported in this browser'); return; }
+    const rec = new SR();
+    rec.continuous = true;
+    rec.interimResults = false;
+    rec.lang = navigator.language || 'en-US';
+    rec.onresult = (e: SpeechRecognitionEvent) => {
+      const text = e.results[e.results.length - 1][0].transcript;
+      setVoiceText(prev => prev ? prev + ' ' + text : text);
+    };
+    rec.onerror = () => setVoiceActive(false);
+    rec.onend = () => setVoiceActive(false);
+    recognitionRef.current = rec;
+    rec.start();
+    setVoiceActive(true);
+  }, [voiceActive]);
 
   const pasteToTerminal = useCallback(() => {
     const s = sessions.get(instanceId);
@@ -1338,10 +1365,24 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
               type="button"
               className="terminal-toolbar-btn"
               onPointerDown={(e) => e.preventDefault()}
-              onClick={() => { const s = sessions.get(instanceId); if (s) { s.xterm.reset(); sendKey('\x0c'); } }}
+              onClick={() => { const s = sessions.get(instanceId); if (s) { s.xterm.refresh(0, s.xterm.rows - 1); sendKey('\x0c'); } }}
               title="Redraw terminal"
             >
               ↻
+            </button>
+            <button
+              type="button"
+              className={`terminal-toolbar-btn${voiceActive ? ' active' : ''}`}
+              onPointerDown={(e) => e.preventDefault()}
+              onClick={toggleVoice}
+              title="Voice input"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
+                <line x1="12" y1="19" x2="12" y2="23" />
+                <line x1="8" y1="23" x2="16" y2="23" />
+              </svg>
             </button>
             <button
               type="button"
@@ -1786,6 +1827,103 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
               <path d="M85 50 L75 45 L75 55 Z" className="joystick-arrow" />
             </svg>
             <div className="terminal-joystick-knob" />
+          </div>
+        </div>
+      )}
+
+      {/* Voice input panel */}
+      {(voiceActive || voiceText) && (
+        <div className="voice-panel" style={{
+          padding: '6px 8px',
+          borderBottom: '1px solid var(--glass-border)',
+          background: 'rgba(127, 0, 255, 0.05)',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '4px',
+          maxHeight: '120px',
+        }}>
+          <textarea
+            className="glass-input"
+            value={voiceText}
+            onChange={(e) => setVoiceText(e.target.value)}
+            placeholder={voiceActive ? 'Listening...' : 'Edit voice input...'}
+            style={{
+              resize: 'none',
+              minHeight: '40px',
+              maxHeight: '80px',
+              overflowY: 'auto',
+              fontSize: '12px',
+              padding: '4px 8px',
+              background: 'rgba(0,0,0,0.3)',
+              border: '1px solid var(--glass-border)',
+              borderRadius: '6px',
+              color: 'var(--text-primary)',
+              fontFamily: 'inherit',
+            }}
+          />
+          <div style={{ display: 'flex', gap: '4px' }}>
+            {/* Cancel */}
+            <button type="button" className="terminal-toolbar-btn" title="Cancel"
+              onPointerDown={(e) => e.preventDefault()}
+              onClick={() => { recognitionRef.current?.stop(); setVoiceActive(false); setVoiceText(''); }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+            {/* Enhance */}
+            <button type="button" className={`terminal-toolbar-btn${voiceProcessing ? ' active' : ''}`} title="Enhance prompt"
+              onPointerDown={(e) => e.preventDefault()}
+              disabled={voiceProcessing || !voiceText.trim()}
+              onClick={async () => {
+                if (!voiceText.trim()) return;
+                setVoiceProcessing(true);
+                try {
+                  const res = await api.post<{ result: string }>('/llm/enhance', { text: voiceText });
+                  setVoiceText(res.data.result);
+                } catch { toast.error('Enhance failed'); }
+                setVoiceProcessing(false);
+              }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+              </svg>
+            </button>
+            {/* Punctuate */}
+            <button type="button" className={`terminal-toolbar-btn${voiceProcessing ? ' active' : ''}`} title="Add punctuation"
+              onPointerDown={(e) => e.preventDefault()}
+              disabled={voiceProcessing || !voiceText.trim()}
+              onClick={async () => {
+                if (!voiceText.trim()) return;
+                setVoiceProcessing(true);
+                try {
+                  const res = await api.post<{ result: string }>('/llm/punctuate', { text: voiceText });
+                  setVoiceText(res.data.result);
+                } catch { toast.error('Punctuate failed'); }
+                setVoiceProcessing(false);
+              }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="6" cy="18" r="1.5" fill="currentColor" /><circle cx="14" cy="18" r="1.5" fill="currentColor" />
+                <path d="M10 4c0 4-6 6-6 10" /><line x1="18" y1="4" x2="18" y2="14" />
+              </svg>
+            </button>
+            {/* Confirm */}
+            <button type="button" className="terminal-toolbar-btn" title="Send to terminal"
+              onPointerDown={(e) => e.preventDefault()}
+              disabled={!voiceText.trim()}
+              onClick={() => {
+                if (!voiceText.trim()) return;
+                const lines = voiceText.split('\n');
+                for (let i = 0; i < lines.length; i++) {
+                  if (i > 0) sendKey('\x0a');
+                  sendKey(lines[i]);
+                }
+                recognitionRef.current?.stop();
+                setVoiceActive(false);
+                setVoiceText('');
+              }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+            </button>
           </div>
         </div>
       )}

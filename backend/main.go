@@ -102,6 +102,7 @@ func main() {
 	claudeSessionsHandler := handlers.NewClaudeSessionsHandler(cfg)
 	syncHandler := handlers.NewSyncHandler(cfg, presenceService, terminalService)
 	hookHandler := handlers.NewHookHandler(cfg)
+	llmHandler := handlers.NewLLMHandler(cfg)
 
 	// Router
 	r := gin.Default()
@@ -170,6 +171,16 @@ func main() {
 		protected.PUT("/sessions/:id", sessionsHandler.Update)
 		protected.DELETE("/sessions/:id", sessionsHandler.Delete)
 		protected.GET("/sessions/:id/messages", sessionsHandler.Messages)
+
+		// LLM
+		protected.GET("/llm/sessions", llmHandler.ListSessions)
+		protected.POST("/llm/sessions", llmHandler.CreateSession)
+		protected.DELETE("/llm/sessions/:id", llmHandler.DeleteSession)
+		protected.GET("/llm/sessions/:id/messages", llmHandler.GetMessages)
+		protected.POST("/llm/chat", llmHandler.Chat)
+		protected.POST("/llm/punctuate", llmHandler.Punctuate)
+		protected.POST("/llm/enhance", llmHandler.Enhance)
+		protected.POST("/llm/vision", llmHandler.Vision)
 
 		// Workspace sessions
 		protected.GET("/workspace-sessions/latest", workspaceSessionsHandler.Latest)

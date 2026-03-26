@@ -9,6 +9,7 @@ import CodeEditor from '../editor/CodeEditor';
 import PreviewPanel from '../preview/PreviewPanel';
 import TerminalComponent from '../terminal/Terminal';
 import TamagotchiPanel from '../pet/TamagotchiPanel';
+import LLMPanel from '../llm/LLMPanel';
 
 const basePanelIcons: Record<BasePanelId, React.ReactNode> = {
   chat: (
@@ -49,6 +50,11 @@ const basePanelIcons: Record<BasePanelId, React.ReactNode> = {
       <path d="M10 13a2 2 0 0 0 4 0" />
     </svg>
   ),
+  llm: (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8z" />
+    </svg>
+  ),
 };
 
 const basePanelTitles: Record<BasePanelId, string> = {
@@ -58,6 +64,7 @@ const basePanelTitles: Record<BasePanelId, string> = {
   preview: 'Preview',
   terminal: 'Terminal',
   pet: 'Pet',
+  llm: 'LLM Chat',
 };
 
 // Dynamic icon lookup — detached editors use the code icon, detached terminals use the terminal icon
@@ -136,6 +143,9 @@ export default function PanelContent({ panelId }: { panelId: PanelId }) {
 
     case 'pet':
       return <TamagotchiPanel />;
+
+    case 'llm':
+      return <LLMPanel />;
 
     default:
       return null;

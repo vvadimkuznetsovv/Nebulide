@@ -7,6 +7,7 @@ import { emitActivity } from '../../utils/activityBus';
 import { sendSyncMessage } from '../../utils/syncBridge';
 import toast from 'react-hot-toast';
 import { log } from '../../utils/logger';
+import LLMPanel from '../llm/LLMPanel';
 
 interface ChatPanelProps {
   sessionId: string | null;
@@ -155,6 +156,7 @@ const FolderIcon = ({ open }: { open?: boolean }) => (
 // ── Component ──
 
 export default function ChatPanel(_props: ChatPanelProps) {
+  const [chatMode, setChatMode] = useState<'claude' | 'llm'>('claude');
   const [projects, setProjects] = useState<ClaudeProject[]>([]);
   const [plans, setPlans] = useState<ClaudePlan[]>([]);
   const [expandedPlan, setExpandedPlan] = useState<string | null>(null);
@@ -479,6 +481,44 @@ export default function ChatPanel(_props: ChatPanelProps) {
       flex: 1, display: 'flex', flexDirection: 'column', height: '100%',
       overflow: 'hidden',
     }}>
+      {/* Mode tabs */}
+      <div style={{
+        display: 'flex', gap: 4, padding: '6px 12px',
+        borderBottom: '1px solid var(--glass-border)', flexShrink: 0,
+      }}>
+        <button
+          type="button"
+          className="btn-glass"
+          onClick={() => setChatMode('claude')}
+          style={{
+            padding: '4px 12px', borderRadius: 6, fontSize: 11, fontWeight: 500,
+            background: chatMode === 'claude' ? 'rgba(127, 0, 255, 0.2)' : 'rgba(255,255,255,0.04)',
+            border: `1px solid ${chatMode === 'claude' ? 'rgba(127, 0, 255, 0.4)' : 'var(--glass-border)'}`,
+            color: chatMode === 'claude' ? 'var(--accent-bright)' : 'var(--text-muted)',
+          }}
+        >Claude</button>
+        <button
+          type="button"
+          className="btn-glass"
+          onClick={() => setChatMode('llm')}
+          style={{
+            padding: '4px 12px', borderRadius: 6, fontSize: 11, fontWeight: 500,
+            background: chatMode === 'llm' ? 'rgba(127, 0, 255, 0.2)' : 'rgba(255,255,255,0.04)',
+            border: `1px solid ${chatMode === 'llm' ? 'rgba(127, 0, 255, 0.4)' : 'var(--glass-border)'}`,
+            color: chatMode === 'llm' ? 'var(--accent-bright)' : 'var(--text-muted)',
+          }}
+        >LLM</button>
+      </div>
+
+      {/* LLM mode */}
+      {chatMode === 'llm' && (
+        <div style={{ flex: 1, overflow: 'hidden' }}>
+          <LLMPanel />
+        </div>
+      )}
+
+      {/* Claude mode */}
+      {chatMode === 'claude' && <>
       {/* Header */}
       <div style={{
         padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -1243,6 +1283,7 @@ export default function ChatPanel(_props: ChatPanelProps) {
           </div>
         )}
       </div>
+      </>}
     </div>
   );
 }

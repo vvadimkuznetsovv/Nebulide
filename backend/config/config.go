@@ -36,6 +36,8 @@ type Config struct {
 
 	TelegramBotToken string
 	TelegramAPIURL   string
+
+	NvidiaAPIKey string
 }
 
 func Load() *Config {
@@ -68,6 +70,8 @@ func Load() *Config {
 
 		TelegramBotToken: getEnv("TELEGRAM_BOT_TOKEN", ""),
 		TelegramAPIURL:   getEnv("TELEGRAM_API_URL", ""),
+
+		NvidiaAPIKey: getEnv("NVIDIA_API_KEY", ""),
 	}
 }
 

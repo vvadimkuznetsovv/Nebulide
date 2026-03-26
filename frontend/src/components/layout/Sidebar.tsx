@@ -57,7 +57,7 @@ function CopyRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-const allPanels: BasePanelId[] = ['chat', 'files', 'editor', 'preview', 'terminal', 'pet'];
+const allPanels: BasePanelId[] = ['chat', 'files', 'editor', 'preview', 'terminal', 'pet', 'llm'];
 
 /* ─────────────────────── Settings Modal ─────────────────────── */
 
@@ -630,7 +630,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
         </div>
 
         {/* Panel toggles */}
-        <div className="px-3 py-2 flex items-center gap-1.5">
+        <div className="px-3 py-2 flex items-center gap-1.5 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
           {allPanels.map((panel) => {
             const isTerminal = panel === 'terminal';
             const anyTerminalVisible = isTerminal
