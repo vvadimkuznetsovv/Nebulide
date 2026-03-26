@@ -27,16 +27,17 @@ func NewLLMHandler(cfg *config.Config) *LLMHandler {
 
 // ListSessions returns all LLM sessions for the user
 func (h *LLMHandler) ListSessions(c *gin.Context) {
-	userID := c.GetString("user_id")
+	rawUID, _ := c.Get("user_id")
+	uid := rawUID.(uuid.UUID)
 	sessions := make([]models.LLMSession, 0)
-	database.DB.Where("user_id = ?", userID).Order("updated_at DESC").Find(&sessions)
+	database.DB.Where("user_id = ?", uid).Order("updated_at DESC").Find(&sessions)
 	c.JSON(http.StatusOK, sessions)
 }
 
 // CreateSession creates a new LLM chat session
 func (h *LLMHandler) CreateSession(c *gin.Context) {
-	userID := c.GetString("user_id")
-	uid, _ := uuid.Parse(userID)
+	rawUID, _ := c.Get("user_id")
+	uid := rawUID.(uuid.UUID)
 
 	var body struct {
 		Title string `json:"title"`
@@ -65,11 +66,12 @@ func (h *LLMHandler) CreateSession(c *gin.Context) {
 
 // DeleteSession deletes a session and its messages
 func (h *LLMHandler) DeleteSession(c *gin.Context) {
-	userID := c.GetString("user_id")
+	rawUID, _ := c.Get("user_id")
+	uid := rawUID.(uuid.UUID)
 	sessionID := c.Param("id")
 
 	var session models.LLMSession
-	if err := database.DB.Where("id = ? AND user_id = ?", sessionID, userID).First(&session).Error; err != nil {
+	if err := database.DB.Where("id = ? AND user_id = ?", sessionID, uid).First(&session).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
 		return
 	}
@@ -81,11 +83,12 @@ func (h *LLMHandler) DeleteSession(c *gin.Context) {
 
 // GetMessages returns all messages for a session
 func (h *LLMHandler) GetMessages(c *gin.Context) {
-	userID := c.GetString("user_id")
+	rawUID, _ := c.Get("user_id")
+	uid := rawUID.(uuid.UUID)
 	sessionID := c.Param("id")
 
 	var session models.LLMSession
-	if err := database.DB.Where("id = ? AND user_id = ?", sessionID, userID).First(&session).Error; err != nil {
+	if err := database.DB.Where("id = ? AND user_id = ?", sessionID, uid).First(&session).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
 		return
 	}
@@ -103,7 +106,8 @@ func (h *LLMHandler) GetMessages(c *gin.Context) {
 
 // TrimContext marks old messages as out-of-context, keeping last N in context
 func (h *LLMHandler) TrimContext(c *gin.Context) {
-	userID := c.GetString("user_id")
+	rawUID, _ := c.Get("user_id")
+	uid := rawUID.(uuid.UUID)
 	sessionID := c.Param("id")
 
 	var body struct {
@@ -115,7 +119,7 @@ func (h *LLMHandler) TrimContext(c *gin.Context) {
 	}
 
 	var session models.LLMSession
-	if err := database.DB.Where("id = ? AND user_id = ?", sessionID, userID).First(&session).Error; err != nil {
+	if err := database.DB.Where("id = ? AND user_id = ?", sessionID, uid).First(&session).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
 		return
 	}
@@ -146,8 +150,8 @@ func (h *LLMHandler) Chat(c *gin.Context) {
 		return
 	}
 
-	userID := c.GetString("user_id")
-	uid, _ := uuid.Parse(userID)
+	rawUID, _ := c.Get("user_id")
+	uid := rawUID.(uuid.UUID)
 
 	var body struct {
 		SessionID        string `json:"session_id" binding:"required"`
