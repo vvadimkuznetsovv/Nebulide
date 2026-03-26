@@ -104,6 +104,7 @@ export default function LLMPanel() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
+  const mediaStreamRef = useRef<MediaStream | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -250,13 +251,19 @@ export default function LLMPanel() {
   };
 
   // Voice
+  const stopVoiceStream = useCallback(() => {
+    mediaStreamRef.current?.getTracks().forEach(t => t.stop());
+    mediaStreamRef.current = null;
+  }, []);
+
   const toggleVoice = useCallback(async () => {
-    if (voiceActive) { recognitionRef.current?.stop(); setVoiceActive(false); return; }
+    if (voiceActive) { recognitionRef.current?.stop(); stopVoiceStream(); setVoiceActive(false); return; }
     const SR = window.SpeechRecognition || (window as unknown as { webkitSpeechRecognition: typeof SpeechRecognition }).webkitSpeechRecognition;
     if (!SR) { toast.error('Speech recognition not supported', { duration: 4000 }); return; }
+    let stream: MediaStream;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      stream.getTracks().forEach(t => t.stop());
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
     } catch {
       toast.error('Microphone access denied. Check site permissions in browser settings.', { duration: 5000 });
       return;
@@ -270,15 +277,16 @@ export default function LLMPanel() {
         const text = e.results[e.results.length - 1][0].transcript;
         setInput((prev) => prev ? prev + ' ' + text : text);
       };
-      rec.onerror = () => setVoiceActive(false);
-      rec.onend = () => setVoiceActive(false);
+      rec.onerror = () => { stopVoiceStream(); setVoiceActive(false); };
+      rec.onend = () => { stopVoiceStream(); setVoiceActive(false); };
       recognitionRef.current = rec;
       rec.start();
       setVoiceActive(true);
     } catch (e) {
+      stopVoiceStream();
       toast.error('Voice input failed: ' + String(e), { duration: 4000 });
     }
-  }, [voiceActive]);
+  }, [voiceActive, stopVoiceStream]);
 
   const handleTrim = useCallback(async (keep: number) => {
     if (!activeSessionId) return;

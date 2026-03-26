@@ -729,6 +729,7 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
   const [voiceActive, setVoiceActive] = useState(false);
   const [voiceText, setVoiceText] = useState('');
   const [voiceProcessing, setVoiceProcessing] = useState(false);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const [joystickTarget, setJoystickTarget] = useState<'cursor' | 'copymode' | null>(null);
   const [joystickMode, setJoystickMode] = useState<'start' | 'end'>('end');
@@ -1035,21 +1036,28 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
     }
   }, [instanceId]);
 
+  const stopVoiceStream = useCallback(() => {
+    mediaStreamRef.current?.getTracks().forEach(t => t.stop());
+    mediaStreamRef.current = null;
+  }, []);
+
   const toggleVoice = useCallback(async () => {
     if (voiceActive) {
       recognitionRef.current?.stop();
+      stopVoiceStream();
       setVoiceActive(false);
       return;
     }
     const SR = window.SpeechRecognition || (window as unknown as { webkitSpeechRecognition: typeof SpeechRecognition }).webkitSpeechRecognition;
     log('[Voice] SpeechRecognition available:', !!SR);
     if (!SR) { toast.error('Speech recognition not supported', { duration: 4000 }); return; }
-    // Request microphone permission explicitly
+    // Request microphone permission — keep stream alive for desktop Chrome
+    let stream: MediaStream;
     try {
       log('[Voice] Requesting getUserMedia...');
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      log('[Voice] getUserMedia granted, stopping tracks');
-      stream.getTracks().forEach(t => t.stop());
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
+      log('[Voice] getUserMedia granted, keeping stream alive');
     } catch (err) {
       log('[Voice] getUserMedia DENIED:', err);
       toast.error('Microphone access denied. Check site permissions in browser settings.', { duration: 5000 });
@@ -1066,15 +1074,16 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
         log('[Voice] Result:', text);
         setVoiceText(prev => prev ? prev + ' ' + text : text);
       };
-      rec.onerror = (e) => { log('[Voice] Error:', e); setVoiceActive(false); };
-      rec.onend = () => { log('[Voice] Ended'); setVoiceActive(false); };
+      rec.onerror = (e) => { log('[Voice] Error:', e); stopVoiceStream(); setVoiceActive(false); };
+      rec.onend = () => { log('[Voice] Ended'); stopVoiceStream(); setVoiceActive(false); };
       recognitionRef.current = rec;
       rec.start();
       setVoiceActive(true);
     } catch (e) {
+      stopVoiceStream();
       toast.error('Voice input failed: ' + String(e), { duration: 4000 });
     }
-  }, [voiceActive]);
+  }, [voiceActive, stopVoiceStream]);
 
   const pasteToTerminal = useCallback(() => {
     const s = sessions.get(instanceId);
