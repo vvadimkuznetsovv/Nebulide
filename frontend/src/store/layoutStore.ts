@@ -283,6 +283,14 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
           : insertPanelAtEdge(state.layout, 'pet', 'bottom');
       }
 
+      // Auto-insert llm panel into layout if not present
+      if (!wasVisible && panelId === 'llm' && !findPanelNode(state.layout, 'llm')) {
+        const chatNode = findPanelNode(state.layout, 'chat');
+        newLayout = chatNode
+          ? insertPanelIntoNode(newLayout, 'llm', chatNode.id)
+          : insertPanelAtEdge(newLayout, 'llm', 'right');
+      }
+
       if (wasVisible) {
         // If hiding the currently active tab in a multi-tab node → switch to next visible tab
         const node = findPanelNode(state.layout, panelId);

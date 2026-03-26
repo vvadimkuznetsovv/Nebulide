@@ -1035,7 +1035,7 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
     }
   }, [instanceId]);
 
-  const toggleVoice = useCallback(() => {
+  const toggleVoice = useCallback(async () => {
     if (voiceActive) {
       recognitionRef.current?.stop();
       setVoiceActive(false);
@@ -1043,19 +1043,31 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
     }
     const SR = window.SpeechRecognition || (window as unknown as { webkitSpeechRecognition: typeof SpeechRecognition }).webkitSpeechRecognition;
     if (!SR) { toast.error('Speech recognition not supported in this browser'); return; }
-    const rec = new SR();
-    rec.continuous = true;
-    rec.interimResults = false;
-    rec.lang = navigator.language || 'en-US';
-    rec.onresult = (e: SpeechRecognitionEvent) => {
-      const text = e.results[e.results.length - 1][0].transcript;
-      setVoiceText(prev => prev ? prev + ' ' + text : text);
-    };
-    rec.onerror = () => setVoiceActive(false);
-    rec.onend = () => setVoiceActive(false);
-    recognitionRef.current = rec;
-    rec.start();
-    setVoiceActive(true);
+    // Request microphone permission explicitly
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach(t => t.stop()); // release immediately, just needed permission
+    } catch {
+      toast.error('Microphone access denied');
+      return;
+    }
+    try {
+      const rec = new SR();
+      rec.continuous = true;
+      rec.interimResults = false;
+      rec.lang = navigator.language || 'en-US';
+      rec.onresult = (e: SpeechRecognitionEvent) => {
+        const text = e.results[e.results.length - 1][0].transcript;
+        setVoiceText(prev => prev ? prev + ' ' + text : text);
+      };
+      rec.onerror = () => setVoiceActive(false);
+      rec.onend = () => setVoiceActive(false);
+      recognitionRef.current = rec;
+      rec.start();
+      setVoiceActive(true);
+    } catch (e) {
+      toast.error('Voice input failed: ' + String(e));
+    }
   }, [voiceActive]);
 
   const pasteToTerminal = useCallback(() => {

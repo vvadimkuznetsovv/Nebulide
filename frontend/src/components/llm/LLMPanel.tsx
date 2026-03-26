@@ -250,23 +250,34 @@ export default function LLMPanel() {
   };
 
   // Voice
-  const toggleVoice = useCallback(() => {
+  const toggleVoice = useCallback(async () => {
     if (voiceActive) { recognitionRef.current?.stop(); setVoiceActive(false); return; }
     const SR = window.SpeechRecognition || (window as unknown as { webkitSpeechRecognition: typeof SpeechRecognition }).webkitSpeechRecognition;
     if (!SR) { toast.error('Speech recognition not supported'); return; }
-    const rec = new SR();
-    rec.continuous = true;
-    rec.interimResults = false;
-    rec.lang = navigator.language || 'en-US';
-    rec.onresult = (e: SpeechRecognitionEvent) => {
-      const text = e.results[e.results.length - 1][0].transcript;
-      setInput((prev) => prev ? prev + ' ' + text : text);
-    };
-    rec.onerror = () => setVoiceActive(false);
-    rec.onend = () => setVoiceActive(false);
-    recognitionRef.current = rec;
-    rec.start();
-    setVoiceActive(true);
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream.getTracks().forEach(t => t.stop());
+    } catch {
+      toast.error('Microphone access denied');
+      return;
+    }
+    try {
+      const rec = new SR();
+      rec.continuous = true;
+      rec.interimResults = false;
+      rec.lang = navigator.language || 'en-US';
+      rec.onresult = (e: SpeechRecognitionEvent) => {
+        const text = e.results[e.results.length - 1][0].transcript;
+        setInput((prev) => prev ? prev + ' ' + text : text);
+      };
+      rec.onerror = () => setVoiceActive(false);
+      rec.onend = () => setVoiceActive(false);
+      recognitionRef.current = rec;
+      rec.start();
+      setVoiceActive(true);
+    } catch (e) {
+      toast.error('Voice input failed: ' + String(e));
+    }
   }, [voiceActive]);
 
   const handleTrim = useCallback(async (keep: number) => {
