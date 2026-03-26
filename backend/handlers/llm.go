@@ -28,7 +28,7 @@ func NewLLMHandler(cfg *config.Config) *LLMHandler {
 // ListSessions returns all LLM sessions for the user
 func (h *LLMHandler) ListSessions(c *gin.Context) {
 	userID := c.GetString("user_id")
-	var sessions []models.LLMSession
+	sessions := make([]models.LLMSession, 0)
 	database.DB.Where("user_id = ?", userID).Order("updated_at DESC").Find(&sessions)
 	c.JSON(http.StatusOK, sessions)
 }
@@ -90,7 +90,7 @@ func (h *LLMHandler) GetMessages(c *gin.Context) {
 		return
 	}
 
-	var messages []models.LLMMessage
+	messages := make([]models.LLMMessage, 0)
 	database.DB.Where("session_id = ?", session.ID).Order("created_at ASC").Find(&messages)
 
 	// Calculate total chars for context warning
