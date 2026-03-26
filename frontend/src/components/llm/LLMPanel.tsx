@@ -6,6 +6,7 @@ import {
   getLLMMessages,
   sendLLMMessage,
   analyzeImage,
+  trimLLMContext,
   type LLMSession,
   type LLMMessage,
 } from '../../api/llm';
@@ -98,6 +99,8 @@ export default function LLMPanel() {
   const [webSearch, setWebSearch] = useState(false);
   const [attachedImage, setAttachedImage] = useState<{ file: File; preview: string } | null>(null);
   const [analyzingImage, setAnalyzingImage] = useState(false);
+  const [totalChars, setTotalChars] = useState(0);
+  const [showTrimConfirm, setShowTrimConfirm] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
@@ -112,7 +115,7 @@ export default function LLMPanel() {
 
   useEffect(() => {
     if (!activeSessionId) { setMessages([]); return; }
-    getLLMMessages(activeSessionId).then((r) => setMessages(r.data)).catch(() => {});
+    getLLMMessages(activeSessionId).then((r) => { setMessages(r.data.messages); setTotalChars(r.data.total_chars); }).catch(() => {});
   }, [activeSessionId]);
 
   useEffect(() => {
@@ -209,7 +212,7 @@ export default function LLMPanel() {
       (chunk) => { if (!abort.signal.aborted) setStreamContent((prev) => prev + chunk); },
       () => {
         setStreaming(false);
-        getLLMMessages(activeSessionId).then((r) => { setMessages(r.data); setStreamContent(''); });
+        getLLMMessages(activeSessionId).then((r) => { setMessages(r.data.messages); setStreamContent(''); setTotalChars(r.data.total_chars); });
         listLLMSessions().then((r) => setSessions(r.data));
       },
       (err) => { setStreaming(false); setStreamContent(''); if (!abort.signal.aborted) toast.error('LLM error: ' + err.slice(0, 100)); },
@@ -265,6 +268,18 @@ export default function LLMPanel() {
     rec.start();
     setVoiceActive(true);
   }, [voiceActive]);
+
+  const handleTrim = useCallback(async (keep: number) => {
+    if (!activeSessionId) return;
+    try {
+      await trimLLMContext(activeSessionId, keep);
+      const r = await getLLMMessages(activeSessionId);
+      setMessages(r.data.messages);
+      setTotalChars(r.data.total_chars);
+      setShowTrimConfirm(false);
+      toast.success(`Context trimmed, keeping last ${keep} messages`);
+    } catch { toast.error('Trim failed'); }
+  }, [activeSessionId]);
 
   const handleTransform = useCallback(async (endpoint: 'punctuate' | 'enhance') => {
     if (!input.trim() || processing) return;
@@ -381,6 +396,46 @@ export default function LLMPanel() {
         </div>
       )}
 
+      {/* Context warning */}
+      {totalChars > 250000 && !showTrimConfirm && (
+        <div className="px-3 py-1.5 shrink-0 flex items-center gap-2" style={{
+          background: 'rgba(255, 150, 0, 0.1)', borderBottom: '1px solid rgba(255, 150, 0, 0.3)',
+        }}>
+          <span className="text-[10px]" style={{ color: 'rgb(255, 180, 50)' }}>
+            ⚠️ Context approaching limit ({Math.round(totalChars / 1000)}k / ~300k chars)
+          </span>
+          <button type="button" className="btn-glass px-2 py-0.5 rounded text-[10px]"
+            onClick={() => setShowTrimConfirm(true)}
+            style={{ color: 'rgb(255, 180, 50)', border: '1px solid rgba(255, 150, 0, 0.3)' }}>
+            Trim context
+          </button>
+        </div>
+      )}
+
+      {/* Trim confirmation */}
+      {showTrimConfirm && (
+        <div className="px-3 py-2 shrink-0" style={{
+          background: 'rgba(255, 150, 0, 0.08)', borderBottom: '1px solid rgba(255, 150, 0, 0.2)',
+        }}>
+          <p className="text-[10px] mb-1.5" style={{ color: 'var(--text-secondary)' }}>
+            Old messages will be marked as out-of-context. History stays visible but AI won't see them. Keep last:
+          </p>
+          <div className="flex items-center gap-1.5">
+            {[10, 20, 40, 60].map((n) => (
+              <button key={n} type="button" className="btn-glass px-2 py-1 rounded text-[10px]"
+                onClick={() => handleTrim(n)}>
+                {n} msgs
+              </button>
+            ))}
+            <div className="flex-1" />
+            <button type="button" className="btn-glass px-2 py-1 rounded text-[10px]"
+              onClick={() => setShowTrimConfirm(false)} style={{ color: 'var(--text-muted)' }}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Messages */}
       <div className="flex-1 overflow-y-auto px-3 py-2 space-y-3">
         {displayMessages.length === 0 && !streaming && (
@@ -390,8 +445,21 @@ export default function LLMPanel() {
             </p>
           </div>
         )}
-        {displayMessages.map((msg) => (
-          <div key={msg.id} className={`group flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+        {displayMessages.map((msg, idx) => {
+          // Show context boundary divider
+          const prevMsg = idx > 0 ? displayMessages[idx - 1] : null;
+          const showBoundary = prevMsg && !prevMsg.in_context && msg.in_context;
+          return (
+          <div key={msg.id}>
+            {showBoundary && (
+              <div className="flex items-center gap-2 my-2">
+                <div className="flex-1 h-px" style={{ background: 'rgba(127, 0, 255, 0.3)' }} />
+                <span className="text-[8px] shrink-0" style={{ color: 'var(--accent)' }}>Context starts here</span>
+                <div className="flex-1 h-px" style={{ background: 'rgba(127, 0, 255, 0.3)' }} />
+              </div>
+            )}
+          <div className={`group flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+            style={msg.in_context === false ? { opacity: 0.4 } : {}}>
             <div className="relative max-w-[85%]">
               <div className="text-[9px] mb-0.5 px-1" style={{ color: 'var(--text-tertiary)' }}>
                 {msg.role === 'user' ? 'You' : 'AI'}
@@ -451,7 +519,9 @@ export default function LLMPanel() {
               )}
             </div>
           </div>
-        ))}
+          </div>
+          );
+        })}
         {streaming && streamContent && (
           <div className="flex justify-start">
             <div className="max-w-[85%]">

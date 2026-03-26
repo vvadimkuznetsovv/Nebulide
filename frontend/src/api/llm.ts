@@ -13,6 +13,7 @@ export interface LLMMessage {
   session_id: string;
   role: string;
   content: string;
+  in_context: boolean;
   created_at: string;
 }
 
@@ -26,7 +27,10 @@ export const deleteLLMSession = (id: string) =>
   api.delete(`/llm/sessions/${id}`);
 
 export const getLLMMessages = (id: string) =>
-  api.get<LLMMessage[]>(`/llm/sessions/${id}/messages`);
+  api.get<{ messages: LLMMessage[]; total_chars: number }>(`/llm/sessions/${id}/messages`);
+
+export const trimLLMContext = (id: string, keep: number) =>
+  api.post<{ trimmed: number; in_context: number }>(`/llm/sessions/${id}/trim`, { keep });
 
 export const analyzeImage = (image: string) =>
   api.post<{ description: string }>('/llm/vision', { image });

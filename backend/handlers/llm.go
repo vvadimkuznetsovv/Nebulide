@@ -92,7 +92,51 @@ func (h *LLMHandler) GetMessages(c *gin.Context) {
 
 	var messages []models.LLMMessage
 	database.DB.Where("session_id = ?", session.ID).Order("created_at ASC").Find(&messages)
-	c.JSON(http.StatusOK, messages)
+
+	// Calculate total chars for context warning
+	totalChars := 0
+	for _, m := range messages {
+		totalChars += len(m.Content)
+	}
+	c.JSON(http.StatusOK, gin.H{"messages": messages, "total_chars": totalChars})
+}
+
+// TrimContext marks old messages as out-of-context, keeping last N in context
+func (h *LLMHandler) TrimContext(c *gin.Context) {
+	userID := c.GetString("user_id")
+	sessionID := c.Param("id")
+
+	var body struct {
+		Keep int `json:"keep"`
+	}
+	c.ShouldBindJSON(&body)
+	if body.Keep < 2 {
+		body.Keep = 20
+	}
+
+	var session models.LLMSession
+	if err := database.DB.Where("id = ? AND user_id = ?", sessionID, userID).First(&session).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
+		return
+	}
+
+	// Get only in-context messages
+	var messages []models.LLMMessage
+	database.DB.Where("session_id = ? AND in_context = true", session.ID).Order("created_at ASC").Find(&messages)
+
+	if len(messages) <= body.Keep {
+		c.JSON(http.StatusOK, gin.H{"trimmed": 0, "in_context": len(messages)})
+		return
+	}
+
+	toTrim := messages[:len(messages)-body.Keep]
+	ids := make([]uuid.UUID, len(toTrim))
+	for i, m := range toTrim {
+		ids[i] = m.ID
+	}
+	database.DB.Model(&models.LLMMessage{}).Where("id IN ?", ids).Update("in_context", false)
+
+	c.JSON(http.StatusOK, gin.H{"trimmed": len(toTrim), "in_context": body.Keep})
 }
 
 // Chat sends a message and streams NVIDIA API response
@@ -133,9 +177,9 @@ func (h *LLMHandler) Chat(c *gin.Context) {
 	userMsg := models.LLMMessage{SessionID: sid, Role: "user", Content: finalContent}
 	database.DB.Create(&userMsg)
 
-	// Build messages array from history
+	// Build messages array from history (only in-context)
 	var history []models.LLMMessage
-	database.DB.Where("session_id = ?", sid).Order("created_at ASC").Find(&history)
+	database.DB.Where("session_id = ? AND in_context = true", sid).Order("created_at ASC").Find(&history)
 
 	type apiMsg struct {
 		Role    string `json:"role"`

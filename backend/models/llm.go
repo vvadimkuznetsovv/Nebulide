@@ -31,6 +31,7 @@ type LLMMessage struct {
 	SessionID uuid.UUID `gorm:"type:uuid;not null;index" json:"session_id"`
 	Role      string    `gorm:"size:50;not null" json:"role"`
 	Content   string    `gorm:"type:text;not null" json:"content"`
+	InContext bool      `gorm:"default:true" json:"in_context"`
 	CreatedAt time.Time `json:"created_at"`
 
 	Session LLMSession `gorm:"foreignKey:SessionID" json:"-"`

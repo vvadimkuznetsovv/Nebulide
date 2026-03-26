@@ -181,6 +181,7 @@ func main() {
 		protected.POST("/llm/punctuate", llmHandler.Punctuate)
 		protected.POST("/llm/enhance", llmHandler.Enhance)
 		protected.POST("/llm/vision", llmHandler.Vision)
+		protected.POST("/llm/sessions/:id/trim", llmHandler.TrimContext)
 
 		// Workspace sessions
 		protected.GET("/workspace-sessions/latest", workspaceSessionsHandler.Latest)
