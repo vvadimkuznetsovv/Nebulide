@@ -81,7 +81,7 @@ const TrashIcon = () => (
 );
 
 function copyToClipboard(text: string) {
-  navigator.clipboard.writeText(text).then(() => toast.success('Copied', { duration: 1000 })).catch(() => toast.error('Copy failed'));
+  navigator.clipboard.writeText(text).then(() => toast.success('Copied', { duration: 1000 })).catch(() => toast.error('Copy failed', { duration: 3000 }));
 }
 
 export default function LLMPanel() {
@@ -115,7 +115,7 @@ export default function LLMPanel() {
 
   useEffect(() => {
     if (!activeSessionId) { setMessages([]); return; }
-    getLLMMessages(activeSessionId).then((r) => { setMessages(r.data.messages); setTotalChars(r.data.total_chars); }).catch(() => {});
+    getLLMMessages(activeSessionId).then((r) => { setMessages(r.data.messages || []); setTotalChars(r.data.total_chars || 0); }).catch(() => {});
   }, [activeSessionId]);
 
   useEffect(() => {
@@ -135,7 +135,7 @@ export default function LLMPanel() {
       setSessions((prev) => [res.data, ...prev]);
       setActiveSessionId(res.data.id);
       setShowSessions(false);
-    } catch { toast.error('Failed to create chat'); }
+    } catch { toast.error('Failed to create chat', { duration: 4000 }); }
   }, []);
 
   const handleDeleteSession = useCallback(async (id: string, e: React.MouseEvent) => {
@@ -144,7 +144,7 @@ export default function LLMPanel() {
       await deleteLLMSession(id);
       setSessions((prev) => prev.filter((s) => s.id !== id));
       if (activeSessionId === id) { setActiveSessionId(null); setMessages([]); }
-    } catch { toast.error('Failed to delete chat'); }
+    } catch { toast.error('Failed to delete chat', { duration: 4000 }); }
   }, [activeSessionId]);
 
   // Stop streaming
@@ -187,7 +187,7 @@ export default function LLMPanel() {
         const visionRes = await analyzeImage(base64);
         imageDescription = visionRes.data.description;
       } catch {
-        toast.error('Failed to analyze image');
+        toast.error('Failed to analyze image', { duration: 4000 });
       }
       setAnalyzingImage(false);
     }
@@ -212,10 +212,10 @@ export default function LLMPanel() {
       (chunk) => { if (!abort.signal.aborted) setStreamContent((prev) => prev + chunk); },
       () => {
         setStreaming(false);
-        getLLMMessages(activeSessionId).then((r) => { setMessages(r.data.messages); setStreamContent(''); setTotalChars(r.data.total_chars); });
+        getLLMMessages(activeSessionId).then((r) => { setMessages(r.data.messages || []); setStreamContent(''); setTotalChars(r.data.total_chars || 0); });
         listLLMSessions().then((r) => setSessions(r.data));
       },
-      (err) => { setStreaming(false); setStreamContent(''); if (!abort.signal.aborted) toast.error('LLM error: ' + err.slice(0, 100)); },
+      (err) => { setStreaming(false); setStreamContent(''); if (!abort.signal.aborted) toast.error('LLM error: ' + err.slice(0, 100), { duration: 5000 }); },
       imageDescription || undefined,
     );
   }, [input, activeSessionId, streaming, webSearch, attachedImage]);
@@ -253,12 +253,12 @@ export default function LLMPanel() {
   const toggleVoice = useCallback(async () => {
     if (voiceActive) { recognitionRef.current?.stop(); setVoiceActive(false); return; }
     const SR = window.SpeechRecognition || (window as unknown as { webkitSpeechRecognition: typeof SpeechRecognition }).webkitSpeechRecognition;
-    if (!SR) { toast.error('Speech recognition not supported'); return; }
+    if (!SR) { toast.error('Speech recognition not supported', { duration: 4000 }); return; }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       stream.getTracks().forEach(t => t.stop());
     } catch {
-      toast.error('Microphone access denied');
+      toast.error('Microphone access denied. Check site permissions in browser settings.', { duration: 5000 });
       return;
     }
     try {
@@ -276,7 +276,7 @@ export default function LLMPanel() {
       rec.start();
       setVoiceActive(true);
     } catch (e) {
-      toast.error('Voice input failed: ' + String(e));
+      toast.error('Voice input failed: ' + String(e), { duration: 4000 });
     }
   }, [voiceActive]);
 
@@ -285,11 +285,11 @@ export default function LLMPanel() {
     try {
       await trimLLMContext(activeSessionId, keep);
       const r = await getLLMMessages(activeSessionId);
-      setMessages(r.data.messages);
-      setTotalChars(r.data.total_chars);
+      setMessages(r.data.messages || []);
+      setTotalChars(r.data.total_chars || 0);
       setShowTrimConfirm(false);
       toast.success(`Context trimmed, keeping last ${keep} messages`);
-    } catch { toast.error('Trim failed'); }
+    } catch { toast.error('Trim failed', { duration: 4000 }); }
   }, [activeSessionId]);
 
   const handleTransform = useCallback(async (endpoint: 'punctuate' | 'enhance') => {
@@ -298,7 +298,7 @@ export default function LLMPanel() {
     try {
       const res = await api.post<{ result: string }>(`/llm/${endpoint}`, { text: input });
       setInput(res.data.result);
-    } catch { toast.error(`${endpoint} failed`); }
+    } catch { toast.error(`${endpoint} failed`, { duration: 4000 }); }
     setProcessing(false);
     inputRef.current?.focus();
   }, [input, processing]);

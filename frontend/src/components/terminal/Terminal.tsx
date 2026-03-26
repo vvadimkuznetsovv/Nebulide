@@ -1042,13 +1042,17 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
       return;
     }
     const SR = window.SpeechRecognition || (window as unknown as { webkitSpeechRecognition: typeof SpeechRecognition }).webkitSpeechRecognition;
-    if (!SR) { toast.error('Speech recognition not supported in this browser'); return; }
+    log('[Voice] SpeechRecognition available:', !!SR);
+    if (!SR) { toast.error('Speech recognition not supported', { duration: 4000 }); return; }
     // Request microphone permission explicitly
     try {
+      log('[Voice] Requesting getUserMedia...');
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      stream.getTracks().forEach(t => t.stop()); // release immediately, just needed permission
-    } catch {
-      toast.error('Microphone access denied');
+      log('[Voice] getUserMedia granted, stopping tracks');
+      stream.getTracks().forEach(t => t.stop());
+    } catch (err) {
+      log('[Voice] getUserMedia DENIED:', err);
+      toast.error('Microphone access denied. Check site permissions in browser settings.', { duration: 5000 });
       return;
     }
     try {
@@ -1056,17 +1060,19 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
       rec.continuous = true;
       rec.interimResults = false;
       rec.lang = navigator.language || 'en-US';
+      log('[Voice] Starting recognition, lang:', rec.lang);
       rec.onresult = (e: SpeechRecognitionEvent) => {
         const text = e.results[e.results.length - 1][0].transcript;
+        log('[Voice] Result:', text);
         setVoiceText(prev => prev ? prev + ' ' + text : text);
       };
-      rec.onerror = () => setVoiceActive(false);
-      rec.onend = () => setVoiceActive(false);
+      rec.onerror = (e) => { log('[Voice] Error:', e); setVoiceActive(false); };
+      rec.onend = () => { log('[Voice] Ended'); setVoiceActive(false); };
       recognitionRef.current = rec;
       rec.start();
       setVoiceActive(true);
     } catch (e) {
-      toast.error('Voice input failed: ' + String(e));
+      toast.error('Voice input failed: ' + String(e), { duration: 4000 });
     }
   }, [voiceActive]);
 
@@ -1892,7 +1898,7 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
                 try {
                   const res = await api.post<{ result: string }>('/llm/enhance', { text: voiceText });
                   setVoiceText(res.data.result);
-                } catch { toast.error('Enhance failed'); }
+                } catch { toast.error('Enhance failed', { duration: 4000 }); }
                 setVoiceProcessing(false);
               }}>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1909,7 +1915,7 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
                 try {
                   const res = await api.post<{ result: string }>('/llm/punctuate', { text: voiceText });
                   setVoiceText(res.data.result);
-                } catch { toast.error('Punctuate failed'); }
+                } catch { toast.error('Punctuate failed', { duration: 4000 }); }
                 setVoiceProcessing(false);
               }}>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
