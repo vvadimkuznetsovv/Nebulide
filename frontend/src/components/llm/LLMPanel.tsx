@@ -110,7 +110,7 @@ export default function LLMPanel() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
-    listLLMSessions().then((r) => setSessions(r.data)).catch(() => {});
+    listLLMSessions().then((r) => setSessions(r.data || [])).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -213,7 +213,7 @@ export default function LLMPanel() {
       () => {
         setStreaming(false);
         getLLMMessages(activeSessionId).then((r) => { setMessages(r.data.messages || []); setStreamContent(''); setTotalChars(r.data.total_chars || 0); });
-        listLLMSessions().then((r) => setSessions(r.data));
+        listLLMSessions().then((r) => setSessions(r.data || []));
       },
       (err) => { setStreaming(false); setStreamContent(''); if (!abort.signal.aborted) toast.error('LLM error: ' + err.slice(0, 100), { duration: 5000 }); },
       imageDescription || undefined,

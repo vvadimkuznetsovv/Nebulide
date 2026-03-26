@@ -121,7 +121,7 @@ func (h *LLMHandler) TrimContext(c *gin.Context) {
 	}
 
 	// Get only in-context messages
-	var messages []models.LLMMessage
+	messages := make([]models.LLMMessage, 0)
 	database.DB.Where("session_id = ? AND in_context = true", session.ID).Order("created_at ASC").Find(&messages)
 
 	if len(messages) <= body.Keep {
@@ -178,7 +178,7 @@ func (h *LLMHandler) Chat(c *gin.Context) {
 	database.DB.Create(&userMsg)
 
 	// Build messages array from history (only in-context)
-	var history []models.LLMMessage
+	history := make([]models.LLMMessage, 0)
 	database.DB.Where("session_id = ? AND in_context = true", sid).Order("created_at ASC").Find(&history)
 
 	type apiMsg struct {
