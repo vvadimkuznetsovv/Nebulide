@@ -155,7 +155,7 @@ export default function LLMPanel() {
       // Keep partial response as a message
       setMessages((prev) => [...prev, {
         id: 'partial-' + Date.now(), session_id: activeSessionId || '',
-        role: 'assistant', content: streamContent + '\n\n[Stopped]', created_at: new Date().toISOString(),
+        role: 'assistant', content: streamContent + '\n\n[Stopped]', in_context: true, created_at: new Date().toISOString(),
       }]);
       setStreamContent('');
     }
@@ -195,7 +195,7 @@ export default function LLMPanel() {
     const displayContent = content || (imageDescription ? '[Image sent]' : '');
     const userMsg: LLMMessage = {
       id: 'temp-' + Date.now(), session_id: activeSessionId,
-      role: 'user', content: imageDescription ? `🖼️ ${displayContent}` : displayContent, created_at: new Date().toISOString(),
+      role: 'user', content: imageDescription ? `🖼️ ${displayContent}` : displayContent, in_context: true, created_at: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, userMsg]);
 
