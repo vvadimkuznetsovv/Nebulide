@@ -27,7 +27,7 @@ export const getLatestWorkspaceSession = () =>
 export const createWorkspaceSession = (name: string, deviceTag: string, snapshot: Record<string, unknown>) =>
   api.post<WorkspaceSession>('/workspace-sessions', { name, device_tag: deviceTag, snapshot });
 
-export const updateWorkspaceSession = (id: string, data: { name?: string; snapshot?: Record<string, unknown> }) =>
+export const updateWorkspaceSession = (id: string, data: { name?: string; snapshot?: Record<string, unknown>; expected_updated_at?: string }) =>
   api.put<WorkspaceSession>(`/workspace-sessions/${id}`, data);
 
 export const deleteWorkspaceSession = (id: string) =>

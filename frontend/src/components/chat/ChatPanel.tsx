@@ -159,6 +159,7 @@ export default function ChatPanel(_props: ChatPanelProps) {
   const [chatMode, setChatMode] = useState<'claude' | 'llm'>('claude');
   const [projects, setProjects] = useState<ClaudeProject[]>([]);
   const [plans, setPlans] = useState<ClaudePlan[]>([]);
+  const [plansCollapsed, setPlansCollapsed] = useState(true);
   const [expandedPlan, setExpandedPlan] = useState<string | null>(null);
   const [planContent, setPlanContent] = useState<string>('');
   const [expandedSession, setExpandedSession] = useState<string | null>(null);
@@ -492,8 +493,8 @@ export default function ChatPanel(_props: ChatPanelProps) {
           onClick={() => setChatMode('claude')}
           style={{
             padding: '4px 12px', borderRadius: 6, fontSize: 11, fontWeight: 500,
-            background: chatMode === 'claude' ? 'rgba(127, 0, 255, 0.2)' : 'rgba(255,255,255,0.04)',
-            border: `1px solid ${chatMode === 'claude' ? 'rgba(127, 0, 255, 0.4)' : 'var(--glass-border)'}`,
+            background: chatMode === 'claude' ? 'rgba(var(--accent-rgb), 0.2)' : 'rgba(255,255,255,0.04)',
+            border: `1px solid ${chatMode === 'claude' ? 'rgba(var(--accent-rgb), 0.4)' : 'var(--glass-border)'}`,
             color: chatMode === 'claude' ? 'var(--accent-bright)' : 'var(--text-muted)',
           }}
         >Claude</button>
@@ -503,8 +504,8 @@ export default function ChatPanel(_props: ChatPanelProps) {
           onClick={() => setChatMode('llm')}
           style={{
             padding: '4px 12px', borderRadius: 6, fontSize: 11, fontWeight: 500,
-            background: chatMode === 'llm' ? 'rgba(127, 0, 255, 0.2)' : 'rgba(255,255,255,0.04)',
-            border: `1px solid ${chatMode === 'llm' ? 'rgba(127, 0, 255, 0.4)' : 'var(--glass-border)'}`,
+            background: chatMode === 'llm' ? 'rgba(var(--accent-rgb), 0.2)' : 'rgba(255,255,255,0.04)',
+            border: `1px solid ${chatMode === 'llm' ? 'rgba(var(--accent-rgb), 0.4)' : 'var(--glass-border)'}`,
             color: chatMode === 'llm' ? 'var(--accent-bright)' : 'var(--text-muted)',
           }}
         >LLM</button>
@@ -694,14 +695,23 @@ export default function ChatPanel(_props: ChatPanelProps) {
         {/* Plans section — hidden when a folder is selected (plans are global, not per-folder) */}
         {plans.length > 0 && !selectedFolder && (
           <div style={{ marginBottom: 8 }}>
-            <div style={{
-              padding: '6px 16px', fontSize: 10, fontWeight: 700,
-              textTransform: 'uppercase', letterSpacing: '0.08em',
-              color: 'var(--text-muted)',
-            }}>
-              Plans
-            </div>
-            {plans.map((plan) => (
+            <button
+              type="button"
+              onClick={() => setPlansCollapsed(v => !v)}
+              style={{
+                width: '100%', padding: '6px 16px', fontSize: 10, fontWeight: 700,
+                textTransform: 'uppercase', letterSpacing: '0.08em',
+                color: 'var(--text-muted)', background: 'none', border: 'none',
+                cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
+              }}
+            >
+              <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"
+                style={{ transform: plansCollapsed ? 'none' : 'rotate(90deg)', transition: 'transform 0.15s' }}>
+                <polyline points="9 18 15 12 9 6" />
+              </svg>
+              Plans ({plans.length})
+            </button>
+            {(plansCollapsed ? plans.slice(0, 3) : plans).map((plan) => (
               <div key={plan.slug}>
                 <button
                   type="button"
@@ -756,6 +766,19 @@ export default function ChatPanel(_props: ChatPanelProps) {
                 )}
               </div>
             ))}
+            {plansCollapsed && plans.length > 3 && (
+              <button
+                type="button"
+                onClick={() => setPlansCollapsed(false)}
+                style={{
+                  width: '100%', padding: '4px 16px', fontSize: 10,
+                  color: 'var(--accent)', background: 'none', border: 'none',
+                  cursor: 'pointer', textAlign: 'left',
+                }}
+              >
+                Show all {plans.length} plans
+              </button>
+            )}
           </div>
         )}
 
@@ -825,7 +848,7 @@ export default function ChatPanel(_props: ChatPanelProps) {
                             onClick={(e) => { e.stopPropagation(); handleToggleBranches(session); }}
                             style={{
                               background: expandedBranches === session.session_id
-                                ? 'rgba(127, 0, 255, 0.25)' : 'rgba(127, 0, 255, 0.15)',
+                                ? 'rgba(var(--accent-rgb), 0.25)' : 'rgba(var(--accent-rgb), 0.15)',
                               color: 'var(--accent)',
                               padding: '0 4px',
                               borderRadius: 3,

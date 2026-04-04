@@ -324,6 +324,9 @@ func defaultShell() string {
 	return "/bin/sh"
 }
 
+// maxSessionsPerUser limits the number of concurrent terminal sessions per user.
+const maxSessionsPerUser = 10
+
 // GetOrCreate returns an existing alive session or creates a new one.
 // If sandboxed is true (Linux only), the shell runs in an isolated mount namespace
 // where other users' workspaces are hidden behind tmpfs.
@@ -349,6 +352,22 @@ func (s *TerminalService) GetOrCreate(sessionKey string, workingDir string, sand
 		// container. Keep it so terminal output survives deploys/restarts.
 		// DA queries stripped in multiWriter.Add() prevent 1;2c on replay.
 		log.Printf("[TerminalService] no existing session, creating new key=%s", sessionKey)
+	}
+
+	// Enforce per-user session limit: extract userID prefix from key format "term:{userID}:{instanceId}"
+	parts := strings.SplitN(sessionKey, ":", 3)
+	if len(parts) >= 2 {
+		userPrefix := parts[0] + ":" + parts[1] + ":"
+		var count int
+		for k, sess := range s.sessions {
+			if strings.HasPrefix(k, userPrefix) && sess.IsAlive() {
+				count++
+			}
+		}
+		if count >= maxSessionsPerUser {
+			log.Printf("[TerminalService] session limit reached for user prefix=%s count=%d max=%d", userPrefix, count, maxSessionsPerUser)
+			return nil, fmt.Errorf("terminal session limit reached (max %d per user)", maxSessionsPerUser)
+		}
 	}
 
 	return s.createLocked(sessionKey, workingDir, sandboxed, username, extraEnv)

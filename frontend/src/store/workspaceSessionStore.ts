@@ -36,11 +36,22 @@ export function isRestoringSnapshot(): boolean { return _restoringSnapshot; }
 let _lastVisibleAt = Date.now();
 export function markVisible() { _lastVisibleAt = Date.now(); }
 
+/** Blocks save until sync WS connects and register_ok received — prevents saving before lockStatus is known. */
+let _syncReady = false;
+export function setSyncReady() { _syncReady = true; log('[WorkspaceSession] syncReady = true'); }
+export function isSyncReady(): boolean { return _syncReady; }
+export function resetSyncReady() { _syncReady = false; }
+
+/** Tracks server's updated_at for optimistic locking — prevents overwriting newer snapshot. */
+let _serverUpdatedAt: string | null = null;
+
 /** Synchronous keepalive save — works during beforeunload/pagehide/visibilitychange:hidden. */
 export function forceSaveSnapshot() {
   const state = useWorkspaceSessionStore.getState();
   const activeId = state.activeSessionId;
   if (!activeId) return;
+  // Don't save until sync WS is connected and lockStatus is known
+  if (!_syncReady) return;
   // Don't save from stale background tab (hidden > 10s)
   if (Date.now() - _lastVisibleAt > 10_000) return;
   // Don't overwrite if another device owns the session
@@ -50,10 +61,16 @@ export function forceSaveSnapshot() {
   const layoutSnap = useLayoutStore.getState().getLayoutSnapshot();
   const token = localStorage.getItem('access_token');
   lastSaveTs = Date.now();
+  const payload: Record<string, unknown> = {
+    snapshot: { workspace: workspaceSnap, layout: layoutSnap },
+  };
+  if (_serverUpdatedAt) {
+    payload.expected_updated_at = _serverUpdatedAt;
+  }
   fetch(`/api/workspace-sessions/${activeId}`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
-    body: JSON.stringify({ snapshot: { workspace: workspaceSnap, layout: layoutSnap } }),
+    body: JSON.stringify(payload),
     keepalive: true,
   });
 }
@@ -139,10 +156,11 @@ export const useWorkspaceSessionStore = create<WorkspaceSessionState>((set, get)
         const exists = sessions.find((s) => s.id === activeSessionId);
         if (exists) {
           // Always restore from server — it's the source of truth
+          _serverUpdatedAt = exists.updated_at;
           try {
             const snap = exists.snapshot as unknown as FullSnapshot;
             if (snap?.layout && snap?.workspace) {
-              log('[WorkspaceSession] initSession: restoring from server');
+              log('[WorkspaceSession] initSession: restoring from server, updated_at=%s', _serverUpdatedAt);
               const panelIdMapping = useWorkspaceStore.getState().restoreFromSnapshot(snap.workspace);
               useLayoutStore.getState().restoreLayoutFromSnapshot(snap.layout, panelIdMapping);
               unblock();
@@ -164,11 +182,12 @@ export const useWorkspaceSessionStore = create<WorkspaceSessionState>((set, get)
         try {
           const { data } = await getLatestWorkspaceSession();
           localStorage.setItem(ACTIVE_WS_KEY, data.id);
+          _serverUpdatedAt = data.updated_at;
           set({ activeSessionId: data.id, loading: false });
           try {
             const snap = data.snapshot as unknown as FullSnapshot;
             if (snap?.layout && snap?.workspace) {
-              log('[WorkspaceSession] initSession: restoring from latest server session');
+              log('[WorkspaceSession] initSession: restoring from latest server session, updated_at=%s', _serverUpdatedAt);
               const panelIdMapping = useWorkspaceStore.getState().restoreFromSnapshot(snap.workspace);
               useLayoutStore.getState().restoreLayoutFromSnapshot(snap.layout, panelIdMapping);
               unblock();
@@ -317,7 +336,13 @@ export const useWorkspaceSessionStore = create<WorkspaceSessionState>((set, get)
     const { activeSessionId } = get();
     if (!activeSessionId) return;
 
-    log('[WorkspaceSession] saveCurrentSession EXECUTING', { activeSessionId, stack: new Error().stack?.split('\n').slice(1, 4).join(' ← ') });
+    // Don't save until sync WS is connected and lockStatus is known
+    if (!_syncReady) {
+      log('[WorkspaceSession] saveCurrentSession BLOCKED: syncReady=false');
+      return;
+    }
+
+    log('[WorkspaceSession] saveCurrentSession EXECUTING', { activeSessionId, serverUpdatedAt: _serverUpdatedAt, stack: new Error().stack?.split('\n').slice(1, 4).join(' ← ') });
     try {
       const workspaceSnap = useWorkspaceStore.getState().getWorkspaceSnapshot();
       const layoutSnap = useLayoutStore.getState().getLayoutSnapshot();
@@ -326,9 +351,31 @@ export const useWorkspaceSessionStore = create<WorkspaceSessionState>((set, get)
         layout: layoutSnap,
       };
       lastSaveTs = Date.now();
-      await updateWorkspaceSession(activeSessionId, { snapshot: fullSnapshot as unknown as Record<string, unknown> });
-    } catch {
-      // Silent fail — background save
+      const payload: { snapshot: Record<string, unknown>; expected_updated_at?: string } = {
+        snapshot: fullSnapshot as unknown as Record<string, unknown>,
+      };
+      if (_serverUpdatedAt) {
+        payload.expected_updated_at = _serverUpdatedAt;
+      }
+      const { data } = await updateWorkspaceSession(activeSessionId, payload);
+      // Update tracked timestamp from server response
+      if (data?.updated_at) {
+        _serverUpdatedAt = data.updated_at;
+      }
+    } catch (err) {
+      // 409 Conflict = server has newer data, don't retry — just skip
+      if (err && typeof err === 'object' && 'response' in err) {
+        const resp = (err as { response?: { status?: number; data?: { server_updated_at?: string } } }).response;
+        if (resp?.status === 409) {
+          log('[WorkspaceSession] save CONFLICT: server has newer snapshot, skipping. server_updated_at=%s', resp.data?.server_updated_at);
+          // Update our tracked timestamp so next save has correct expectation
+          if (resp.data?.server_updated_at) {
+            _serverUpdatedAt = resp.data.server_updated_at;
+          }
+          return;
+        }
+      }
+      // Other errors — silent fail
     }
   },
 
@@ -395,6 +442,9 @@ export const useWorkspaceSessionStore = create<WorkspaceSessionState>((set, get)
 
       const { data } = await getWorkspaceSessions();
       const fresh = data?.find((s) => s.id === activeSessionId);
+      if (fresh?.updated_at) {
+        _serverUpdatedAt = fresh.updated_at;
+      }
       if (fresh?.snapshot) {
         const snap = fresh.snapshot as unknown as FullSnapshot;
         if (snap?.layout && snap?.workspace) {

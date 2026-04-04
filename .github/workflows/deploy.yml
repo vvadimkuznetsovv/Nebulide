@@ -40,6 +40,10 @@ jobs:
 
             echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S docker compose -f /opt/nebulide/docker-compose.yml up -d
 
+            # Cleanup: remove old images (>24h) and trim build cache to 2GB
+            echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S docker image prune -af --filter "until=24h"
+            echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S docker builder prune -af --keep-storage=2GB
+
             # Certbot renewal hook: reload Docker nginx on certificate renewal
             echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S mkdir -p /etc/letsencrypt/renewal-hooks/deploy
             echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S bash -c 'cat > /etc/letsencrypt/renewal-hooks/deploy/reload-docker-nginx.sh << "HOOK"

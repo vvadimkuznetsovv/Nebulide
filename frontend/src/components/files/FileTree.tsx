@@ -46,6 +46,7 @@ const ICONS = {
   extract: iconMulti('M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4', 'M7 10l5 5 5-5', 'M12 15V3'),
   copy: iconMulti('M20 9h-9a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-9a2 2 0 0 0-2-2z', 'M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1'),
   paste: iconMulti('M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2', 'M15 2H9a1 1 0 0 0-1 1v2a1 1 0 0 0 1 1h6a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1z'),
+  link: iconMulti('M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71', 'M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71'),
   download: iconMulti('M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4', 'M7 10l5 5 5-5', 'M12 15V3'),
 };
 
@@ -86,6 +87,7 @@ function getMenuItems(target: FileEntry | null, hasTelegram: boolean, multiCount
       { label: 'New Folder', action: 'new-folder-parent', icon: ICONS.folderPlus },
       { type: 'separator' },
       { label: 'Copy', action: 'copy', icon: ICONS.copy },
+      { label: 'Copy Path', action: 'copy-path', icon: ICONS.link },
     ];
     if (hasClipboard) {
       items.push({ label: 'Paste', action: 'paste', icon: ICONS.paste });
@@ -108,6 +110,7 @@ function getMenuItems(target: FileEntry | null, hasTelegram: boolean, multiCount
     { label: 'New Folder', action: 'new-folder', icon: ICONS.folderPlus },
     { type: 'separator' },
     { label: 'Copy', action: 'copy', icon: ICONS.copy },
+    { label: 'Copy Path', action: 'copy-path', icon: ICONS.link },
   ];
   if (hasClipboard) {
     items.push({ label: 'Paste', action: 'paste', icon: ICONS.paste });
@@ -554,6 +557,13 @@ const FileTree = forwardRef<FileTreeHandle, FileTreeProps>(function FileTree({ r
             ? [...selectedPaths] : [target.path];
           setClipboardFiles(paths);
           toast.success(`${paths.length} item(s) copied`);
+        }
+        break;
+      case 'copy-path':
+        if (target) {
+          navigator.clipboard.writeText(target.path)
+            .then(() => toast.success('Path copied'))
+            .catch(() => toast.error('Failed to copy path'));
         }
         break;
       case 'paste':

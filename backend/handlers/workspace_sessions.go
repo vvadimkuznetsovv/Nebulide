@@ -3,7 +3,9 @@ package handlers
 import (
 	"context"
 	"encoding/json"
+	"log"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -29,8 +31,9 @@ type createWorkspaceSessionRequest struct {
 }
 
 type updateWorkspaceSessionRequest struct {
-	Name     string         `json:"name"`
-	Snapshot datatypes.JSON `json:"snapshot"`
+	Name              string         `json:"name"`
+	Snapshot          datatypes.JSON `json:"snapshot"`
+	ExpectedUpdatedAt *time.Time     `json:"expected_updated_at"`
 }
 
 type sessionWithLock struct {
@@ -122,6 +125,19 @@ func (h *WorkspaceSessionsHandler) Update(c *gin.Context) {
 	if err := database.DB.Where("id = ? AND user_id = ?", sessionID, userID).First(&session).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Workspace session not found"})
 		return
+	}
+
+	// Optimistic locking: reject save if server was updated after client's last known timestamp
+	if req.ExpectedUpdatedAt != nil && req.Snapshot != nil {
+		if session.UpdatedAt.After(*req.ExpectedUpdatedAt) {
+			log.Printf("[WorkspaceSession] conflict: client expected %v but server has %v (session=%s)",
+				req.ExpectedUpdatedAt, session.UpdatedAt, sessionID)
+			c.JSON(http.StatusConflict, gin.H{
+				"error":              "conflict",
+				"server_updated_at":  session.UpdatedAt,
+			})
+			return
+		}
 	}
 
 	if req.Name != "" {

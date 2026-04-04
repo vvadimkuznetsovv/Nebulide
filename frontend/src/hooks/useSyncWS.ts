@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { ensureFreshToken } from '../api/tokenRefresh';
-import { useWorkspaceSessionStore, isRecentSelfSave } from '../store/workspaceSessionStore';
+import { useWorkspaceSessionStore, isRecentSelfSave, setSyncReady, resetSyncReady } from '../store/workspaceSessionStore';
 import { useWorkspaceStore } from '../store/workspaceStore';
 import { useLayoutStore } from '../store/layoutStore';
 import { getWorkspaceSessions } from '../api/workspaceSessions';
@@ -80,6 +80,7 @@ export function useSyncWS() {
           switch (msg.type) {
             case 'register_ok':
               log('[SyncWS] register_ok', { session_id: msg.session_id, active_claude_terminals: msg.active_claude_terminals, activeTerminals: getActiveTerminalInstanceIds() });
+              setSyncReady();
               if (msg.session_id) {
                 store.setLockState(msg.session_id, 'owner');
                 // Reconnect terminals that were disconnected by workspace_locked/force_disconnected.
@@ -220,6 +221,7 @@ export function useSyncWS() {
       ws.onclose = (e) => {
         log(`[SyncWS] ws.onclose code=${e.code} reason=${e.reason} destroyed=${destroyed}`);
         setSyncWs(null);
+        resetSyncReady();
         if (!destroyed) {
           log('[SyncWS] scheduling reconnect in 3s');
           reconnectTimerRef.current = window.setTimeout(connect, 3000);

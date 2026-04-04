@@ -17,6 +17,7 @@
     --text-tertiary: rgba(255, 255, 255, 0.3);
     --glass-border: rgba(255, 255, 255, 0.15);
     --glass-border-hover: rgba(255, 255, 255, 0.25);
+    --glass-menu-bg-rgb: 20, 12, 35;
     --danger: #f87171;
     --danger-glow: rgba(248, 113, 113, 0.3);
     --warning: #fbbf24;
@@ -1468,7 +1469,7 @@
     min-width: 180px;
     padding: 5px;
     border-radius: 14px;
-    background: rgba(20, 12, 35, 0.94);
+    background: rgba(var(--glass-menu-bg-rgb), 0.94);
     border: 1px solid rgba(var(--accent-rgb), 0.15);
     -webkit-backdrop-filter: blur(16px) saturate(180%);
     backdrop-filter: blur(16px) saturate(180%);

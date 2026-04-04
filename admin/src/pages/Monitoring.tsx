@@ -30,7 +30,7 @@ function ProgressBar({ percent, color }: { percent: number; color: string }) {
   );
 }
 
-type SortKey = 'pid' | 'username' | 'cpu_percent' | 'memory_rss_bytes' | 'command' | 'status' | 'writer_count';
+type SortKey = 'pid' | 'username' | 'cpu_percent' | 'memory_rss_bytes' | 'command' | 'project_name' | 'status' | 'writer_count';
 type FilterType = 'all' | 'user' | 'system';
 type StatusFilter = 'all' | 'active' | 'hidden' | 'offline' | 'system';
 
@@ -119,7 +119,9 @@ export default function Monitoring() {
         p.username.toLowerCase().includes(q) ||
         p.command.toLowerCase().includes(q) ||
         p.instance_id.toLowerCase().includes(q) ||
-        p.session_key.toLowerCase().includes(q)
+        p.session_key.toLowerCase().includes(q) ||
+        (p.project_name || '').toLowerCase().includes(q) ||
+        (p.cwd || '').toLowerCase().includes(q)
       );
     }
 
@@ -132,6 +134,7 @@ export default function Monitoring() {
         case 'cpu_percent': va = a.cpu_percent; vb = b.cpu_percent; break;
         case 'memory_rss_bytes': va = a.memory_rss_bytes; vb = b.memory_rss_bytes; break;
         case 'command': va = a.command.toLowerCase(); vb = b.command.toLowerCase(); break;
+        case 'project_name': va = (a.project_name || '').toLowerCase(); vb = (b.project_name || '').toLowerCase(); break;
         case 'status': va = a.status; vb = b.status; break;
         case 'writer_count': va = a.writer_count; vb = b.writer_count; break;
         default: va = 0; vb = 0;
@@ -353,6 +356,9 @@ export default function Monitoring() {
                     <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => handleSort('username')}>
                       User<SortIcon col="username" />
                     </th>
+                    <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => handleSort('project_name')}>
+                      Project<SortIcon col="project_name" />
+                    </th>
                     <th>Instance</th>
                     <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => handleSort('status')}>
                       Status<SortIcon col="status" />
@@ -391,6 +397,13 @@ export default function Monitoring() {
                           >
                             {p.username}
                           </button>
+                        </td>
+                        <td style={{ fontSize: '12px', maxWidth: '200px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={p.cwd || ''}>
+                          {p.project_name ? (
+                            <span style={{ color: 'var(--accent-bright)', fontWeight: 500 }}>{p.project_name}</span>
+                          ) : (
+                            <span style={{ color: 'var(--text-muted)' }}>—</span>
+                          )}
                         </td>
                         <td style={{ color: 'var(--text-secondary)', fontSize: '13px' }}>{p.instance_id}</td>
                         <td>{statusBadge(p)}</td>

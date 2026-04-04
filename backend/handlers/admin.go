@@ -208,7 +208,7 @@ func (h *AdminHandler) ListTerminals(c *gin.Context) {
 			WriterCount: s.WriterCount,
 		}
 		if runtime.GOOS == "linux" && s.PID > 0 {
-			td.MemoryRSS, td.Command = readProcInfo(s.PID)
+			td.MemoryRSS, td.Command, _ = readProcInfo(s.PID)
 			pids = append(pids, s.PID)
 		}
 		result = append(result, td)
@@ -376,6 +376,8 @@ type processInfo struct {
 	CPUPercent  float64 `json:"cpu_percent"`
 	MemoryRSS   int64   `json:"memory_rss_bytes"`
 	Command     string  `json:"command"`
+	CWD         string  `json:"cwd"`
+	ProjectName string  `json:"project_name"`
 	WriterCount int     `json:"writer_count"`
 	Status      string  `json:"status"` // "active", "hidden", "offline"
 }
@@ -476,7 +478,8 @@ func (h *AdminHandler) Monitoring(c *gin.Context) {
 			Status:      status,
 		}
 		if runtime.GOOS == "linux" && s.PID > 0 {
-			pi.MemoryRSS, pi.Command = readProcInfo(s.PID)
+			pi.MemoryRSS, pi.Command, pi.CWD = readProcInfo(s.PID)
+			pi.ProjectName = projectNameFromCWD(pi.CWD)
 			pi.CPUPercent = procCPU[s.PID]
 		}
 		processes = append(processes, pi)
@@ -488,18 +491,20 @@ func (h *AdminHandler) Monitoring(c *gin.Context) {
 			if pid <= 1 || terminalPIDs[pid] {
 				continue
 			}
-			rss, cmd := readProcInfo(pid)
+			rss, cmd, pcwd := readProcInfo(pid)
 			if cmd == "" || rss == 0 {
 				continue // skip kernel threads and empty processes
 			}
 			processes = append(processes, processInfo{
-				PID:       pid,
-				Username:  "system",
-				Alive:     true,
-				Status:    "system",
-				MemoryRSS: rss,
-				Command:   cmd,
-				CPUPercent: procCPU[pid],
+				PID:         pid,
+				Username:    "system",
+				Alive:       true,
+				Status:      "system",
+				MemoryRSS:   rss,
+				Command:     cmd,
+				CWD:         pcwd,
+				ProjectName: projectNameFromCWD(pcwd),
+				CPUPercent:  procCPU[pid],
 			})
 		}
 	}
@@ -533,8 +538,8 @@ func (h *AdminHandler) KillProcess(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Process killed", "pid": pid})
 }
 
-// readProcInfo reads RSS and command from /proc/{pid} (no CPU — handled by measureAllCPU).
-func readProcInfo(pid int) (rss int64, command string) {
+// readProcInfo reads RSS, command, and CWD from /proc/{pid} (no CPU — handled by measureAllCPU).
+func readProcInfo(pid int) (rss int64, command string, cwd string) {
 	statm, err := os.ReadFile(fmt.Sprintf("/proc/%d/statm", pid))
 	if err == nil {
 		fields := strings.Fields(string(statm))
@@ -551,7 +556,32 @@ func readProcInfo(pid int) (rss int64, command string) {
 			command = command[:120] + "..."
 		}
 	}
+	cwd, _ = os.Readlink(fmt.Sprintf("/proc/%d/cwd", pid))
 	return
+}
+
+// projectNameFromCWD extracts a human-readable project name from the working directory.
+func projectNameFromCWD(cwd string) string {
+	if cwd == "" {
+		return ""
+	}
+	// Strip common prefixes to get project name
+	for _, prefix := range []string{"/home/nebulide/workspaces/", "/home/nebulide/workspace/"} {
+		if strings.HasPrefix(cwd, prefix) {
+			rest := strings.TrimPrefix(cwd, prefix)
+			if rest != "" {
+				return rest
+			}
+		}
+	}
+	// Fallback: last path component
+	parts := strings.Split(cwd, "/")
+	for i := len(parts) - 1; i >= 0; i-- {
+		if parts[i] != "" {
+			return parts[i]
+		}
+	}
+	return cwd
 }
 
 // measureAllCPU takes a single 500ms snapshot to measure system CPU and per-process CPU simultaneously.

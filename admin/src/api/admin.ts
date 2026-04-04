@@ -94,6 +94,8 @@ export interface ProcessInfo {
   cpu_percent: number;
   memory_rss_bytes: number;
   command: string;
+  cwd: string;
+  project_name: string;
   writer_count: number;
   status: 'active' | 'hidden' | 'offline' | 'system';
 }
