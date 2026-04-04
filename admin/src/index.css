@@ -4,9 +4,12 @@
   :root {
     --bg-primary: #030108;
     --accent: #7F00FF;
+    --accent-rgb: 127, 0, 255;
     --accent-bright: #A64DFF;
-    --accent-glow: rgba(127, 0, 255, 0.4);
-    --accent-soft: rgba(127, 0, 255, 0.15);
+    --accent-bright-rgb: 166, 77, 255;
+    --accent-glow: rgba(var(--accent-rgb), 0.4);
+    --accent-soft: rgba(var(--accent-rgb), 0.15);
+    --blob-glow-rgb: var(--accent-rgb);
     --text-primary: rgba(255, 255, 255, 0.95);
     --text-secondary: rgba(255, 255, 255, 0.7);
     --text-tertiary: rgba(255, 255, 255, 0.4);
@@ -75,49 +78,49 @@
   .lava-blob-1 {
     width: 420px; height: 420px;
     top: 5%; left: 8%;
-    background: #7F00FF;
+    background: var(--accent);
     filter: blur(22px);
-    box-shadow: 0 0 80px 35px rgba(127, 0, 255, 0.5);
+    box-shadow: 0 0 80px 35px rgba(var(--accent-rgb), 0.5);
     animation: lava1 28s cubic-bezier(0.4, 0, 0.6, 1) infinite alternate;
   }
   .lava-blob-2 {
     width: 350px; height: 350px;
     bottom: 8%; right: 10%;
-    background: #7F00FF;
+    background: var(--accent);
     filter: blur(20px);
-    box-shadow: 0 0 70px 30px rgba(127, 0, 255, 0.45);
+    box-shadow: 0 0 70px 30px rgba(var(--accent-rgb), 0.45);
     animation: lava2 32s cubic-bezier(0.4, 0, 0.6, 1) infinite alternate;
   }
   .lava-blob-3 {
     width: 300px; height: 300px;
     top: 45%; left: 55%;
-    background: #7F00FF;
+    background: var(--accent);
     filter: blur(18px);
-    box-shadow: 0 0 60px 25px rgba(127, 0, 255, 0.45);
+    box-shadow: 0 0 60px 25px rgba(var(--accent-rgb), 0.45);
     animation: lava3 24s cubic-bezier(0.4, 0, 0.6, 1) infinite alternate;
   }
   .lava-blob-4 {
     width: 260px; height: 260px;
     top: 15%; right: 18%;
-    background: #7F00FF;
+    background: var(--accent);
     filter: blur(16px);
-    box-shadow: 0 0 55px 22px rgba(127, 0, 255, 0.45);
+    box-shadow: 0 0 55px 22px rgba(var(--accent-rgb), 0.45);
     animation: lava4 30s cubic-bezier(0.4, 0, 0.6, 1) infinite alternate;
   }
   .lava-blob-5 {
     width: 220px; height: 220px;
     bottom: 30%; left: 15%;
-    background: #7F00FF;
+    background: var(--accent);
     filter: blur(16px);
-    box-shadow: 0 0 50px 20px rgba(127, 0, 255, 0.45);
+    box-shadow: 0 0 50px 20px rgba(var(--accent-rgb), 0.45);
     animation: lava5 34s cubic-bezier(0.4, 0, 0.6, 1) infinite alternate;
   }
   .lava-blob-6 {
     width: 320px; height: 320px;
     top: 65%; left: 5%;
-    background: #7F00FF;
+    background: var(--accent);
     filter: blur(20px);
-    box-shadow: 0 0 65px 28px rgba(127, 0, 255, 0.45);
+    box-shadow: 0 0 65px 28px rgba(var(--accent-rgb), 0.45);
     animation: lava6 26s cubic-bezier(0.4, 0, 0.6, 1) infinite alternate;
   }
 
