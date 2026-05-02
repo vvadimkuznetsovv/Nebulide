@@ -33,9 +33,14 @@ func scrollbackPath(sessionKey string) string {
 
 const replayBufCap = 65536 // 64KB ring buffer for late joiners
 
+type writerEntry struct {
+	closer io.Closer
+	wsId   string
+}
+
 type multiWriter struct {
 	mu      sync.Mutex
-	writers map[io.Writer]io.Closer
+	writers map[io.Writer]*writerEntry
 
 	// replayBuf stores the last N bytes of PTY output so that new
 	// connections see the current prompt / recent output.
@@ -51,7 +56,7 @@ func newMultiWriter(filePath string) *multiWriter {
 	os.MkdirAll(scrollbackDir, 0755)
 
 	mw := &multiWriter{
-		writers:  make(map[io.Writer]io.Closer),
+		writers:  make(map[io.Writer]*writerEntry),
 		filePath: filePath,
 		stopCh:   make(chan struct{}),
 	}
@@ -114,9 +119,9 @@ func (mw *multiWriter) Write(p []byte) (int, error) {
 	}
 	mw.dirty = true
 
-	for w, closer := range mw.writers {
+	for w, entry := range mw.writers {
 		if _, err := w.Write(p); err != nil {
-			closer.Close()
+			entry.closer.Close()
 			delete(mw.writers, w)
 		}
 	}
@@ -130,9 +135,22 @@ var daQueryRe = regexp.MustCompile(`\x1b\[[\d>]*c`)
 
 // Add registers a new writer. Flushes the replay buffer to it so the client
 // sees the current terminal state (prompt, recent output).
-func (mw *multiWriter) Add(w io.Writer, closer io.Closer) {
+// If wsId is provided, supersedes any existing writer with the same wsId
+// (handles reconnect race where stale TCP connection still in writers map).
+func (mw *multiWriter) Add(w io.Writer, closer io.Closer, wsId string) {
 	mw.mu.Lock()
 	defer mw.mu.Unlock()
+
+	// Supersede stale writer with same wsId — prevents WS=2 race condition
+	if wsId != "" {
+		for existing, entry := range mw.writers {
+			if entry.wsId == wsId {
+				log.Printf("[TerminalService] superseding stale writer wsId=%s", wsId)
+				entry.closer.Close()
+				delete(mw.writers, existing)
+			}
+		}
+	}
 
 	// Replay recent output to the new connection, stripping DA queries
 	// to prevent xterm from auto-responding with \e[?1;2c → "1;2c" in terminal
@@ -146,7 +164,7 @@ func (mw *multiWriter) Add(w io.Writer, closer io.Closer) {
 		log.Printf("[TerminalService] replay %d bytes (cleaned %d DA/remnant bytes)", len(mw.replayBuf), len(mw.replayBuf)-len(cleaned))
 	}
 
-	mw.writers[w] = closer
+	mw.writers[w] = &writerEntry{closer: closer, wsId: wsId}
 }
 
 // Remove unregisters a writer (called when WS disconnects).
@@ -212,6 +230,11 @@ type TerminalSession struct {
 	// Sessions with no writers for >orphanTimeout are reaped.
 	// Zero value means at least one writer is connected.
 	OrphanSince time.Time
+
+	// LastWriterAttachAt tracks the most recent successful AddWriter call.
+	// Used for "suspicious" detection: if other sessions of the same user
+	// recently got a writer but this one didn't, it's likely dead.
+	LastWriterAttachAt time.Time
 }
 
 func NewTerminalService() *TerminalService {
@@ -324,8 +347,9 @@ func defaultShell() string {
 	return "/bin/sh"
 }
 
-// maxSessionsPerUser limits the number of concurrent terminal sessions per user.
-const maxSessionsPerUser = 10
+// maxSessionsPerUser limits the number of concurrent ACTIVE (with writers) terminal sessions per user.
+// Orphaned sessions (writers=0) don't count — they don't block new terminals.
+const maxSessionsPerUser = 15
 
 // GetOrCreate returns an existing alive session or creates a new one.
 // If sandboxed is true (Linux only), the shell runs in an isolated mount namespace
@@ -358,15 +382,15 @@ func (s *TerminalService) GetOrCreate(sessionKey string, workingDir string, sand
 	parts := strings.SplitN(sessionKey, ":", 3)
 	if len(parts) >= 2 {
 		userPrefix := parts[0] + ":" + parts[1] + ":"
-		var count int
+		var activeCount int
 		for k, sess := range s.sessions {
-			if strings.HasPrefix(k, userPrefix) && sess.IsAlive() {
-				count++
+			if strings.HasPrefix(k, userPrefix) && sess.IsAlive() && sess.WriterCount() > 0 {
+				activeCount++
 			}
 		}
-		if count >= maxSessionsPerUser {
-			log.Printf("[TerminalService] session limit reached for user prefix=%s count=%d max=%d", userPrefix, count, maxSessionsPerUser)
-			return nil, fmt.Errorf("terminal session limit reached (max %d per user)", maxSessionsPerUser)
+		if activeCount >= maxSessionsPerUser {
+			log.Printf("[TerminalService] active session limit reached for user prefix=%s active=%d max=%d", userPrefix, activeCount, maxSessionsPerUser)
+			return nil, fmt.Errorf("active terminal session limit reached (max %d per user)", maxSessionsPerUser)
 		}
 	}
 
@@ -578,12 +602,14 @@ func (ts *TerminalSession) IsAlive() bool {
 
 // AddWriter registers a new WS connection to receive PTY output.
 // The replay buffer is flushed to the new writer so it sees current terminal state.
-func (ts *TerminalSession) AddWriter(w io.Writer, closer io.Closer) {
-	log.Printf("[TerminalService] AddWriter: registering %p", w)
-	ts.mw.Add(w, closer)
+// wsId (workspace session id from frontend) is used to dedupe stale writers on reconnect.
+func (ts *TerminalSession) AddWriter(w io.Writer, closer io.Closer, wsId string) {
+	log.Printf("[TerminalService] AddWriter: registering %p wsId=%s", w, wsId)
+	ts.mw.Add(w, closer, wsId)
 	// Clear orphan timer — a client is connected
 	ts.mu.Lock()
 	ts.OrphanSince = time.Time{}
+	ts.LastWriterAttachAt = time.Now()
 	ts.mu.Unlock()
 }
 
@@ -788,35 +814,81 @@ func (s *TerminalService) CountUserSessions(userID string) int {
 
 // SessionProcessInfo holds PID + session metadata for monitoring.
 type SessionProcessInfo struct {
-	Key         string `json:"session_key"`
-	UserID      string `json:"user_id"`
-	InstanceID  string `json:"instance_id"`
-	Alive       bool   `json:"alive"`
-	PID         int    `json:"pid"`
-	WriterCount int    `json:"writer_count"`
-	HasChildren bool   `json:"has_children"`
+	Key                string    `json:"session_key"`
+	UserID             string    `json:"user_id"`
+	InstanceID         string    `json:"instance_id"`
+	Alive              bool      `json:"alive"`
+	PID                int       `json:"pid"`
+	WriterCount        int       `json:"writer_count"`
+	HasChildren        bool      `json:"has_children"`
+	LastWriterAttachAt time.Time `json:"last_writer_attach_at"`
+	Suspicious         bool      `json:"suspicious"`
 }
 
 // ListSessionsWithPID returns all sessions with their process PIDs.
 // Does NOT reap dead sessions — reapLoop handles that separately.
+// Computes Suspicious flag: orphaned (writers=0) + significantly older
+// LastWriterAttachAt than other sessions of the same user — likely dead.
 func (s *TerminalService) ListSessionsWithPID() []SessionProcessInfo {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	result := make([]SessionProcessInfo, 0, len(s.sessions))
+
+	// First pass: collect raw info + find max LastWriterAttachAt per user
+	type rawInfo struct {
+		key         string
+		uid, iid    string
+		pid         int
+		alive       bool
+		writers     int
+		hasChildren bool
+		lastAttach  time.Time
+	}
+	raws := make([]rawInfo, 0, len(s.sessions))
+	maxAttachByUser := make(map[string]time.Time)
 	for key, sess := range s.sessions {
 		uid, iid := parseSessionKey(key)
 		pid := 0
 		if sess.Cmd != nil && sess.Cmd.Process != nil {
 			pid = sess.Cmd.Process.Pid
 		}
+		sess.mu.Lock()
+		la := sess.LastWriterAttachAt
+		sess.mu.Unlock()
+		raws = append(raws, rawInfo{
+			key: key, uid: uid, iid: iid, pid: pid,
+			alive:       sess.IsAlive(),
+			writers:     sess.WriterCount(),
+			hasChildren: sess.HasChildProcesses(),
+			lastAttach:  la,
+		})
+		if !la.IsZero() && la.After(maxAttachByUser[uid]) {
+			maxAttachByUser[uid] = la
+		}
+	}
+
+	// Second pass: compute Suspicious — orphaned + significantly older lastAttach than peers
+	result := make([]SessionProcessInfo, 0, len(raws))
+	const suspiciousGap = 60 * time.Second
+	for _, r := range raws {
+		suspicious := false
+		if r.alive && r.writers == 0 {
+			peerMax := maxAttachByUser[r.uid]
+			if !peerMax.IsZero() {
+				if r.lastAttach.IsZero() || peerMax.Sub(r.lastAttach) > suspiciousGap {
+					suspicious = true
+				}
+			}
+		}
 		result = append(result, SessionProcessInfo{
-			Key:         key,
-			UserID:      uid,
-			InstanceID:  iid,
-			Alive:       sess.IsAlive(),
-			PID:         pid,
-			WriterCount: sess.WriterCount(),
-			HasChildren: sess.HasChildProcesses(),
+			Key:                r.key,
+			UserID:             r.uid,
+			InstanceID:         r.iid,
+			Alive:              r.alive,
+			PID:                r.pid,
+			WriterCount:        r.writers,
+			HasChildren:        r.hasChildren,
+			LastWriterAttachAt: r.lastAttach,
+			Suspicious:         suspicious,
 		})
 	}
 	return result

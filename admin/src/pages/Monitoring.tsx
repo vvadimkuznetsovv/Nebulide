@@ -32,7 +32,7 @@ function ProgressBar({ percent, color }: { percent: number; color: string }) {
 
 type SortKey = 'pid' | 'username' | 'cpu_percent' | 'memory_rss_bytes' | 'command' | 'project_name' | 'status' | 'writer_count';
 type FilterType = 'all' | 'user' | 'system';
-type StatusFilter = 'all' | 'active' | 'hidden' | 'offline' | 'system';
+type StatusFilter = 'all' | 'active' | 'hidden' | 'suspicious' | 'offline' | 'system';
 
 const ACID_GREEN = '#39ff14';
 
@@ -125,8 +125,10 @@ export default function Monitoring() {
       );
     }
 
-    // Sort
+    // Sort: suspicious always go first regardless of sort key
     list.sort((a, b) => {
+      // Suspicious always on top
+      if (a.suspicious !== b.suspicious) return a.suspicious ? -1 : 1;
       let va: string | number, vb: string | number;
       switch (sortBy) {
         case 'pid': va = a.pid; vb = b.pid; break;
@@ -165,10 +167,13 @@ export default function Monitoring() {
 
   const statusBadge = (p: ProcessInfo) => {
     if (p.status === 'active') return <span className="badge active">Active ({p.writer_count})</span>;
+    if (p.status === 'suspicious') return <span className="badge" style={{ background: 'rgba(251,191,36,0.18)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.5)', fontWeight: 600 }} title={`Likely dead — other terminals reconnected, this one didn't (${p.last_attach_seconds_ago}s ago last attach)`}>⚠️ Suspicious</span>;
     if (p.status === 'hidden') return <span className="badge warning">Hidden</span>;
     if (p.status === 'system') return <span className="badge" style={{ background: 'rgba(100,100,255,0.15)', color: '#8888ff' }}>System</span>;
     return <span style={{ color: 'var(--text-muted)' }}>Offline</span>;
   };
+
+  const suspiciousCount = data?.processes.filter(p => p.suspicious).length ?? 0;
 
   return (
     <div>
@@ -282,6 +287,26 @@ export default function Monitoring() {
             </div>
           </div>
 
+          {/* Suspicious terminals banner */}
+          {suspiciousCount > 0 && (
+            <div
+              onClick={() => setStatusFilter('suspicious')}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 10,
+                padding: '10px 14px', marginBottom: 16, borderRadius: 10,
+                background: 'rgba(251,191,36,0.1)',
+                border: '1px solid rgba(251,191,36,0.3)',
+                cursor: 'pointer',
+              }}
+            >
+              <span style={{ fontSize: 18 }}>⚠️</span>
+              <span style={{ color: '#fbbf24', fontWeight: 600, fontSize: 13 }}>
+                {suspiciousCount} suspicious terminal{suspiciousCount > 1 ? 's' : ''} — likely dead, kill recommended
+              </span>
+              <span style={{ color: 'var(--text-muted)', fontSize: 11, marginLeft: 'auto' }}>Click to filter →</span>
+            </div>
+          )}
+
           {/* Processes header + controls */}
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
             <h2 style={{ color: 'var(--text-primary)', fontSize: '18px', fontWeight: 600, margin: 0 }}>
@@ -296,6 +321,15 @@ export default function Monitoring() {
               <span style={{ width: '1px', height: '20px', background: 'var(--glass-border)', margin: '0 4px' }} />
               <button style={filterBtnStyle(statusFilter === 'all')} onClick={() => setStatusFilter('all')}>Any</button>
               <button style={filterBtnStyle(statusFilter === 'active')} onClick={() => setStatusFilter('active')}>Active</button>
+              <button
+                style={{
+                  ...filterBtnStyle(statusFilter === 'suspicious'),
+                  ...(suspiciousCount > 0 ? { background: 'rgba(251,191,36,0.15)', color: '#fbbf24', border: '1px solid rgba(251,191,36,0.4)' } : {}),
+                }}
+                onClick={() => setStatusFilter('suspicious')}
+              >
+                ⚠️ Suspicious{suspiciousCount > 0 ? ` (${suspiciousCount})` : ''}
+              </button>
               <button style={filterBtnStyle(statusFilter === 'hidden')} onClick={() => setStatusFilter('hidden')}>Hidden</button>
               <button style={filterBtnStyle(statusFilter === 'offline')} onClick={() => setStatusFilter('offline')}>Offline</button>
               <button style={filterBtnStyle(statusFilter === 'system')} onClick={() => setStatusFilter('system')}>System</button>
@@ -382,7 +416,10 @@ export default function Monitoring() {
                   {processes.map((p) => {
                     const canKill = p.status !== 'active';
                     return (
-                      <tr key={p.session_key || `pid-${p.pid}`}>
+                      <tr
+                        key={p.session_key || `pid-${p.pid}`}
+                        style={p.suspicious ? { background: 'rgba(251,191,36,0.08)', borderLeft: '3px solid rgba(251,191,36,0.6)' } : undefined}
+                      >
                         <td style={{ fontFamily: 'monospace', fontSize: '13px' }}>{p.pid || '—'}</td>
                         <td>
                           <button

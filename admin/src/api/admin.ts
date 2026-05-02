@@ -97,7 +97,9 @@ export interface ProcessInfo {
   cwd: string;
   project_name: string;
   writer_count: number;
-  status: 'active' | 'hidden' | 'offline' | 'system';
+  status: 'active' | 'hidden' | 'offline' | 'suspicious' | 'system';
+  suspicious: boolean;
+  last_attach_seconds_ago: number;
 }
 
 export interface SystemInfo {

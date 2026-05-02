@@ -367,19 +367,21 @@ func (h *AdminHandler) Stats(c *gin.Context) {
 // ── Monitoring ──
 
 type processInfo struct {
-	PID         int     `json:"pid"`
-	UserID      string  `json:"user_id"`
-	Username    string  `json:"username"`
-	SessionKey  string  `json:"session_key"`
-	InstanceID  string  `json:"instance_id"`
-	Alive       bool    `json:"alive"`
-	CPUPercent  float64 `json:"cpu_percent"`
-	MemoryRSS   int64   `json:"memory_rss_bytes"`
-	Command     string  `json:"command"`
-	CWD         string  `json:"cwd"`
-	ProjectName string  `json:"project_name"`
-	WriterCount int     `json:"writer_count"`
-	Status      string  `json:"status"` // "active", "hidden", "offline"
+	PID                  int     `json:"pid"`
+	UserID               string  `json:"user_id"`
+	Username             string  `json:"username"`
+	SessionKey           string  `json:"session_key"`
+	InstanceID           string  `json:"instance_id"`
+	Alive                bool    `json:"alive"`
+	CPUPercent           float64 `json:"cpu_percent"`
+	MemoryRSS            int64   `json:"memory_rss_bytes"`
+	Command              string  `json:"command"`
+	CWD                  string  `json:"cwd"`
+	ProjectName          string  `json:"project_name"`
+	WriterCount          int     `json:"writer_count"`
+	Status               string  `json:"status"` // "active", "hidden", "offline", "suspicious", "system"
+	Suspicious           bool    `json:"suspicious"`
+	LastAttachSecondsAgo int     `json:"last_attach_seconds_ago"`
 }
 
 type monitoringResponse struct {
@@ -465,17 +467,27 @@ func (h *AdminHandler) Monitoring(c *gin.Context) {
 		if s.WriterCount > 0 {
 			status = "active"
 		} else if s.Alive {
-			status = "hidden"
+			if s.Suspicious {
+				status = "suspicious"
+			} else {
+				status = "hidden"
+			}
+		}
+		lastAttachSec := 0
+		if !s.LastWriterAttachAt.IsZero() {
+			lastAttachSec = int(time.Since(s.LastWriterAttachAt).Seconds())
 		}
 		pi := processInfo{
-			PID:         s.PID,
-			UserID:      s.UserID,
-			Username:    username,
-			SessionKey:  s.Key,
-			InstanceID:  s.InstanceID,
-			Alive:       s.Alive,
-			WriterCount: s.WriterCount,
-			Status:      status,
+			PID:                  s.PID,
+			UserID:               s.UserID,
+			Username:             username,
+			SessionKey:           s.Key,
+			InstanceID:           s.InstanceID,
+			Alive:                s.Alive,
+			WriterCount:          s.WriterCount,
+			Status:               status,
+			Suspicious:           s.Suspicious,
+			LastAttachSecondsAgo: lastAttachSec,
 		}
 		if runtime.GOOS == "linux" && s.PID > 0 {
 			pi.MemoryRSS, pi.Command, pi.CWD = readProcInfo(s.PID)

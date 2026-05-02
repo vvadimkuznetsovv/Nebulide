@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -76,14 +77,22 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 		return
 	}
 
-	instanceID := c.Query("instanceId")
-	if instanceID == "" {
-		instanceID = "default"
+	rawInstanceID := c.Query("instanceId")
+	if rawInstanceID == "" {
+		rawInstanceID = "default"
+	}
+	// Extract wsId (workspace session id) from instanceId format "{instance}@ws:{wsId}"
+	// — used for writer dedup, NOT for session key (otherwise wsId changes create phantom sessions)
+	instanceID := rawInstanceID
+	wsId := ""
+	if idx := strings.Index(rawInstanceID, "@ws:"); idx > 0 {
+		instanceID = rawInstanceID[:idx]
+		wsId = rawInstanceID[idx+4:]
 	}
 	sessionKey := "term:" + claims.UserID.String() + ":" + instanceID
 
-	log.Printf("[Terminal] NEW WS connection: remote=%s instanceId=%q sessionKey=%s",
-		c.Request.RemoteAddr, instanceID, sessionKey)
+	log.Printf("[Terminal] NEW WS connection: remote=%s rawInstance=%q instance=%q wsId=%q sessionKey=%s",
+		c.Request.RemoteAddr, rawInstanceID, instanceID, wsId, sessionKey)
 
 	conn, err := h.upgrader.Upgrade(c.Writer, c.Request, nil)
 	if err != nil {
@@ -135,8 +144,8 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 	// pumpOutput broadcasts to all writers via multiWriter.
 	// Multiple devices on the same workspace share one PTY.
 	writer := &wsWriter{conn: conn}
-	log.Printf("[Terminal] calling AddWriter key=%s", sessionKey)
-	termSession.AddWriter(writer, conn)
+	log.Printf("[Terminal] calling AddWriter key=%s wsId=%s", sessionKey, wsId)
+	termSession.AddWriter(writer, conn, wsId)
 	log.Printf("[Terminal] AddWriter done key=%s", sessionKey)
 
 	// Ping/pong keepalive — detect dead clients, prevent proxy timeouts.
