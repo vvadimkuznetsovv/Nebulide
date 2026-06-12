@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -44,35 +43,24 @@ func main() {
 	// Services
 	claudeService := services.NewClaudeService(cfg.ClaudeAllowedTools)
 	terminalService := services.NewTerminalService()
-	// When a claude-* terminal loses its child process (Ctrl+C), broadcast pet_event:disconnected
-	terminalService.OnChildExited = func(userID, instanceID string) {
-		iid := instanceID
-		if idx := strings.Index(iid, "@ws:"); idx >= 0 {
-			iid = iid[:idx]
-		}
-		log.Printf("[Main] child exited → broadcasting pet_event:disconnected user=%s instance=%s", userID, iid)
+	// childWatchLoop is the single source of truth for pet existence:
+	// claude descendant appears/disappears → broadcast pet_event to all devices.
+	broadcastPetEvent := func(action, userID, instanceID, workspaceID string) {
+		log.Printf("[Main] claude %s → broadcasting pet_event user=%s instance=%s ws=%s", action, userID, instanceID, workspaceID)
 		payload, _ := json.Marshal(map[string]string{
 			"type":        "pet_event",
-			"pet_action":  "disconnected",
-			"instance_id": iid,
+			"pet_action":  action,
+			"instance_id": instanceID,
+			"session_id":  workspaceID,
 			"device_id":   "server",
 		})
 		database.RDB.Publish(context.Background(), "ws:user:"+userID, string(payload))
 	}
-	// When a claude-* terminal gains a child process (claude started), broadcast pet_event:launched
-	terminalService.OnChildStarted = func(userID, instanceID string) {
-		iid := instanceID
-		if idx := strings.Index(iid, "@ws:"); idx >= 0 {
-			iid = iid[:idx]
-		}
-		log.Printf("[Main] child started → broadcasting pet_event:launched user=%s instance=%s", userID, iid)
-		payload, _ := json.Marshal(map[string]string{
-			"type":        "pet_event",
-			"pet_action":  "launched",
-			"instance_id": iid,
-			"device_id":   "server",
-		})
-		database.RDB.Publish(context.Background(), "ws:user:"+userID, string(payload))
+	terminalService.OnChildExited = func(userID, instanceID, workspaceID string) {
+		broadcastPetEvent("disconnected", userID, instanceID, workspaceID)
+	}
+	terminalService.OnChildStarted = func(userID, instanceID, workspaceID string) {
+		broadcastPetEvent("launched", userID, instanceID, workspaceID)
 	}
 	presenceService := services.NewPresenceService()
 

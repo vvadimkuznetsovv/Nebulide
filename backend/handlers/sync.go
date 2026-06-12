@@ -34,10 +34,10 @@ type syncClientMsg struct {
 }
 
 type syncServerMsg struct {
-	Type                  string    `json:"type"`                                    // register_ok | workspace_locked | workspace_unlocked | force_disconnected
+	Type                  string    `json:"type"`                                    // register_ok | workspace_locked | workspace_unlocked | force_disconnected | terminal_reconcile
 	SessionID             string    `json:"session_id,omitempty"`
 	LockedBy              *LockInfo `json:"locked_by,omitempty"`
-	ActiveClaudeTerminals []string  `json:"active_claude_terminals,omitempty"`       // instanceIds of alive claude-* terminals (sent with register_ok)
+	ActiveClaudeTerminals []string  `json:"active_claude_terminals,omitempty"`       // instanceIds where a claude descendant is alive (register_ok + terminal_reconcile)
 }
 
 // LockInfo describes the device currently holding a workspace lock.
@@ -71,29 +71,26 @@ func NewSyncHandler(cfg *config.Config, presence *services.PresenceService, term
 	}
 }
 
-// activeClaudeTerminals returns instanceIds of alive claude-* terminal sessions
-// for a user within a specific workspace session. The workspaceSessionID filter
-// prevents zombie terminals from other workspaces from creating phantom pets.
+// activeClaudeTerminals returns instanceIds of alive terminal sessions where
+// a `claude` descendant process is currently running. The workspaceSessionID
+// filter prevents zombie terminals from other workspaces from creating
+// phantom pets. No instance_id prefix filter — claude can run in any terminal.
 func (h *SyncHandler) activeClaudeTerminals(userID, workspaceSessionID string) []string {
 	if h.terminal == nil {
 		return nil
 	}
 	sessions := h.terminal.ListUserSessions(userID)
-	suffix := "@ws:" + workspaceSessionID
 	var result []string
 	for _, s := range sessions {
-		if strings.Contains(s.InstanceID, "claude-") && s.Alive && s.HasChildren {
-			// Filter by workspace session if specified
-			if workspaceSessionID != "" && !strings.HasSuffix(s.InstanceID, suffix) {
-				continue
-			}
-			// Return clean instanceId (strip @ws: suffix)
-			iid := s.InstanceID
-			if idx := strings.Index(iid, "@ws:"); idx >= 0 {
-				iid = iid[:idx]
-			}
-			result = append(result, iid)
+		if !s.Alive || !s.HasClaudeChild {
+			continue
 		}
+		// Filter by workspace session if specified (WorkspaceID is recorded
+		// on attach from the @ws: suffix; the session key itself has none)
+		if workspaceSessionID != "" && s.WorkspaceID != workspaceSessionID {
+			continue
+		}
+		result = append(result, s.InstanceID)
 	}
 	return result
 }
@@ -205,6 +202,29 @@ func (h *SyncHandler) HandleWebSocket(c *gin.Context) {
 						activeSessionID = ""
 					}
 				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	// --- pet reconcile broadcast (every 15s) ---
+	// Sends authoritative list of terminals with a live claude descendant.
+	// Frontend reconciles its pet store: spawns missing, kills orphaned (with grace).
+	go func() {
+		ticker := time.NewTicker(15 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				if activeSessionID == "" {
+					continue
+				}
+				sendJSON(syncServerMsg{
+					Type:                  "terminal_reconcile",
+					SessionID:             activeSessionID,
+					ActiveClaudeTerminals: h.activeClaudeTerminals(userID, activeSessionID),
+				})
 			case <-ctx.Done():
 				return
 			}

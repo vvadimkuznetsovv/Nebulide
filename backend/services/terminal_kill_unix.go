@@ -63,3 +63,55 @@ func getChildPids(pid int) []int {
 	}
 	return pids
 }
+
+// hasClaudeProcess walks the process tree from rootPid (BFS, max depth 4)
+// and returns true if any descendant's cmdline argv contains "claude".
+// Reads /proc/{pid}/cmdline (NUL-separated argv).
+func hasClaudeProcess(rootPid int) bool {
+	if rootPid <= 0 {
+		return false
+	}
+	queue := []int{rootPid}
+	visited := make(map[int]bool, 16)
+	const maxDepth = 4
+	for depth := 0; depth <= maxDepth && len(queue) > 0; depth++ {
+		var next []int
+		for _, pid := range queue {
+			if visited[pid] {
+				continue
+			}
+			visited[pid] = true
+			if pid != rootPid {
+				cmdlineFile := filepath.Join("/proc", strconv.Itoa(pid), "cmdline")
+				if data, err := os.ReadFile(cmdlineFile); err == nil && isClaudeCmdline(data) {
+					return true
+				}
+			}
+			for _, child := range getChildPids(pid) {
+				if !visited[child] {
+					next = append(next, child)
+				}
+			}
+		}
+		queue = next
+	}
+	return false
+}
+
+// isClaudeCmdline checks if any argv token (NUL-separated) refers to a
+// claude binary. Matches "claude", "claude.js" or "claude-*" basenames.
+func isClaudeCmdline(data []byte) bool {
+	for _, p := range strings.Split(string(data), "\x00") {
+		if p == "" {
+			continue
+		}
+		base := p
+		if idx := strings.LastIndexAny(p, "/\\"); idx >= 0 {
+			base = p[idx+1:]
+		}
+		if base == "claude" || base == "claude.js" || strings.HasPrefix(base, "claude-") {
+			return true
+		}
+	}
+	return false
+}

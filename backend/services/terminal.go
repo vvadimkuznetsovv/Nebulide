@@ -201,13 +201,13 @@ type TerminalService struct {
 	sessions map[string]*TerminalSession
 	mu       sync.RWMutex
 
-	// OnChildExited is called when a claude-* terminal's child process exits
-	// (e.g. user pressed Ctrl+C). Parameters: userID, instanceID.
-	OnChildExited func(userID, instanceID string)
+	// OnChildExited is called when a terminal loses its live `claude` descendant
+	// (Ctrl+C, crash, terminal closed/killed). Parameters: userID, instanceID, workspaceID.
+	OnChildExited func(userID, instanceID, workspaceID string)
 
-	// OnChildStarted is called when a claude-* terminal gains a child process
-	// (e.g. user ran `claude` command). Parameters: userID, instanceID.
-	OnChildStarted func(userID, instanceID string)
+	// OnChildStarted is called when a terminal gains a live `claude` descendant
+	// (user ran `claude` command). Parameters: userID, instanceID, workspaceID.
+	OnChildStarted func(userID, instanceID, workspaceID string)
 }
 
 type TerminalSession struct {
@@ -235,6 +235,11 @@ type TerminalSession struct {
 	// Used for "suspicious" detection: if other sessions of the same user
 	// recently got a writer but this one didn't, it's likely dead.
 	LastWriterAttachAt time.Time
+
+	// WorkspaceID is the workspace session this terminal belongs to
+	// (from the @ws: suffix of the connect query). Set on every attach;
+	// used to scope active_claude_terminals / pet events per workspace.
+	WorkspaceID string
 }
 
 func NewTerminalService() *TerminalService {
@@ -285,40 +290,53 @@ func (s *TerminalService) reapLoop() {
 	}
 }
 
-// childWatchLoop checks every 5 seconds if claude-* terminals lost their child
-// processes (e.g. user pressed Ctrl+C). When detected, calls OnChildExited
-// so the frontend can remove the pet.
+// watchedClaude remembers identity of a session that had a claude descendant,
+// so OnChildExited can fire even after the session is removed from the map.
+type watchedClaude struct {
+	userID      string
+	instanceID  string
+	workspaceID string
+}
+
+// childWatchLoop checks every 2 seconds if any alive terminal gained or lost
+// a live `claude` descendant process (precise cmdline detection — vim/top/ssh
+// don't qualify). On transition fires OnChildStarted / OnChildExited — this is
+// the single source of truth for pet existence on the frontend.
+// A session disappearing from the map (closed/killed) or dying also counts
+// as an exit — otherwise closing a terminal never broadcasts disconnected.
 func (s *TerminalService) childWatchLoop() {
-	prevState := make(map[string]bool) // session key → had children last check
-	ticker := time.NewTicker(5 * time.Second)
+	prevState := make(map[string]watchedClaude) // session key → claude present last check
+	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	for range ticker.C {
+		current := make(map[string]watchedClaude)
 		s.mu.RLock()
 		for key, sess := range s.sessions {
-			if !strings.Contains(key, "claude-") || !sess.IsAlive() {
+			if !sess.IsAlive() || !sess.HasClaudeChild() {
 				continue
 			}
-			hasChildren := sess.HasChildProcesses()
-			had := prevState[key]
-			if had && !hasChildren && s.OnChildExited != nil {
-				uid, iid := parseSessionKey(key)
-				log.Printf("[TerminalService] child exited: key=%s uid=%s iid=%s", key, uid, iid)
-				go s.OnChildExited(uid, iid)
-			}
-			if !had && hasChildren && s.OnChildStarted != nil {
-				uid, iid := parseSessionKey(key)
-				log.Printf("[TerminalService] child started: key=%s uid=%s iid=%s", key, uid, iid)
-				go s.OnChildStarted(uid, iid)
-			}
-			prevState[key] = hasChildren
-		}
-		// Cleanup stale entries for removed sessions
-		for key := range prevState {
-			if _, exists := s.sessions[key]; !exists {
-				delete(prevState, key)
-			}
+			uid, iid := parseSessionKey(key)
+			sess.mu.Lock()
+			wsID := sess.WorkspaceID
+			sess.mu.Unlock()
+			current[key] = watchedClaude{userID: uid, instanceID: iid, workspaceID: wsID}
 		}
 		s.mu.RUnlock()
+
+		// Fire transitions outside the service lock
+		for key, w := range current {
+			if _, had := prevState[key]; !had && s.OnChildStarted != nil {
+				log.Printf("[TerminalService] claude started: key=%s uid=%s iid=%s ws=%s", key, w.userID, w.instanceID, w.workspaceID)
+				go s.OnChildStarted(w.userID, w.instanceID, w.workspaceID)
+			}
+		}
+		for key, w := range prevState {
+			if _, still := current[key]; !still && s.OnChildExited != nil {
+				log.Printf("[TerminalService] claude exited: key=%s uid=%s iid=%s ws=%s", key, w.userID, w.instanceID, w.workspaceID)
+				go s.OnChildExited(w.userID, w.instanceID, w.workspaceID)
+			}
+		}
+		prevState = current
 	}
 }
 
@@ -590,6 +608,16 @@ func (ts *TerminalSession) HasChildProcesses() bool {
 	return hasChildProcesses(ts.Cmd.Process.Pid)
 }
 
+// HasClaudeChild walks the process tree from the shell and returns true
+// only if a descendant matches a "claude" binary by argv. Used to drive
+// pet reconciliation — vim/top/ssh inside the shell don't trigger pets.
+func (ts *TerminalSession) HasClaudeChild() bool {
+	if ts.Cmd == nil || ts.Cmd.Process == nil {
+		return false
+	}
+	return hasClaudeProcess(ts.Cmd.Process.Pid)
+}
+
 // IsAlive returns true if the shell process is still running.
 func (ts *TerminalSession) IsAlive() bool {
 	select {
@@ -610,6 +638,9 @@ func (ts *TerminalSession) AddWriter(w io.Writer, closer io.Closer, wsId string)
 	ts.mu.Lock()
 	ts.OrphanSince = time.Time{}
 	ts.LastWriterAttachAt = time.Now()
+	if wsId != "" {
+		ts.WorkspaceID = wsId
+	}
 	ts.mu.Unlock()
 }
 
@@ -666,11 +697,13 @@ func (ts *TerminalSession) CloseKeepScrollback() {
 
 // SessionInfo holds metadata about a terminal session for admin listing.
 type SessionInfo struct {
-	Key         string `json:"session_key"`
-	UserID      string `json:"user_id"`
-	InstanceID  string `json:"instance_id"`
-	Alive       bool   `json:"alive"`
-	HasChildren bool   `json:"has_children"` // shell has child processes (e.g. claude running inside)
+	Key            string `json:"session_key"`
+	UserID         string `json:"user_id"`
+	InstanceID     string `json:"instance_id"`
+	WorkspaceID    string `json:"workspace_id"` // workspace session this terminal belongs to
+	Alive          bool   `json:"alive"`
+	HasChildren    bool   `json:"has_children"`     // shell has any child process (vim, claude, etc.)
+	HasClaudeChild bool   `json:"has_claude_child"` // shell has a `claude` descendant specifically
 }
 
 // parseSessionKey splits "term:{userID}:{instanceId}" into parts.
@@ -718,12 +751,17 @@ func (s *TerminalService) ListUserSessions(userID string) []SessionInfo {
 	for key, sess := range s.sessions {
 		if strings.HasPrefix(key, prefix) {
 			_, iid := parseSessionKey(key)
+			sess.mu.Lock()
+			wsID := sess.WorkspaceID
+			sess.mu.Unlock()
 			result = append(result, SessionInfo{
-				Key:         key,
-				UserID:      userID,
-				InstanceID:  iid,
-				Alive:       sess.IsAlive(),
-				HasChildren: sess.HasChildProcesses(),
+				Key:            key,
+				UserID:         userID,
+				InstanceID:     iid,
+				WorkspaceID:    wsID,
+				Alive:          sess.IsAlive(),
+				HasChildren:    sess.HasChildProcesses(),
+				HasClaudeChild: sess.HasClaudeChild(),
 			})
 		}
 	}
