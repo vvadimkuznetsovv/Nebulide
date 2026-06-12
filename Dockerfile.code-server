@@ -11,7 +11,7 @@ RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
     apt-get clean && rm -rf /var/lib/apt/lists/*
 
 # Claude Code CLI
-RUN npm install -g @anthropic-ai/claude-code
+RUN npm install -g @anthropic-ai/claude-code@2.1.175
 
 # Disable code-server password auth on every container start.
 # Nebulide's JWT reverse proxy (/code/*) handles all authentication.

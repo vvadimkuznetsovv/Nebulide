@@ -6,7 +6,7 @@ RUN apk add --no-cache ca-certificates tzdata bash curl sudo util-linux libreoff
 RUN apk add --no-cache nodejs npm git openssh-client python3 py3-pip postgresql-client
 
 # Install Claude Code CLI
-RUN npm install -g @anthropic-ai/claude-code
+RUN npm install -g @anthropic-ai/claude-code@2.1.175
 
 WORKDIR /app
 
