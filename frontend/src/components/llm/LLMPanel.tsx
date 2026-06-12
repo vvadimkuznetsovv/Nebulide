@@ -264,8 +264,9 @@ export default function LLMPanel() {
     try {
       stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaStreamRef.current = stream;
-    } catch {
-      toast.error('Microphone access denied. Check site permissions in browser settings.', { duration: 5000 });
+    } catch (err) {
+      const name = err instanceof Error ? err.name : String(err);
+      toast.error(`Microphone access failed (${name}). Check site permissions in browser settings.`, { duration: 5000 });
       return;
     }
     try {
@@ -277,7 +278,14 @@ export default function LLMPanel() {
         const text = e.results[e.results.length - 1][0].transcript;
         setInput((prev) => prev ? prev + ' ' + text : text);
       };
-      rec.onerror = () => { stopVoiceStream(); setVoiceActive(false); };
+      rec.onerror = (e) => {
+        console.error('[Voice] SpeechRecognition error:', e.error);
+        // 'aborted' = manual stop, 'no-speech' = silence — not worth a toast
+        if (e.error !== 'aborted' && e.error !== 'no-speech') {
+          toast.error(`Voice recognition error: ${e.error}`, { duration: 5000 });
+        }
+        stopVoiceStream(); setVoiceActive(false);
+      };
       rec.onend = () => { stopVoiceStream(); setVoiceActive(false); };
       recognitionRef.current = rec;
       rec.start();

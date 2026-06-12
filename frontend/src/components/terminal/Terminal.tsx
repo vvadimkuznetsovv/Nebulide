@@ -295,14 +295,15 @@ function createXterm(instanceId: string): TermSession {
             log(`[Terminal] inputBuffer ENTER id=${instanceId} text="${text}" matchesClaude=${/^claude\b/.test(text)}`);
           }
 
-          // Detect claude command launch from any terminal
+          // Detect claude command launch from any terminal — local optimistic
+          // feedback. Cross-device broadcast comes from backend's childWatchLoop
+          // once it sees the actual claude descendant in the process tree.
           if (text && /^claude\b/.test(text) && !/^claude\s+(-h|--help|--version|-v)$/.test(text)) {
             const petsBefore = Object.keys(usePetStore.getState().pets);
             log(`[Terminal] CLAUDE DETECTED id=${instanceId} petsBefore=`, petsBefore);
             emitActivity({ type: 'claude_launched', instanceId });
             const petsAfter = Object.keys(usePetStore.getState().pets);
             log(`[Terminal] after emit petsAfter=`, petsAfter);
-            sendSyncMessage({ type: 'pet_event', pet_action: 'launched', instance_id: instanceId });
           }
 
           // Sentiment analysis for terminals with active pet
@@ -1060,7 +1061,8 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
       log('[Voice] getUserMedia granted, keeping stream alive');
     } catch (err) {
       log('[Voice] getUserMedia DENIED:', err);
-      toast.error('Microphone access denied. Check site permissions in browser settings.', { duration: 5000 });
+      const name = err instanceof Error ? err.name : String(err);
+      toast.error(`Microphone access failed (${name}). Check site permissions in browser settings.`, { duration: 5000 });
       return;
     }
     try {
@@ -1074,7 +1076,14 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
         log('[Voice] Result:', text);
         setVoiceText(prev => prev ? prev + ' ' + text : text);
       };
-      rec.onerror = (e) => { log('[Voice] Error:', e); stopVoiceStream(); setVoiceActive(false); };
+      rec.onerror = (e) => {
+        log('[Voice] Error:', e.error);
+        // 'aborted' = manual stop, 'no-speech' = silence — not worth a toast
+        if (e.error !== 'aborted' && e.error !== 'no-speech') {
+          toast.error(`Voice recognition error: ${e.error}`, { duration: 5000 });
+        }
+        stopVoiceStream(); setVoiceActive(false);
+      };
       rec.onend = () => { log('[Voice] Ended'); stopVoiceStream(); setVoiceActive(false); };
       recognitionRef.current = rec;
       rec.start();
