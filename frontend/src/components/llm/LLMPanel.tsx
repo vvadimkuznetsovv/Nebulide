@@ -12,6 +12,7 @@ import {
 } from '../../api/llm';
 import api from '../../api/client';
 import toast from 'react-hot-toast';
+import { useVoiceInput } from '../../hooks/useVoiceInput';
 
 const MAX_INPUT_CHARS = 100000;
 
@@ -93,7 +94,6 @@ export default function LLMPanel() {
   const [streamContent, setStreamContent] = useState('');
   const [showSessions, setShowSessions] = useState(true);
   const [processing, setProcessing] = useState(false);
-  const [voiceActive, setVoiceActive] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchOpen, setSearchOpen] = useState(false);
   const [webSearch, setWebSearch] = useState(false);
@@ -104,9 +104,7 @@ export default function LLMPanel() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [editingMsgId, setEditingMsgId] = useState<string | null>(null);
   const [editText, setEditText] = useState('');
-  const mediaStreamRef = useRef<MediaStream | null>(null);
   const abortRef = useRef<AbortController | null>(null);
-  const recognitionRef = useRef<SpeechRecognition | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -250,51 +248,10 @@ export default function LLMPanel() {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); }
   };
 
-  // Voice
-  const stopVoiceStream = useCallback(() => {
-    mediaStreamRef.current?.getTracks().forEach(t => t.stop());
-    mediaStreamRef.current = null;
-  }, []);
-
-  const toggleVoice = useCallback(async () => {
-    if (voiceActive) { recognitionRef.current?.stop(); stopVoiceStream(); setVoiceActive(false); return; }
-    const SR = window.SpeechRecognition || (window as unknown as { webkitSpeechRecognition: typeof SpeechRecognition }).webkitSpeechRecognition;
-    if (!SR) { toast.error('Speech recognition not supported', { duration: 4000 }); return; }
-    let stream: MediaStream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      mediaStreamRef.current = stream;
-    } catch (err) {
-      const name = err instanceof Error ? err.name : String(err);
-      toast.error(`Microphone access failed (${name}). Check site permissions in browser settings.`, { duration: 5000 });
-      return;
-    }
-    try {
-      const rec = new SR();
-      rec.continuous = true;
-      rec.interimResults = false;
-      rec.lang = navigator.language || 'en-US';
-      rec.onresult = (e: SpeechRecognitionEvent) => {
-        const text = e.results[e.results.length - 1][0].transcript;
-        setInput((prev) => prev ? prev + ' ' + text : text);
-      };
-      rec.onerror = (e) => {
-        console.error('[Voice] SpeechRecognition error:', e.error);
-        // 'aborted' = manual stop, 'no-speech' = silence — not worth a toast
-        if (e.error !== 'aborted' && e.error !== 'no-speech') {
-          toast.error(`Voice recognition error: ${e.error}`, { duration: 5000 });
-        }
-        stopVoiceStream(); setVoiceActive(false);
-      };
-      rec.onend = () => { stopVoiceStream(); setVoiceActive(false); };
-      recognitionRef.current = rec;
-      rec.start();
-      setVoiceActive(true);
-    } catch (e) {
-      stopVoiceStream();
-      toast.error('Voice input failed: ' + String(e), { duration: 4000 });
-    }
-  }, [voiceActive, stopVoiceStream]);
+  // Voice — Web Speech с fallback на серверный Whisper (useVoiceInput)
+  const voice = useVoiceInput({
+    onText: (text) => setInput((prev) => (prev ? prev + ' ' + text : text)),
+  });
 
   const handleTrim = useCallback(async (keep: number) => {
     if (!activeSessionId) return;
@@ -602,9 +559,13 @@ export default function LLMPanel() {
 
         {/* Tools row */}
         <div className="flex items-center gap-1 mb-1.5">
-          <button type="button" className={`btn-glass p-1.5 rounded${voiceActive ? ' active' : ''}`}
-            onClick={toggleVoice} title="Voice input"
-            style={voiceActive ? { background: 'rgba(255,50,50,0.2)', border: '1px solid rgba(255,50,50,0.4)', color: '#f55' } : {}}>
+          <button type="button" className={`btn-glass p-1.5 rounded${voice.active ? ' active' : ''}`}
+            onClick={voice.toggle} title={voice.state === 'transcribing' ? 'Transcribing...' : 'Voice input'}
+            style={voice.active
+              ? { background: 'rgba(255,50,50,0.2)', border: '1px solid rgba(255,50,50,0.4)', color: '#f55' }
+              : voice.state === 'transcribing'
+                ? { background: 'rgba(var(--accent-rgb),0.2)', border: '1px solid rgba(var(--accent-rgb),0.4)', color: 'var(--accent)', cursor: 'wait' }
+                : {}}>
             <MicIcon />
           </button>
           <button type="button" className="btn-glass p-1.5 rounded" onClick={() => fileInputRef.current?.click()}
@@ -651,7 +612,7 @@ export default function LLMPanel() {
                 }
               }
             }}
-            placeholder={voiceActive ? 'Listening...' : attachedImage ? 'Describe what you want to know about the image...' : 'Type a message...'}
+            placeholder={voice.state === 'transcribing' ? 'Transcribing...' : voice.state === 'recording' ? 'Recording...' : voice.state === 'listening' ? 'Listening...' : attachedImage ? 'Describe what you want to know about the image...' : 'Type a message...'}
             className="glass-input flex-1 px-3 py-2 rounded-lg text-xs"
             style={{ resize: 'none', minHeight: '36px', maxHeight: '120px', overflowY: 'auto', lineHeight: 1.5 }}
             rows={1}
