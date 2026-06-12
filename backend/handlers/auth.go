@@ -280,11 +280,7 @@ func (h *AuthHandler) Refresh(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"access_token":  accessToken,
 		"refresh_token": refreshToken,
-		"user": gin.H{
-			"id":           user.ID,
-			"username":     user.Username,
-			"totp_enabled": user.TOTPEnabled,
-		},
+		"user":          h.userResponse(user),
 	})
 }
 
@@ -294,6 +290,30 @@ func (h *AuthHandler) Logout(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Logged out"})
 }
 
+// userWorkspaceDir returns the filesystem workspace path for a user.
+func (h *AuthHandler) userWorkspaceDir(u models.User) string {
+	if u.IsAdmin {
+		return h.cfg.ClaudeWorkingDir
+	}
+	return h.cfg.GetUserWorkspaceDir(u.Username)
+}
+
+// userResponse builds the full user object returned by Me/Login/TOTP/Refresh.
+// All four MUST return the same shape — the frontend relies on shared_dir and
+// workspace_dir (Shared/Uploads buttons) being present right after login,
+// not only after a Me() refresh.
+func (h *AuthHandler) userResponse(u models.User) gin.H {
+	return gin.H{
+		"id":            u.ID,
+		"username":      u.Username,
+		"is_admin":      u.IsAdmin,
+		"totp_enabled":  u.TOTPEnabled,
+		"telegram_id":   u.TelegramID,
+		"shared_dir":    h.cfg.SharedDir,
+		"workspace_dir": h.userWorkspaceDir(u),
+	}
+}
+
 func (h *AuthHandler) Me(c *gin.Context) {
 	userID, _ := c.Get("user_id")
 	var user models.User
@@ -301,20 +321,7 @@ func (h *AuthHandler) Me(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{
-		"id":            user.ID,
-		"username":      user.Username,
-		"totp_enabled":  user.TOTPEnabled,
-		"is_admin":      user.IsAdmin,
-		"telegram_id":   user.TelegramID,
-		"shared_dir":    h.cfg.SharedDir,
-		"workspace_dir": func() string {
-			if user.IsAdmin {
-				return h.cfg.ClaudeWorkingDir
-			}
-			return h.cfg.GetUserWorkspaceDir(user.Username)
-		}(),
-	})
+	c.JSON(http.StatusOK, h.userResponse(user))
 }
 
 func (h *AuthHandler) UpdateTelegramID(c *gin.Context) {
@@ -454,10 +461,6 @@ func (h *AuthHandler) issueFullTokens(c *gin.Context, user models.User) {
 	c.JSON(http.StatusOK, gin.H{
 		"access_token":  accessToken,
 		"refresh_token": refreshToken,
-		"user": gin.H{
-			"id":           user.ID,
-			"username":     user.Username,
-			"totp_enabled": user.TOTPEnabled,
-		},
+		"user":          h.userResponse(user),
 	})
 }
