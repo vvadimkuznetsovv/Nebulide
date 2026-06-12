@@ -526,19 +526,18 @@ func (h *ClaudeSessionsHandler) SearchSessions(c *gin.Context) {
 				continue
 			}
 
-			// Search through messages
-			match := h.searchInSession(fullPath, qLower)
+			// Search through custom titles (session/branch names) + messages
+			titles := extractCustomTitles(fullPath, fi.Size())
+			match := h.searchInSession(fullPath, qLower, titles)
 			if match == nil {
 				continue
 			}
 
 			var name string
-			if titles := extractCustomTitles(fullPath, fi.Size()); titles != nil {
-				if t, ok := titles[match.sessionID]; ok {
-					name = t
-				} else if t, ok := titles[strings.TrimSuffix(f.Name(), ".jsonl")]; ok {
-					name = t
-				}
+			if t, ok := titles[match.sessionID]; ok {
+				name = t
+			} else if t, ok := titles[strings.TrimSuffix(f.Name(), ".jsonl")]; ok {
+				name = t
 			}
 
 			results = append(results, searchResult{
@@ -579,12 +578,21 @@ type searchMatch struct {
 	cwd          string
 }
 
-func (h *ClaudeSessionsHandler) searchInSession(filePath, qLower string) *searchMatch {
+func (h *ClaudeSessionsHandler) searchInSession(filePath, qLower string, titles map[string]string) *searchMatch {
 	file, err := os.Open(filePath)
 	if err != nil {
 		return nil
 	}
 	defer file.Close()
+
+	// Custom title (session/branch name) match — snippet is the title itself
+	titleHit := ""
+	for _, t := range titles {
+		if strings.Contains(strings.ToLower(t), qLower) {
+			titleHit = t
+			break
+		}
+	}
 
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
@@ -625,6 +633,17 @@ func (h *ClaudeSessionsHandler) searchInSession(filePath, qLower string) *search
 				firstMessage = truncate(text, 200)
 			}
 
+			// Title matched — metadata collected, no need to scan content
+			if titleHit != "" && sessionID != "" && firstMessage != "" {
+				return &searchMatch{
+					sessionID:    sessionID,
+					slug:         slug,
+					snippet:      titleHit,
+					firstMessage: firstMessage,
+					cwd:          cwd,
+				}
+			}
+
 			textLower := strings.ToLower(text)
 			idx := strings.Index(textLower, qLower)
 			if idx >= 0 {
@@ -663,6 +682,20 @@ func (h *ClaudeSessionsHandler) searchInSession(filePath, qLower string) *search
 		// Don't scan more than 2000 lines per file for performance
 		if lineCount > 2000 {
 			break
+		}
+	}
+
+	// Title matched but scan ended before full metadata was collected
+	if titleHit != "" {
+		if sessionID == "" {
+			sessionID = strings.TrimSuffix(filepath.Base(filePath), ".jsonl")
+		}
+		return &searchMatch{
+			sessionID:    sessionID,
+			slug:         slug,
+			snippet:      titleHit,
+			firstMessage: firstMessage,
+			cwd:          cwd,
 		}
 	}
 	return nil
