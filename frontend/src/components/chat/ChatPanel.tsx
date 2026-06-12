@@ -3,7 +3,6 @@ import { listClaudeSessions, listClaudePlans, readClaudePlan, readClaudeSession,
 import type { ClaudeProject, ClaudeSession, ClaudePlan, ClaudeSessionMessage, ClaudeSearchResult, ClaudeBranch } from '../../api/claudeSessions';
 import { useLayoutStore } from '../../store/layoutStore';
 import { typeCommandInTerminal } from '../terminal/Terminal';
-import { emitActivity } from '../../utils/activityBus';
 import toast from 'react-hot-toast';
 import { log } from '../../utils/logger';
 import LLMPanel from '../llm/LLMPanel';
