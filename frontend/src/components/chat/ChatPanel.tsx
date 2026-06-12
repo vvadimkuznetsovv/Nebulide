@@ -4,7 +4,6 @@ import type { ClaudeProject, ClaudeSession, ClaudePlan, ClaudeSessionMessage, Cl
 import { useLayoutStore } from '../../store/layoutStore';
 import { typeCommandInTerminal } from '../terminal/Terminal';
 import { emitActivity } from '../../utils/activityBus';
-import { sendSyncMessage } from '../../utils/syncBridge';
 import toast from 'react-hot-toast';
 import { log } from '../../utils/logger';
 import LLMPanel from '../llm/LLMPanel';
@@ -35,7 +34,8 @@ function projectDisplayName(slug: string): string {
   return slug;
 }
 
-function sessionDisplayName(session: { first_message?: string; slug?: string; session_id: string }): string {
+function sessionDisplayName(session: { name?: string; first_message?: string; slug?: string; session_id: string }): string {
+  if (session.name) return session.name;
   if (session.first_message) {
     const msg = session.first_message;
     return msg.length > 60 ? msg.slice(0, 60) + '...' : msg;
@@ -264,7 +264,8 @@ export default function ChatPanel(_props: ChatPanelProps) {
     if (!searchQuery || searchResults !== null) return list;
     const q = searchQuery.toLowerCase();
     return list.filter(s =>
-      s.first_message?.toLowerCase().includes(q)
+      s.name?.toLowerCase().includes(q)
+      || s.first_message?.toLowerCase().includes(q)
       || s.slug?.toLowerCase().includes(q)
       || projectDisplayName(s.project).toLowerCase().includes(q)
     );
@@ -281,8 +282,9 @@ export default function ChatPanel(_props: ChatPanelProps) {
     const cmd = session.cwd ? `cd "${session.cwd}" && ${resumeCmd}` : resumeCmd;
     const ok = await typeCommandInTerminal(instanceId, cmd);
     if (ok) {
+      // Local optimistic feedback — backend's childWatchLoop will broadcast
+      // pet_event:launched to other devices once it sees the claude descendant.
       emitActivity({ type: 'claude_launched', instanceId });
-      sendSyncMessage({ type: 'pet_event', pet_action: 'launched', instance_id: instanceId });
     } else {
       toast.error('Failed to connect to terminal');
     }
@@ -993,7 +995,7 @@ export default function ChatPanel(_props: ChatPanelProps) {
                                 fontSize: 11, color: 'var(--text-primary)',
                                 overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                               }}>
-                                {branch.first_message || `Branch ${idx + 1}`}
+                                {branch.name || branch.first_message || `Branch ${idx + 1}`}
                               </div>
                               <div style={{ fontSize: 9, color: 'var(--text-muted)', marginTop: 2 }}>
                                 {branch.message_count} msgs · {timeAgo(branch.created_at)}

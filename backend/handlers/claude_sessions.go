@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -17,12 +18,23 @@ import (
 	"nebulide/config"
 )
 
+// cachedSession caches the parsed sessionInfo for a JSONL file keyed by path.
+// Valid while modTime+size are unchanged (sessions are append-only).
+type cachedSession struct {
+	modTime time.Time
+	size    int64
+	skip    bool // file has no conversation — excluded from listing
+	info    sessionInfo
+}
+
 type ClaudeSessionsHandler struct {
-	cfg *config.Config
+	cfg     *config.Config
+	cacheMu sync.RWMutex
+	cache   map[string]cachedSession
 }
 
 func NewClaudeSessionsHandler(cfg *config.Config) *ClaudeSessionsHandler {
-	return &ClaudeSessionsHandler{cfg: cfg}
+	return &ClaudeSessionsHandler{cfg: cfg, cache: make(map[string]cachedSession)}
 }
 
 // claudeBaseDir returns the .claude directory (shared for all users in Docker).
@@ -81,17 +93,66 @@ var slugRe = regexp.MustCompile(`^[a-zA-Z0-9_-]+$`)
 // --- JSONL metadata extraction ---
 
 type jsonlMeta struct {
-	SessionID  string `json:"sessionId"`
-	Slug       string `json:"slug"`
-	Type       string `json:"type"`
-	Timestamp  string `json:"timestamp"`
-	CWD        string `json:"cwd"`
-	UUID       string `json:"uuid"`
-	ParentUUID string `json:"parentUuid"`
-	Message    *struct {
+	SessionID   string `json:"sessionId"`
+	Slug        string `json:"slug"`
+	Type        string `json:"type"`
+	Timestamp   string `json:"timestamp"`
+	CWD         string `json:"cwd"`
+	UUID        string `json:"uuid"`
+	ParentUUID  string `json:"parentUuid"`
+	CustomTitle string `json:"customTitle"` // type == "custom-title": user-assigned session/branch name
+	Message     *struct {
 		Role    string          `json:"role"`
 		Content json.RawMessage `json:"content"`
 	} `json:"message,omitempty"`
+}
+
+// extractCustomTitles scans the tail of a JSONL file for custom-title records
+// ({"type":"custom-title","customTitle":"...","sessionId":"..."}). Claude CLI
+// re-appends them throughout the file, so the tail almost always contains the
+// latest one per sessionId; last record wins (renames). Returns sessionId → title.
+func extractCustomTitles(fullPath string, fileSize int64) map[string]string {
+	const tailSize = 64 * 1024
+	file, err := os.Open(fullPath)
+	if err != nil {
+		return nil
+	}
+	defer file.Close()
+
+	offset := int64(0)
+	if fileSize > tailSize {
+		offset = fileSize - tailSize
+	}
+	if _, err := file.Seek(offset, io.SeekStart); err != nil {
+		return nil
+	}
+
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
+	if offset > 0 {
+		scanner.Scan() // discard partial first line
+	}
+
+	var titles map[string]string
+	for scanner.Scan() {
+		line := scanner.Text()
+		if !strings.Contains(line, `"custom-title"`) {
+			continue
+		}
+		var rec struct {
+			Type        string `json:"type"`
+			CustomTitle string `json:"customTitle"`
+			SessionID   string `json:"sessionId"`
+		}
+		if json.Unmarshal([]byte(line), &rec) != nil || rec.Type != "custom-title" || rec.CustomTitle == "" {
+			continue
+		}
+		if titles == nil {
+			titles = map[string]string{}
+		}
+		titles[rec.SessionID] = rec.CustomTitle
+	}
+	return titles
 }
 
 func extractTextContent(meta jsonlMeta) string {
@@ -186,6 +247,7 @@ func countBranches(fullPath string, maxLines int) int {
 type sessionInfo struct {
 	SessionID    string  `json:"session_id"`
 	Slug         string  `json:"slug"`
+	Name         string  `json:"name,omitempty"` // user-assigned title (custom-title record)
 	CWD          string  `json:"cwd"`
 	CreatedAt    string  `json:"created_at"`
 	UpdatedAt    string  `json:"updated_at"`
@@ -214,6 +276,8 @@ func (h *ClaudeSessionsHandler) List(c *gin.Context) {
 	wsSlug := h.userWorkspaceSlug(c)
 
 	var projects []projectInfo
+	seenPaths := map[string]bool{}
+	var scannedDirs []string
 
 	for _, projEntry := range entries {
 		if !projEntry.IsDir() {
@@ -230,6 +294,7 @@ func (h *ClaudeSessionsHandler) List(c *gin.Context) {
 		if err != nil {
 			continue
 		}
+		scannedDirs = append(scannedDirs, projPath)
 
 		var sessions []sessionInfo
 		for _, f := range files {
@@ -238,13 +303,26 @@ func (h *ClaudeSessionsHandler) List(c *gin.Context) {
 			}
 
 			fullPath := filepath.Join(projPath, f.Name())
+			seenPaths[fullPath] = true
 			fi, err := os.Stat(fullPath)
 			if err != nil {
 				continue
 			}
 
+			// Cache hit: file unchanged since last parse (append-only JSONL)
+			h.cacheMu.RLock()
+			ce, cached := h.cache[fullPath]
+			h.cacheMu.RUnlock()
+			if cached && ce.modTime.Equal(fi.ModTime()) && ce.size == fi.Size() {
+				if !ce.skip {
+					sessions = append(sessions, ce.info)
+				}
+				continue
+			}
+
+			fileBaseID := strings.TrimSuffix(f.Name(), ".jsonl")
 			si := sessionInfo{
-				SessionID: strings.TrimSuffix(f.Name(), ".jsonl"),
+				SessionID: fileBaseID,
 				SizeMB:    float64(fi.Size()) / (1024 * 1024),
 				UpdatedAt: fi.ModTime().UTC().Format(time.RFC3339),
 				Project:   projEntry.Name(),
@@ -252,6 +330,7 @@ func (h *ClaudeSessionsHandler) List(c *gin.Context) {
 
 			// Read first 50 lines to extract metadata
 			hasConversation := false
+			titles := map[string]string{}
 			func() {
 				file, err := os.Open(fullPath)
 				if err != nil {
@@ -276,8 +355,13 @@ func (h *ClaudeSessionsHandler) List(c *gin.Context) {
 						continue
 					}
 
+					if meta.Type == "custom-title" && meta.CustomTitle != "" {
+						titles[meta.SessionID] = meta.CustomTitle
+						continue
+					}
+
 					// Use internal sessionId (what claude --resume expects)
-					if meta.SessionID != "" && si.SessionID == strings.TrimSuffix(f.Name(), ".jsonl") {
+					if meta.SessionID != "" && si.SessionID == fileBaseID {
 						si.SessionID = meta.SessionID
 					}
 
@@ -306,6 +390,9 @@ func (h *ClaudeSessionsHandler) List(c *gin.Context) {
 
 			// Skip files that have no conversation (e.g. file-history-snapshot only)
 			if !hasConversation {
+				h.cacheMu.Lock()
+				h.cache[fullPath] = cachedSession{modTime: fi.ModTime(), size: fi.Size(), skip: true}
+				h.cacheMu.Unlock()
 				continue
 			}
 
@@ -322,6 +409,20 @@ func (h *ClaudeSessionsHandler) List(c *gin.Context) {
 				maxLines = 500
 			}
 			si.BranchCount = countBranches(fullPath, maxLines)
+
+			// Custom titles live deep in the file — the tail has the latest ones (wins over head)
+			for id, t := range extractCustomTitles(fullPath, fi.Size()) {
+				titles[id] = t
+			}
+			if t, ok := titles[si.SessionID]; ok {
+				si.Name = t
+			} else if t, ok := titles[fileBaseID]; ok {
+				si.Name = t
+			}
+
+			h.cacheMu.Lock()
+			h.cache[fullPath] = cachedSession{modTime: fi.ModTime(), size: fi.Size(), info: si}
+			h.cacheMu.Unlock()
 
 			sessions = append(sessions, si)
 		}
@@ -352,6 +453,22 @@ func (h *ClaudeSessionsHandler) List(c *gin.Context) {
 		return projects[i].Sessions[0].UpdatedAt > projects[j].Sessions[0].UpdatedAt
 	})
 
+	// Prune cache entries for files deleted from the scanned projects.
+	// Only scanned dirs — other users' workspaces must keep their entries.
+	h.cacheMu.Lock()
+	for p := range h.cache {
+		if seenPaths[p] {
+			continue
+		}
+		for _, dir := range scannedDirs {
+			if strings.HasPrefix(p, dir+string(filepath.Separator)) {
+				delete(h.cache, p)
+				break
+			}
+		}
+	}
+	h.cacheMu.Unlock()
+
 	c.JSON(http.StatusOK, gin.H{"projects": projects})
 }
 
@@ -361,6 +478,7 @@ type searchResult struct {
 	SessionID    string  `json:"session_id"`
 	Project      string  `json:"project"`
 	Slug         string  `json:"slug"`
+	Name         string  `json:"name,omitempty"`
 	UpdatedAt    string  `json:"updated_at"`
 	SizeMB       float64 `json:"size_mb"`
 	Snippet      string  `json:"snippet"`
@@ -414,10 +532,20 @@ func (h *ClaudeSessionsHandler) SearchSessions(c *gin.Context) {
 				continue
 			}
 
+			var name string
+			if titles := extractCustomTitles(fullPath, fi.Size()); titles != nil {
+				if t, ok := titles[match.sessionID]; ok {
+					name = t
+				} else if t, ok := titles[strings.TrimSuffix(f.Name(), ".jsonl")]; ok {
+					name = t
+				}
+			}
+
 			results = append(results, searchResult{
 				SessionID:    match.sessionID,
 				Project:      projEntry.Name(),
 				Slug:         match.slug,
+				Name:         name,
 				UpdatedAt:    fi.ModTime().UTC().Format(time.RFC3339),
 				SizeMB:       float64(fi.Size()) / (1024 * 1024),
 				Snippet:      match.snippet,
@@ -736,6 +864,10 @@ func (h *ClaudeSessionsHandler) DeleteSession(c *gin.Context) {
 		return
 	}
 
+	h.cacheMu.Lock()
+	delete(h.cache, fullPath)
+	h.cacheMu.Unlock()
+
 	c.JSON(http.StatusOK, gin.H{"message": "Session deleted"})
 }
 
@@ -743,6 +875,7 @@ func (h *ClaudeSessionsHandler) DeleteSession(c *gin.Context) {
 
 type branchDetail struct {
 	BranchID     string `json:"branch_id"`
+	Name         string `json:"name,omitempty"` // custom-title of the branch's sessionId
 	FirstMessage string `json:"first_message"`
 	MessageCount int    `json:"message_count"`
 	CreatedAt    string `json:"created_at"`
@@ -833,10 +966,12 @@ func (h *ClaudeSessionsHandler) ListBranches(c *gin.Context) {
 		msgType    string // user, assistant
 		text       string
 		timestamp  string
+		sessionID  string
 		children   []string
 	}
 
 	nodes := map[string]*msgNode{}
+	titles := map[string]string{} // sessionId → custom title (branch names)
 	var rootUUIDs []string
 	scanner := bufio.NewScanner(file)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1<<20)
@@ -847,7 +982,14 @@ func (h *ClaudeSessionsHandler) ListBranches(c *gin.Context) {
 			continue
 		}
 		var meta jsonlMeta
-		if err := json.Unmarshal([]byte(line), &meta); err != nil || meta.UUID == "" {
+		if err := json.Unmarshal([]byte(line), &meta); err != nil {
+			continue
+		}
+		if meta.Type == "custom-title" && meta.CustomTitle != "" {
+			titles[meta.SessionID] = meta.CustomTitle // last record wins
+			continue
+		}
+		if meta.UUID == "" {
 			continue
 		}
 		if meta.Type != "user" && meta.Type != "assistant" {
@@ -860,6 +1002,7 @@ func (h *ClaudeSessionsHandler) ListBranches(c *gin.Context) {
 			msgType:    meta.Type,
 			text:       text,
 			timestamp:  meta.Timestamp,
+			sessionID:  meta.SessionID,
 		}
 		nodes[meta.UUID] = n
 		if meta.ParentUUID == "" {
@@ -940,8 +1083,16 @@ func (h *ClaudeSessionsHandler) ListBranches(c *gin.Context) {
 			}
 		}
 
+		// Branch name: custom-title whose sessionId matches the leaf's sessionId
+		// (forked branches get their own sessionId in appended records)
+		branchName := ""
+		if leaf := nodes[leafUUID]; leaf != nil && leaf.sessionID != "" {
+			branchName = titles[leaf.sessionID]
+		}
+
 		branches = append(branches, branchDetail{
 			BranchID:     leafUUID,
+			Name:         branchName,
 			FirstMessage: truncate(firstUserMsg, 200),
 			MessageCount: msgCount,
 			CreatedAt:    firstTimestamp,

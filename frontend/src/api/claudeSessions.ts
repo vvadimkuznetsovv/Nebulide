@@ -3,6 +3,7 @@ import api from './client';
 export interface ClaudeSession {
   session_id: string;
   slug: string;
+  name?: string;
   cwd: string;
   created_at: string;
   updated_at: string;
@@ -46,6 +47,7 @@ export interface ClaudeSearchResult {
   session_id: string;
   project: string;
   slug: string;
+  name?: string;
   updated_at: string;
   size_mb: number;
   snippet: string;
@@ -58,6 +60,7 @@ export const searchClaudeSessions = (q: string) =>
 
 export interface ClaudeBranch {
   branch_id: string;
+  name?: string;
   first_message: string;
   message_count: number;
   created_at: string;
