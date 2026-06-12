@@ -1294,7 +1294,6 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
 
   const s = sessions.get(instanceId);
   const hasSelection = s?.xterm.hasSelection() ?? false;
-  const isConnected = s?.ws?.readyState === WebSocket.OPEN;
 
   const ctxMenuItems: ContextMenuItem[] = [
     { label: 'Copy', action: 'copy', icon: TERM_ICONS.copy, disabled: !hasSelection },
@@ -1308,7 +1307,8 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
     { type: 'separator' },
     { label: 'Clear', action: 'clear', icon: TERM_ICONS.trash },
     { label: 'Clear Console', action: 'clear-all', icon: TERM_ICONS.eraser, danger: true },
-    { label: 'Reconnect', action: 'reconnect', icon: TERM_ICONS.refresh, disabled: isConnected },
+    // Always enabled: WS can be OPEN but dead (bad network) — forceReconnect closes any state safely
+    { label: 'Reconnect', action: 'reconnect', icon: TERM_ICONS.refresh },
   ];
 
   return (
