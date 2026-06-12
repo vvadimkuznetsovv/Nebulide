@@ -91,7 +91,6 @@ func main() {
 	syncHandler := handlers.NewSyncHandler(cfg, presenceService, terminalService)
 	hookHandler := handlers.NewHookHandler(cfg)
 	llmHandler := handlers.NewLLMHandler(cfg)
-	voiceHandler := handlers.NewVoiceHandler(cfg)
 
 	// Router
 	r := gin.Default()
@@ -171,9 +170,6 @@ func main() {
 		protected.POST("/llm/enhance", llmHandler.Enhance)
 		protected.POST("/llm/vision", llmHandler.Vision)
 		protected.POST("/llm/sessions/:id/trim", llmHandler.TrimContext)
-
-		// Voice transcription (server-side Whisper fallback)
-		protected.POST("/voice/transcribe", voiceHandler.Transcribe)
 
 		// Workspace sessions
 		protected.GET("/workspace-sessions/latest", workspaceSessionsHandler.Latest)

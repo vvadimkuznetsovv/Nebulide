@@ -11,7 +11,6 @@ import { useWorkspaceSessionStore } from '../../store/workspaceSessionStore';
 import { emitActivity } from '../../utils/activityBus';
 import { registerTerminal, unregisterTerminal, getTerminalNumber, useTerminalRegistryVersion, markTerminalClosed } from '../../utils/terminalRegistry';
 import { usePetStore } from '../../store/petStore';
-import { useVoiceInput } from '../../hooks/useVoiceInput';
 import api from '../../api/client';
 import toast from 'react-hot-toast';
 import { log } from '../../utils/logger';
@@ -719,8 +718,11 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
   const [arrowBtnsOpen, setArrowBtnsOpen] = useState(false);
   const [shiftActive, setShiftActive] = useState(false);
   const [navKeysOpen, setNavKeysOpen] = useState(false);
+  const [voiceActive, setVoiceActive] = useState(false);
   const [voiceText, setVoiceText] = useState('');
   const [voiceProcessing, setVoiceProcessing] = useState(false);
+  const mediaStreamRef = useRef<MediaStream | null>(null);
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
   const [joystickTarget, setJoystickTarget] = useState<'cursor' | 'copymode' | null>(null);
   const [joystickMode, setJoystickMode] = useState<'start' | 'end'>('end');
   const [joystickPosition, setJoystickPosition] = useState<string>(() =>
@@ -1026,10 +1028,62 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
     }
   }, [instanceId]);
 
-  // Voice — Web Speech с fallback на серверный Whisper (useVoiceInput)
-  const voice = useVoiceInput({
-    onText: (text) => setVoiceText(prev => prev ? prev + ' ' + text : text),
-  });
+  const stopVoiceStream = useCallback(() => {
+    mediaStreamRef.current?.getTracks().forEach(t => t.stop());
+    mediaStreamRef.current = null;
+  }, []);
+
+  const toggleVoice = useCallback(async () => {
+    if (voiceActive) {
+      recognitionRef.current?.stop();
+      stopVoiceStream();
+      setVoiceActive(false);
+      return;
+    }
+    const SR = window.SpeechRecognition || (window as unknown as { webkitSpeechRecognition: typeof SpeechRecognition }).webkitSpeechRecognition;
+    log('[Voice] SpeechRecognition available:', !!SR);
+    if (!SR) { toast.error('Speech recognition not supported', { duration: 4000 }); return; }
+    // Request microphone permission — keep stream alive for desktop Chrome
+    let stream: MediaStream;
+    try {
+      log('[Voice] Requesting getUserMedia...');
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      mediaStreamRef.current = stream;
+      log('[Voice] getUserMedia granted, keeping stream alive');
+    } catch (err) {
+      log('[Voice] getUserMedia DENIED:', err);
+      const name = err instanceof Error ? err.name : String(err);
+      toast.error(`Microphone access failed (${name}). Check site permissions in browser settings.`, { duration: 5000 });
+      return;
+    }
+    try {
+      const rec = new SR();
+      rec.continuous = true;
+      rec.interimResults = false;
+      rec.lang = navigator.language || 'en-US';
+      log('[Voice] Starting recognition, lang:', rec.lang);
+      rec.onresult = (e: SpeechRecognitionEvent) => {
+        const text = e.results[e.results.length - 1][0].transcript;
+        log('[Voice] Result:', text);
+        setVoiceText(prev => prev ? prev + ' ' + text : text);
+      };
+      rec.onerror = (e) => {
+        log('[Voice] Error:', e.error);
+        // 'aborted' = manual stop, 'no-speech' = silence — not worth a toast
+        if (e.error !== 'aborted' && e.error !== 'no-speech') {
+          toast.error(`Voice recognition error: ${e.error}`, { duration: 5000 });
+        }
+        stopVoiceStream(); setVoiceActive(false);
+      };
+      rec.onend = () => { log('[Voice] Ended'); stopVoiceStream(); setVoiceActive(false); };
+      recognitionRef.current = rec;
+      rec.start();
+      setVoiceActive(true);
+    } catch (e) {
+      stopVoiceStream();
+      toast.error('Voice input failed: ' + String(e), { duration: 4000 });
+    }
+  }, [voiceActive, stopVoiceStream]);
 
   const pasteToTerminal = useCallback(() => {
     const s = sessions.get(instanceId);
@@ -1345,10 +1399,10 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
             </button>
             <button
               type="button"
-              className={`terminal-toolbar-btn${voice.active || voice.state === 'transcribing' ? ' active' : ''}`}
+              className={`terminal-toolbar-btn${voiceActive ? ' active' : ''}`}
               onPointerDown={(e) => e.preventDefault()}
-              onClick={voice.toggle}
-              title={voice.state === 'transcribing' ? 'Transcribing...' : 'Voice input'}
+              onClick={toggleVoice}
+              title="Voice input"
             >
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
@@ -1805,7 +1859,7 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
       )}
 
       {/* Voice input panel */}
-      {(voice.active || voice.state === 'transcribing' || voiceText) && (
+      {(voiceActive || voiceText) && (
         <div className="voice-panel" style={{
           padding: '6px 8px',
           borderBottom: '1px solid var(--glass-border)',
@@ -1819,7 +1873,7 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
             className="glass-input"
             value={voiceText}
             onChange={(e) => setVoiceText(e.target.value)}
-            placeholder={voice.state === 'transcribing' ? 'Transcribing...' : voice.state === 'recording' ? 'Recording...' : voice.state === 'listening' ? 'Listening...' : 'Edit voice input...'}
+            placeholder={voiceActive ? 'Listening...' : 'Edit voice input...'}
             style={{
               resize: 'none',
               minHeight: '40px',
@@ -1838,7 +1892,7 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
             {/* Cancel */}
             <button type="button" className="terminal-toolbar-btn" title="Cancel"
               onPointerDown={(e) => e.preventDefault()}
-              onClick={() => { voice.cancel(); setVoiceText(''); }}>
+              onClick={() => { recognitionRef.current?.stop(); setVoiceActive(false); setVoiceText(''); }}>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
               </svg>
@@ -1889,7 +1943,8 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
                   if (i > 0) sendKey('\x0a');
                   sendKey(lines[i]);
                 }
-                voice.cancel();
+                recognitionRef.current?.stop();
+                setVoiceActive(false);
                 setVoiceText('');
               }}>
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">

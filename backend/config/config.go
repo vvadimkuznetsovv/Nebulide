@@ -38,9 +38,6 @@ type Config struct {
 	TelegramAPIURL   string
 
 	NvidiaAPIKey string
-
-	WhisperURL   string // OpenAI-compatible transcription service (e.g. http://whisper:8000); empty = voice transcription disabled
-	WhisperModel string
 }
 
 func Load() *Config {
@@ -75,9 +72,6 @@ func Load() *Config {
 		TelegramAPIURL:   getEnv("TELEGRAM_API_URL", ""),
 
 		NvidiaAPIKey: getEnv("NVIDIA_API_KEY", ""),
-
-		WhisperURL:   getEnv("WHISPER_URL", ""),
-		WhisperModel: getEnv("WHISPER_MODEL", "Systran/faster-whisper-small"),
 	}
 }
 

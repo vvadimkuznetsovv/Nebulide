@@ -53,7 +53,6 @@ services:
       DB_HOST: postgres
       REDIS_URL: redis:6379
       TELEGRAM_API_URL: http://telegram-bot-api:8081
-      WHISPER_URL: http://whisper:8000
     volumes:
       - /home/nebulide/workspace:/home/nebulide/workspace
       - /home/nebulide/workspaces:/home/nebulide/workspaces
@@ -74,22 +73,6 @@ services:
       TELEGRAM_LOCAL: "true"
     volumes:
       - telegram_bot_api_data:/var/lib/telegram-bot-api
-
-  # Серверная транскрипция голоса (fallback, когда Web Speech API недоступен).
-  # Модель (~480МБ) скачивается с HuggingFace при первом запросе — прогреть curl'ом.
-  # app намеренно НЕ зависит от whisper: без него /api/voice/transcribe отдаёт 503.
-  whisper:
-    image: ghcr.io/speaches-ai/speaches:latest-cpu
-    restart: unless-stopped
-    environment:
-      - WHISPER__COMPUTE_TYPE=int8
-      - WHISPER__TTL=300
-    volumes:
-      - whisper_models:/home/ubuntu/.cache/huggingface
-    deploy:
-      resources:
-        limits:
-          memory: 2G
 
   code-server:
     build:
@@ -116,4 +99,3 @@ volumes:
   code-server-config:
   telegram_bot_api_data:
   nginx_logs:
-  whisper_models:
