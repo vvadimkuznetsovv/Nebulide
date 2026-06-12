@@ -9,7 +9,6 @@ import { useLongPress } from '../../hooks/useLongPress';
 import { ensureFreshToken, refreshTokenOnce } from '../../api/tokenRefresh';
 import { useWorkspaceSessionStore } from '../../store/workspaceSessionStore';
 import { emitActivity } from '../../utils/activityBus';
-import { sendSyncMessage } from '../../utils/syncBridge';
 import { registerTerminal, unregisterTerminal, getTerminalNumber, useTerminalRegistryVersion, markTerminalClosed } from '../../utils/terminalRegistry';
 import { usePetStore } from '../../store/petStore';
 import api from '../../api/client';
@@ -70,8 +69,6 @@ interface TermSession {
   inputBuffer: string;
   /** Escape sequence state: 0=normal, 1=saw ESC, 2=inside CSI/SS3 */
   inEscape: number;
-  /** Timer to auto-remove pet for non-claude-* terminals after inactivity */
-  petInactivityTimer: number;
 }
 
 const sessions = new Map<string, TermSession>();
@@ -169,22 +166,22 @@ const RECONNECT_DELAY = 800;
 const RECONNECT_DELAY_BACKEND_DOWN = 3000; // longer delay when backend is unreachable
 
 /** Get workspace session ID — terminals are scoped to workspace, shared across devices.
- *  Falls back to localStorage (sync) when store hasn't loaded yet (race on first mount). */
-function getWorkspaceSessionId(): string {
+ *  Falls back to localStorage (sync) when store hasn't loaded yet (race on first mount).
+ *  Returns null when neither is available — caller must wait, NOT guess:
+ *  connecting with a wrong wsId desyncs pet/workspace filtering on the backend. */
+function getWorkspaceSessionId(): string | null {
   return useWorkspaceSessionStore.getState().activeSessionId
     || localStorage.getItem('nebulide-active-workspace')
-    || 'default';
+    || null;
 }
 
-/** Emit terminal_disconnect locally + broadcast to other devices for terminals with active pets */
+/** Emit terminal_disconnect locally — instant pet removal when the user closes
+ *  a terminal. Other devices get pet_event:disconnected from the backend's
+ *  childWatchLoop (≤2s) once the PTY and its claude descendant are gone. */
 function emitDisconnect(instanceId: string) {
   const hasPet = !!usePetStore.getState().pets[instanceId];
   log(`[Terminal] emitDisconnect id=${instanceId} hasPet=${hasPet}`, new Error().stack?.split('\n').slice(1, 4).join(' ← '));
   emitActivity({ type: 'terminal_disconnect', instanceId });
-  // Broadcast pet disconnect for any terminal that has an active pet
-  if (hasPet) {
-    sendSyncMessage({ type: 'pet_event', pet_action: 'disconnected', instance_id: instanceId });
-  }
 }
 
 function createXterm(instanceId: string): TermSession {
@@ -211,7 +208,6 @@ function createXterm(instanceId: string): TermSession {
     streamEndTimer: 0,
     inputBuffer: '',
     inEscape: 0,
-    petInactivityTimer: 0,
   };
 
   const xterm = new XTerm({
@@ -291,20 +287,9 @@ function createXterm(instanceId: string): TermSession {
 
         if (ch === '\r' || ch === '\n') {
           const text = session.inputBuffer.trim();
-          if (text) {
-            log(`[Terminal] inputBuffer ENTER id=${instanceId} text="${text}" matchesClaude=${/^claude\b/.test(text)}`);
-          }
-
-          // Detect claude command launch from any terminal — local optimistic
-          // feedback. Cross-device broadcast comes from backend's childWatchLoop
-          // once it sees the actual claude descendant in the process tree.
-          if (text && /^claude\b/.test(text) && !/^claude\s+(-h|--help|--version|-v)$/.test(text)) {
-            const petsBefore = Object.keys(usePetStore.getState().pets);
-            log(`[Terminal] CLAUDE DETECTED id=${instanceId} petsBefore=`, petsBefore);
-            emitActivity({ type: 'claude_launched', instanceId });
-            const petsAfter = Object.keys(usePetStore.getState().pets);
-            log(`[Terminal] after emit petsAfter=`, petsAfter);
-          }
+          // Pet creation is server-driven: backend's childWatchLoop broadcasts
+          // pet_event:launched once it sees a claude descendant in the process
+          // tree. No local optimistic emit — it was a duplicate-pet source.
 
           // Sentiment analysis for terminals with active pet
           if (text.length > 2 && usePetStore.getState().pets[instanceId]) {
@@ -364,7 +349,17 @@ async function connectWs(instanceId: string): Promise<void> {
   }
 
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsId = getWorkspaceSessionId();
+  // Wait for the workspace session id (store may not be hydrated on first mount).
+  // Connecting with a wrong id would scope this terminal to the wrong workspace.
+  let wsId = getWorkspaceSessionId();
+  for (let i = 0; i < 50 && !wsId; i++) {
+    await new Promise((r) => setTimeout(r, 100));
+    wsId = getWorkspaceSessionId();
+  }
+  if (!wsId) {
+    log(`[Terminal] connectWs id=${instanceId}: no workspace session id after 5s, falling back to "default"`);
+    wsId = 'default';
+  }
   const wsInstanceId = `${instanceId}@ws:${wsId}`;
   const url = `${protocol}//${window.location.host}/ws/terminal?token=${token}&instanceId=${encodeURIComponent(wsInstanceId)}`;
   log(`[Terminal] connectWs id=${instanceId} attempt=${session.reconnectAttempts}`);
@@ -380,6 +375,11 @@ async function connectWs(instanceId: string): Promise<void> {
     log(`[Terminal] ws.onopen id=${instanceId} url=${url.replace(/token=[^&]+/, 'token=***')}`);
     session.xterm.write(_green('[WS] Connected!') + '\r\n');
     session.reconnectAttempts = 0;
+    // Reset streaming detection — stale streamActive/streamEndTimer from the
+    // previous connection would keep the pet stuck in "working"
+    clearTimeout(session.streamEndTimer);
+    session.streamActive = false;
+    session.streamStart = 0;
     emitActivity({ type: 'terminal_connect', instanceId });
     // Suppress external resize events briefly — the single resize below is enough.
     // Without this, ResizeObserver / fit() / active-effect fire extra resizes
@@ -457,16 +457,8 @@ async function connectWs(instanceId: string): Promise<void> {
         }
       }, 3000);
     }
-    // Auto-remove pet for non-claude-* terminals after inactivity
-    // (Claude process exited back to bash prompt — no more significant output)
-    if (usePetStore.getState().pets[instanceId] && !instanceId.startsWith('claude-')) {
-      clearTimeout(session.petInactivityTimer);
-      session.petInactivityTimer = window.setTimeout(() => {
-        if (usePetStore.getState().pets[instanceId] && !session.streamActive) {
-          emitDisconnect(instanceId);
-        }
-      }, 60_000);
-    }
+    // Pet removal is server-driven (childWatchLoop sees claude exit ≤2s) —
+    // no client-side inactivity heuristics.
   };
 
   ws.onerror = (ev) => {
@@ -610,7 +602,6 @@ export function destroyTerminalSession(instanceId: string): void {
     session.reconnectTimer = null;
   }
   clearTimeout(session.streamEndTimer);
-  clearTimeout(session.petInactivityTimer);
   if (session.ws) {
     session.ws.close();
     session.ws = null;

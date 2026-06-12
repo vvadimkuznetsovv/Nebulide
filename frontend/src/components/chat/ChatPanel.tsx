@@ -281,13 +281,11 @@ export default function ChatPanel(_props: ChatPanelProps) {
     const resumeCmd = `claude --resume ${session.session_id}`;
     const cmd = session.cwd ? `cd "${session.cwd}" && ${resumeCmd}` : resumeCmd;
     const ok = await typeCommandInTerminal(instanceId, cmd);
-    if (ok) {
-      // Local optimistic feedback — backend's childWatchLoop will broadcast
-      // pet_event:launched to other devices once it sees the claude descendant.
-      emitActivity({ type: 'claude_launched', instanceId });
-    } else {
+    if (!ok) {
       toast.error('Failed to connect to terminal');
     }
+    // Pet creation is server-driven: backend's childWatchLoop broadcasts
+    // pet_event:launched (≤2s) once it sees the claude descendant.
     setLaunching(null);
   }, [launching, openTerminalWithId]);
 

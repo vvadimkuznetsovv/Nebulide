@@ -22,12 +22,10 @@ import (
 // ---------- types ----------
 
 type syncClientMsg struct {
-	Type       string `json:"type"`                  // device_register | heartbeat | force_takeover | pet_event
+	Type       string `json:"type"`                  // device_register | heartbeat | force_takeover | terminal_rename
 	DeviceID   string `json:"device_id,omitempty"`
 	DeviceType string `json:"device_type,omitempty"` // phone | tablet | desktop
 	SessionID  string `json:"session_id,omitempty"`  // workspace session UUID
-	// pet_event fields
-	PetAction  string `json:"pet_action,omitempty"`  // launched | disconnected
 	InstanceID string `json:"instance_id,omitempty"` // terminal instanceId
 	// terminal_rename fields
 	Name       string `json:"name,omitempty"`        // new terminal name
@@ -344,18 +342,8 @@ func (h *SyncHandler) HandleWebSocket(c *gin.Context) {
 				h.publishLockEvent(userID, "force_disconnected", msg.SessionID, info)
 			}
 
-		case "pet_event":
-			// Broadcast pet lifecycle events (launched/disconnected) to all devices
-			if msg.PetAction != "" && msg.InstanceID != "" {
-				payload, _ := json.Marshal(map[string]string{
-					"type":        "pet_event",
-					"pet_action":  msg.PetAction,
-					"instance_id": msg.InstanceID,
-					"device_id":   deviceID,
-				})
-				database.RDB.Publish(context.Background(), "ws:user:"+userID, string(payload))
-				log.Printf("[Sync] pet_event broadcast: action=%s instanceId=%s from=%s", msg.PetAction, msg.InstanceID, deviceID)
-			}
+		// NOTE: client "pet_event" is gone — pet lifecycle is broadcast
+		// exclusively by the backend's childWatchLoop (see main.go).
 
 		case "terminal_rename":
 			// Broadcast terminal rename to all devices

@@ -15,6 +15,34 @@ import { log } from '../utils/logger';
 // Re-export for backwards compat (store imports from syncBridge directly now)
 export { sendSyncMessage } from '../utils/syncBridge';
 
+// Reconcile is computed per-connection while pet_event goes through Redis —
+// ordering between them isn't guaranteed. A reconcile snapshot taken just
+// before claude spawned can arrive right after pet_event:launched and would
+// kill the newborn pet. 5s grace covers that in-flight window only.
+const RECONCILE_GRACE_MS = 5_000;
+
+/** Apply the backend-authoritative list of terminals with a live claude:
+ *  spawn missing pets, remove orphaned ones. Single source of truth. */
+function applyClaudeTerminalList(ids: unknown, msgSessionId: string | undefined, activeSessionId: string | null) {
+  // Only apply lists for the workspace we're currently on
+  if (!msgSessionId || !activeSessionId || msgSessionId !== activeSessionId) return;
+  const expected = new Set<string>(Array.isArray(ids) ? ids : []);
+  const petStore = usePetStore.getState();
+  const now = Date.now();
+  for (const id of expected) {
+    if (!petStore.pets[id]) {
+      log('[SyncWS] applyClaudeTerminalList: spawning pet', id);
+      emitActivity({ type: 'claude_launched', instanceId: id });
+    }
+  }
+  for (const [id, pet] of Object.entries(petStore.pets)) {
+    if (expected.has(id)) continue;
+    if (now - pet.createdAt < RECONCILE_GRACE_MS) continue;
+    log('[SyncWS] applyClaudeTerminalList: removing orphaned pet', id);
+    petStore.processEvent({ type: 'terminal_disconnect', instanceId: id });
+  }
+}
+
 export function useSyncWS() {
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimerRef = useRef<number | null>(null);
@@ -88,27 +116,11 @@ export function useSyncWS() {
                 log('[SyncWS] calling reconnectAllTerminalSessions from register_ok');
                 reconnectAllTerminalSessions();
                 setTimeout(() => {
-                  store.reloadActiveSession({ soft: true, skipSave: true }).then(() => {
-                    // Clean up phantom pets — terminals that exist in petStore but not
-                    // in the module-level sessions Map (e.g. zombie PTY from crashed destroy)
-                    const petIds = Object.keys(usePetStore.getState().pets);
-                    const activeIds = getActiveTerminalInstanceIds();
-                    log('[SyncWS] phantom cleanup: petIds=', petIds, 'activeIds=', activeIds);
-                    for (const id of petIds) {
-                      if (!activeIds.includes(id)) {
-                        log('[SyncWS] removing phantom pet:', id);
-                        usePetStore.getState().processEvent({ type: 'terminal_disconnect', instanceId: id });
-                      }
-                    }
-                  });
+                  store.reloadActiveSession({ soft: true, skipSave: true });
                 }, 1500);
               }
-              // Create pets for active Claude terminals (cross-device sync)
-              if (Array.isArray(msg.active_claude_terminals)) {
-                for (const instanceId of msg.active_claude_terminals) {
-                  emitActivity({ type: 'claude_launched', instanceId });
-                }
-              }
+              // Backend-authoritative pet sync
+              applyClaudeTerminalList(msg.active_claude_terminals, msg.session_id, activeSessionIdRef.current);
               break;
 
             case 'workspace_locked':
@@ -179,14 +191,21 @@ export function useSyncWS() {
               break;
 
             case 'pet_event':
-              log('[SyncWS] pet_event', { pet_action: msg.pet_action, instance_id: msg.instance_id, device_id: msg.device_id, isOwnDevice: msg.device_id === getDeviceId() });
-              // Cross-device pet sync — another device launched/disconnected Claude
-              if (msg.device_id === getDeviceId()) break; // ignore own events (already handled locally)
+              log('[SyncWS] pet_event', { pet_action: msg.pet_action, instance_id: msg.instance_id, session_id: msg.session_id });
+              // Server is the single source of pet existence (childWatchLoop).
+              // Ignore events for other workspaces.
+              if (msg.session_id && activeSessionIdRef.current && msg.session_id !== activeSessionIdRef.current) break;
               if (msg.pet_action === 'launched' && msg.instance_id) {
                 emitActivity({ type: 'claude_launched', instanceId: msg.instance_id });
               } else if (msg.pet_action === 'disconnected' && msg.instance_id) {
                 usePetStore.getState().processEvent({ type: 'terminal_disconnect', instanceId: msg.instance_id });
               }
+              break;
+
+            case 'terminal_reconcile':
+              // Backend periodically (15s) sends the authoritative list of
+              // terminals with a live `claude` descendant for this workspace.
+              applyClaudeTerminalList(msg.active_claude_terminals, msg.session_id, activeSessionIdRef.current);
               break;
 
             case 'terminal_rename':

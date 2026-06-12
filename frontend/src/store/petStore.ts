@@ -79,9 +79,13 @@ export interface IndividualPetState {
   lastActivity: number;
   claudeStreaming: boolean;
   speechBubble: string | null;
+  // Timestamp when pet was created — used by reconcile grace period to avoid
+  // killing a freshly-spawned pet before the backend's child watch loop sees claude.
+  createdAt: number;
 }
 
 function createDefaultPetState(): IndividualPetState {
+  const now = Date.now();
   return {
     task: 'idle',
     emotion: 'neutral',
@@ -89,9 +93,10 @@ function createDefaultPetState(): IndividualPetState {
     walkX: 0.2 + Math.random() * 0.6,
     walkTarget: 0.5,
     walkDirection: 1,
-    lastActivity: Date.now(),
+    lastActivity: now,
     claudeStreaming: false,
     speechBubble: null,
+    createdAt: now,
   };
 }
 
@@ -196,7 +201,8 @@ export const usePetStore = create<PetStoreState>((set, get) => ({
       // ── Terminal lifecycle — only create pets for Claude terminals ──
 
       case 'terminal_connect': {
-        // Pet is NOT created here — only via 'claude_launched' from ChatPanel.
+        // Pet is NOT created here — only via 'claude_launched', which is
+        // emitted from server messages (pet_event / active_claude_terminals).
         break;
       }
 
