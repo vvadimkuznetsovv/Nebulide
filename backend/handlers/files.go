@@ -109,10 +109,7 @@ func (h *FilesHandler) List(c *gin.Context) {
 		if err != nil {
 			continue
 		}
-		// Skip hidden files starting with .
-		if strings.HasPrefix(entry.Name(), ".") {
-			continue
-		}
+		// Show hidden files (dotfiles like .env) — this is a dev IDE
 		files = append(files, FileInfo{
 			Name:    entry.Name(),
 			Path:    filepath.Join(requestedPath, entry.Name()),
