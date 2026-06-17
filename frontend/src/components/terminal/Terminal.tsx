@@ -690,6 +690,7 @@ const CTRL_KEYS: { label: string; title: string; data: string }[] = [
   { label: 'C-v', title: 'Ctrl+V \u2014 Insert next char literally', data: '\x16' },
   { label: 'C-r', title: 'Ctrl+R \u2014 Reverse search history', data: '\x12' },
   { label: 'C-c', title: 'Ctrl+C \u2014 Interrupt (SIGINT)', data: '\x03' },
+  { label: 'C-o', title: 'Ctrl+O \u2014 Save (nano) / control-O', data: '\x0f' },
   { label: 'EOF', title: 'Ctrl+D \u2014 End of file / Exit', data: '\x04' },
   { label: 'Susp', title: 'Ctrl+Z \u2014 Suspend (SIGTSTP)', data: '\x1a' },
   { label: 'Clr', title: 'Ctrl+L \u2014 Clear screen', data: '\x0c' },
