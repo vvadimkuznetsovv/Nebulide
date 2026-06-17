@@ -106,7 +106,7 @@ func (h *FilesHandler) List(c *gin.Context) {
 	// Hide only noisy shell-internal files in the workspace root (command history, venv).
 	// Everything else — .env, .ssh, .config, .claude, project dotfiles — stays visible.
 	atRoot := filepath.Clean(fullPath) == filepath.Clean(userDir)
-	hiddenAtRoot := map[string]bool{".nebulide_history": true, ".venv": true}
+	hiddenAtRoot := map[string]bool{".nebulide_history": true, ".venv": true, ".nebulide_chats": true}
 
 	files := make([]FileInfo, 0, len(entries))
 	for _, entry := range entries {

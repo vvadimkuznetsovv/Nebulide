@@ -72,3 +72,6 @@ export const listBranches = (project: string, sessionFile: string) =>
 
 export const deleteClaudeSession = (project: string, sessionId: string) =>
   api.delete(`/claude-sessions/${encodeURIComponent(project)}/${encodeURIComponent(sessionId)}`);
+
+export const renameClaudeSession = (project: string, sessionId: string, name: string) =>
+  api.put(`/claude-sessions/${encodeURIComponent(project)}/${encodeURIComponent(sessionId)}/rename`, { name });

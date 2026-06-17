@@ -904,6 +904,121 @@ func (h *ClaudeSessionsHandler) DeleteSession(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"message": "Session deleted"})
 }
 
+// --- Rename Session ---
+
+type renameSessionRequest struct {
+	Name string `json:"name" binding:"required"`
+}
+
+// RenameSession sets a session's display name by appending a custom-title record
+// to its JSONL file — the same mechanism Claude CLI uses for renames (last record
+// per sessionId wins). The record's sessionId is the session's internal id, which
+// is what List/Search match against to populate Name.
+func (h *ClaudeSessionsHandler) RenameSession(c *gin.Context) {
+	project := c.Param("project")
+	sessionFile := c.Param("sessionFile")
+
+	if !slugRe.MatchString(project) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid project"})
+		return
+	}
+
+	var req renameSessionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid request"})
+		return
+	}
+	name := strings.TrimSpace(req.Name)
+	if name == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Name is required"})
+		return
+	}
+	if len([]rune(name)) > 200 {
+		name = string([]rune(name)[:200])
+	}
+
+	// Security: only allow access to user's own workspace projects
+	wsSlug := h.userWorkspaceSlug(c)
+	if !matchesWorkspace(project, wsSlug) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	claudeBase := h.claudeBaseDir()
+	projDir := filepath.Join(claudeBase, "projects", project)
+
+	// Find JSONL file — sessionFile could be internal sessionId or filename UUID
+	var fullPath string
+	candidate := filepath.Join(projDir, sessionFile+".jsonl")
+	if _, err := os.Stat(candidate); err == nil {
+		fullPath = candidate
+	} else {
+		files, err := os.ReadDir(projDir)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Project not found"})
+			return
+		}
+		for _, f := range files {
+			if f.IsDir() || !strings.HasSuffix(f.Name(), ".jsonl") {
+				continue
+			}
+			fp := filepath.Join(projDir, f.Name())
+			file, err := os.Open(fp)
+			if err != nil {
+				continue
+			}
+			scanner := bufio.NewScanner(file)
+			scanner.Buffer(make([]byte, 0, 64*1024), 256*1024)
+			for i := 0; i < 5 && scanner.Scan(); i++ {
+				var meta jsonlMeta
+				if json.Unmarshal([]byte(scanner.Text()), &meta) == nil && meta.SessionID == sessionFile {
+					fullPath = fp
+					break
+				}
+			}
+			file.Close()
+			if fullPath != "" {
+				break
+			}
+		}
+	}
+
+	if fullPath == "" {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
+		return
+	}
+
+	// Build a valid custom-title JSONL line (json.Marshal escapes the title safely).
+	rec := struct {
+		Type        string `json:"type"`
+		CustomTitle string `json:"customTitle"`
+		SessionID   string `json:"sessionId"`
+	}{Type: "custom-title", CustomTitle: name, SessionID: sessionFile}
+	line, err := json.Marshal(rec)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to encode title"})
+		return
+	}
+
+	f, err := os.OpenFile(fullPath, os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to open session"})
+		return
+	}
+	if _, err := f.Write(append(line, '\n')); err != nil {
+		f.Close()
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to write title"})
+		return
+	}
+	f.Close()
+
+	h.cacheMu.Lock()
+	delete(h.cache, fullPath)
+	h.cacheMu.Unlock()
+
+	c.JSON(http.StatusOK, gin.H{"message": "Session renamed", "name": name})
+}
+
 // --- List Branches ---
 
 type branchDetail struct {

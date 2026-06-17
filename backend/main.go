@@ -220,6 +220,7 @@ func main() {
 		protected.GET("/claude-sessions/:project/:sessionFile/branches", claudeSessionsHandler.ListBranches)
 		protected.GET("/claude-sessions/:project/:sessionFile", claudeSessionsHandler.ReadSession)
 		protected.DELETE("/claude-sessions/:project/:sessionFile", claudeSessionsHandler.DeleteSession)
+		protected.PUT("/claude-sessions/:project/:sessionFile/rename", claudeSessionsHandler.RenameSession)
 		protected.GET("/claude-plans", claudeSessionsHandler.ListPlans)
 		protected.GET("/claude-plans/:slug", claudeSessionsHandler.ReadPlan)
 	}

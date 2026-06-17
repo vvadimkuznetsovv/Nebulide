@@ -1,11 +1,17 @@
 import { useState, useEffect, useCallback, useMemo, useRef, type ReactNode } from 'react';
-import { listClaudeSessions, listClaudePlans, readClaudePlan, readClaudeSession, searchClaudeSessions, deleteClaudeSession, listBranches } from '../../api/claudeSessions';
+import { listClaudeSessions, listClaudePlans, readClaudePlan, readClaudeSession, searchClaudeSessions, deleteClaudeSession, renameClaudeSession, listBranches } from '../../api/claudeSessions';
 import type { ClaudeProject, ClaudeSession, ClaudePlan, ClaudeSessionMessage, ClaudeSearchResult, ClaudeBranch } from '../../api/claudeSessions';
 import { useLayoutStore } from '../../store/layoutStore';
+import { useAuthStore } from '../../store/authStore';
 import { typeCommandInTerminal } from '../terminal/Terminal';
 import toast from 'react-hot-toast';
 import { log } from '../../utils/logger';
 import LLMPanel from '../llm/LLMPanel';
+import FolderPicker from './FolderPicker';
+
+/** Normalize a path for cross-OS comparison: forward slashes, no trailing slash. */
+const normPath = (p?: string) => (p || '').replace(/\\/g, '/').replace(/\/+$/, '');
+const baseName = (p: string) => normPath(p).split('/').pop() || p;
 
 interface ChatPanelProps {
   sessionId: string | null;
@@ -183,7 +189,37 @@ export default function ChatPanel(_props: ChatPanelProps) {
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
   const [treeVisible, setTreeVisible] = useState(true);
 
+  // Inline session rename
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState('');
+
+  // "Communication chats" view + arbitrary-folder picker
+  const [viewMode, setViewMode] = useState<'normal' | 'communication'>('normal');
+  const [pickedFolderPath, setPickedFolderPath] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+
   const openTerminalWithId = useLayoutStore((s) => s.openTerminalWithId);
+  const user = useAuthStore((s) => s.user);
+
+  // Dedicated per-user folder that holds "communication" chats (talking to Claude
+  // outside of any project). Hidden from the file manager by the backend.
+  const commDir = useMemo(() => {
+    const ws = normPath(user?.workspace_dir);
+    return ws ? ws + '/.nebulide_chats' : null;
+  }, [user?.workspace_dir]);
+
+  const isCommSession = useCallback(
+    (s: { cwd?: string }) => !!commDir && normPath(s.cwd) === commDir,
+    [commDir]
+  );
+
+  // Open a fresh terminal, cd into the folder (creating it if needed) and run claude.
+  const startNewChatInFolder = useCallback(async (absPath: string) => {
+    const instanceId = `claude-${Date.now()}`;
+    openTerminalWithId(instanceId);
+    const ok = await typeCommandInTerminal(instanceId, `mkdir -p "${absPath}" && cd "${absPath}" && claude`);
+    if (!ok) toast.error('Failed to connect to terminal');
+  }, [openTerminalWithId]);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -217,11 +253,23 @@ export default function ChatPanel(_props: ChatPanelProps) {
     });
   }, [projects]);
 
+  // Communication chats are segregated from normal chats (frontend-only split).
+  const commSessions = useMemo(() => allSessions.filter(isCommSession), [allSessions, isCommSession]);
+  const normalSessions = useMemo(() => allSessions.filter((s) => !isCommSession(s)), [allSessions, isCommSession]);
+
+  // Projects with communication sessions stripped out — drives the normal folder tree.
+  const normalProjects = useMemo(() =>
+    projects
+      .map((p) => ({ ...p, sessions: p.sessions.filter((s) => !isCommSession(s)) }))
+      .filter((p) => p.sessions.length > 0),
+    [projects, isCommSession]
+  );
+
   // Build folder tree — recount using deduped sessions so badges match "All (N)"
   const folderTree = useMemo(() => {
-    const tree = buildFolderTree(projects);
+    const tree = buildFolderTree(normalProjects);
     const countByProject = new Map<string, number>();
-    for (const s of allSessions) {
+    for (const s of normalSessions) {
       countByProject.set(s.project, (countByProject.get(s.project) || 0) + 1);
     }
     function patchCounts(node: FolderTreeNode): number {
@@ -233,7 +281,7 @@ export default function ChatPanel(_props: ChatPanelProps) {
     }
     patchCounts(tree);
     return tree;
-  }, [projects, allSessions]);
+  }, [normalProjects, normalSessions]);
 
   // Auto-expand all nodes on first load
   const initializedRef = useRef(false);
@@ -244,11 +292,21 @@ export default function ChatPanel(_props: ChatPanelProps) {
     }
   }, [projects, folderTree]);
 
-  // Filter sessions by selected folder + toggle + search
+  // Filter sessions by mode (communication vs normal) + folder/picker + search
   const filteredSessions = useMemo(() => {
-    let list = allSessions;
+    // Communication mode: show only the dedicated-folder chats, ignore folder/picker filters.
+    if (viewMode === 'communication') return commSessions;
 
-    if (selectedFolder) {
+    let list = normalSessions;
+
+    if (pickedFolderPath) {
+      // Arbitrary folder picked from the filesystem — match by cwd (self + subfolders).
+      const target = normPath(pickedFolderPath);
+      list = list.filter(s => {
+        const c = normPath(s.cwd);
+        return c === target || c.startsWith(target + '/');
+      });
+    } else if (selectedFolder) {
       if (includeSubfolders) {
         list = list.filter(s =>
           s.project === selectedFolder || s.project.startsWith(selectedFolder + '-')
@@ -258,7 +316,7 @@ export default function ChatPanel(_props: ChatPanelProps) {
       }
     }
 
-    log('[ChatPanel] filter:', { selectedFolder, includeSubfolders, total: allSessions.length, filtered: list.length, searchResults: searchResults?.length ?? null });
+    log('[ChatPanel] filter:', { viewMode, selectedFolder, pickedFolderPath, includeSubfolders, total: normalSessions.length, filtered: list.length, searchResults: searchResults?.length ?? null });
 
     if (!searchQuery) return list;
     // Active search: keep only local name/slug/project matches and exclude
@@ -274,7 +332,18 @@ export default function ChatPanel(_props: ChatPanelProps) {
         || projectDisplayName(s.project).toLowerCase().includes(q)
       )
     );
-  }, [allSessions, selectedFolder, includeSubfolders, searchQuery, searchResults]);
+  }, [viewMode, commSessions, normalSessions, selectedFolder, pickedFolderPath, includeSubfolders, searchQuery, searchResults]);
+
+  // Resolve the folder path "New chat" should target in normal mode:
+  // the picked folder, or a folder derived from the selected tree node's sessions.
+  const folderTargetPath = useMemo(() => {
+    if (pickedFolderPath) return pickedFolderPath;
+    if (selectedFolder) {
+      const hit = normalSessions.find(s => s.project === selectedFolder && s.cwd);
+      if (hit?.cwd) return normPath(hit.cwd);
+    }
+    return null;
+  }, [pickedFolderPath, selectedFolder, normalSessions]);
 
   const handleOpenSession = useCallback(async (session: { session_id: string; cwd?: string }) => {
     if (launching) return;
@@ -323,6 +392,29 @@ export default function ChatPanel(_props: ChatPanelProps) {
       toast.error('Failed to delete session');
     }
   }, [expandedSession, refresh]);
+
+  const beginRename = useCallback((session: ClaudeSession & { project: string }) => {
+    setRenamingId(session.session_id);
+    setRenameValue(session.name || sessionDisplayName(session));
+  }, []);
+
+  const commitRename = useCallback(async (session: ClaudeSession & { project: string }, raw: string) => {
+    const name = raw.trim();
+    setRenamingId(null);
+    if (!name || name === (session.name || '')) return;
+    // Optimistic update across all project entries holding this session_id
+    setProjects(prev => prev.map(p => ({
+      ...p,
+      sessions: p.sessions.map(s => s.session_id === session.session_id ? { ...s, name } : s),
+    })));
+    try {
+      await renameClaudeSession(session.project, session.session_id, name);
+      toast.success('Сессия переименована');
+    } catch {
+      toast.error('Не удалось переименовать');
+      refresh();
+    }
+  }, [refresh]);
 
   const handlePlanClick = useCallback(async (slug: string) => {
     if (expandedPlan === slug) {
@@ -402,6 +494,7 @@ export default function ChatPanel(_props: ChatPanelProps) {
   }, []);
 
   const handleFolderSelect = useCallback((pathPrefix: string | null) => {
+    setPickedFolderPath(null);
     setSelectedFolder(prev => prev === pathPrefix ? null : pathPrefix);
   }, []);
 
@@ -551,8 +644,40 @@ export default function ChatPanel(_props: ChatPanelProps) {
         </button>
       </div>
 
+      {/* View mode: all chats vs communication chats */}
+      <div style={{ display: 'flex', gap: 6, padding: '6px 12px', flexShrink: 0 }}>
+        <button
+          type="button"
+          onClick={() => setViewMode('normal')}
+          style={{
+            flex: 1, padding: '5px 10px', borderRadius: 6, fontSize: 11, fontWeight: 500, cursor: 'pointer',
+            fontFamily: 'inherit',
+            background: viewMode === 'normal' ? 'rgba(var(--accent-rgb), 0.18)' : 'rgba(255,255,255,0.04)',
+            border: `1px solid ${viewMode === 'normal' ? 'rgba(var(--accent-rgb), 0.4)' : 'var(--glass-border)'}`,
+            color: viewMode === 'normal' ? 'var(--accent-bright)' : 'var(--text-muted)',
+          }}
+        >Все чаты</button>
+        <button
+          type="button"
+          onClick={() => {
+            setViewMode('communication');
+            setSelectedFolder(null);
+            setPickedFolderPath(null);
+            setSearchQuery('');
+            setSearchResults(null);
+          }}
+          style={{
+            flex: 1, padding: '5px 10px', borderRadius: 6, fontSize: 11, fontWeight: 500, cursor: 'pointer',
+            fontFamily: 'inherit',
+            background: viewMode === 'communication' ? 'rgba(var(--accent-rgb), 0.18)' : 'rgba(255,255,255,0.04)',
+            border: `1px solid ${viewMode === 'communication' ? 'rgba(var(--accent-rgb), 0.4)' : 'var(--glass-border)'}`,
+            color: viewMode === 'communication' ? 'var(--accent-bright)' : 'var(--text-muted)',
+          }}
+        >💬 Чаты общения</button>
+      </div>
+
       {/* Search */}
-      {!isEmpty && (
+      {!isEmpty && viewMode === 'normal' && (
         <div style={{ padding: '8px 12px', flexShrink: 0 }}>
           <div style={{
             display: 'flex', alignItems: 'center', gap: 8,
@@ -593,7 +718,7 @@ export default function ChatPanel(_props: ChatPanelProps) {
       )}
 
       {/* Folder explorer */}
-      {!isEmpty && !searchQuery && folderTree.children.length > 0 && (
+      {viewMode === 'normal' && !isEmpty && !searchQuery && (
         <div style={{
           flexShrink: 0,
           borderBottom: '1px solid var(--glass-border)',
@@ -622,22 +747,44 @@ export default function ChatPanel(_props: ChatPanelProps) {
               Folders
             </span>
 
+            {/* Browse arbitrary folder */}
+            <button
+              type="button"
+              onClick={() => setPickerOpen(true)}
+              title="Открыть любую папку"
+              disabled={!user?.workspace_dir}
+              style={{
+                padding: '2px 8px', borderRadius: 10,
+                border: '1px solid var(--glass-border)', cursor: 'pointer',
+                fontSize: 9, fontFamily: 'inherit',
+                background: 'rgba(var(--accent-rgb), 0.04)',
+                color: 'var(--text-muted)',
+                display: 'flex', alignItems: 'center', gap: 3,
+                opacity: user?.workspace_dir ? 1 : 0.4,
+              }}
+            >
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+              </svg>
+              Папка…
+            </button>
+
             {/* "All" button to clear selection */}
             <button
               type="button"
-              onClick={() => setSelectedFolder(null)}
+              onClick={() => { setSelectedFolder(null); setPickedFolderPath(null); }}
               title="Show all sessions"
               style={{
                 padding: '2px 8px', borderRadius: 10,
                 border: '1px solid var(--glass-border)', cursor: 'pointer',
                 fontSize: 9, fontFamily: 'inherit',
-                background: !selectedFolder ? 'rgba(var(--accent-rgb), 0.15)' : 'rgba(var(--accent-rgb), 0.04)',
-                color: !selectedFolder ? 'var(--accent)' : 'var(--text-muted)',
-                fontWeight: !selectedFolder ? 600 : 400,
+                background: (!selectedFolder && !pickedFolderPath) ? 'rgba(var(--accent-rgb), 0.15)' : 'rgba(var(--accent-rgb), 0.04)',
+                color: (!selectedFolder && !pickedFolderPath) ? 'var(--accent)' : 'var(--text-muted)',
+                fontWeight: (!selectedFolder && !pickedFolderPath) ? 600 : 400,
                 transition: 'all 0.15s',
               }}
             >
-              All ({allSessions.length})
+              All ({normalSessions.length})
             </button>
 
             {/* Subfolder toggle */}
@@ -671,8 +818,35 @@ export default function ChatPanel(_props: ChatPanelProps) {
             </button>
           </div>
 
+          {/* Picked-folder chip (arbitrary folder chosen via the picker) */}
+          {pickedFolderPath && (
+            <div style={{
+              margin: '0 12px 6px', padding: '4px 8px', borderRadius: 8,
+              display: 'flex', alignItems: 'center', gap: 6,
+              background: 'rgba(var(--accent-rgb), 0.12)',
+              border: '1px solid rgba(var(--accent-rgb), 0.3)',
+            }}>
+              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="var(--accent)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z" />
+              </svg>
+              <span style={{ flex: 1, minWidth: 0, fontSize: 11, color: 'var(--accent)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {baseName(pickedFolderPath)}
+              </span>
+              <button
+                type="button"
+                onClick={() => setPickedFolderPath(null)}
+                title="Сбросить"
+                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', display: 'flex', padding: 0 }}
+              >
+                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+          )}
+
           {/* Tree */}
-          {treeVisible && (
+          {treeVisible && folderTree.children.length > 0 && (
             <div style={{ paddingBottom: 6, maxHeight: 200, overflow: 'auto' }}>
               {folderTree.children.map(child => renderFolderNode(child, 0))}
             </div>
@@ -681,7 +855,7 @@ export default function ChatPanel(_props: ChatPanelProps) {
       )}
 
       <div style={{ flex: 1, overflow: 'auto', padding: '8px 0' }}>
-        {isEmpty && (
+        {viewMode === 'normal' && isEmpty && (
           <div style={{
             display: 'flex', flexDirection: 'column', alignItems: 'center',
             justifyContent: 'center', height: '100%', gap: 12,
@@ -697,8 +871,38 @@ export default function ChatPanel(_props: ChatPanelProps) {
           </div>
         )}
 
+        {/* Communication chats — dedicated-folder header + new chat button */}
+        {viewMode === 'communication' && (
+          <div style={{ padding: '4px 16px 8px' }}>
+            <button
+              type="button"
+              onClick={() => commDir && startNewChatInFolder(commDir)}
+              disabled={!commDir}
+              style={{
+                width: '100%', padding: '9px 12px', borderRadius: 8, fontSize: 12, fontWeight: 600,
+                cursor: commDir ? 'pointer' : 'not-allowed', fontFamily: 'inherit',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                background: 'rgba(var(--accent-rgb), 0.18)',
+                border: '1px solid rgba(var(--accent-rgb), 0.4)',
+                color: 'var(--accent-bright)',
+                opacity: commDir ? 1 : 0.5,
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+              Новый чат общения
+            </button>
+            {filteredSessions.length === 0 && (
+              <div style={{ marginTop: 12, textAlign: 'center', fontSize: 11, color: 'var(--text-muted)' }}>
+                Пока нет чатов для общения. Создайте первый.
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Plans section — hidden when a folder is selected (plans are global, not per-folder) or during search */}
-        {plans.length > 0 && !selectedFolder && !searchQuery && (
+        {viewMode === 'normal' && plans.length > 0 && !selectedFolder && !pickedFolderPath && !searchQuery && (
           <div style={{ marginBottom: 8 }}>
             <button
               type="button"
@@ -716,7 +920,7 @@ export default function ChatPanel(_props: ChatPanelProps) {
               </svg>
               Plans ({plans.length})
             </button>
-            {(plansCollapsed ? plans.slice(0, 3) : plans).map((plan) => (
+            {!plansCollapsed && plans.map((plan) => (
               <div key={plan.slug}>
                 <button
                   type="button"
@@ -771,24 +975,11 @@ export default function ChatPanel(_props: ChatPanelProps) {
                 )}
               </div>
             ))}
-            {plansCollapsed && plans.length > 3 && (
-              <button
-                type="button"
-                onClick={() => setPlansCollapsed(false)}
-                style={{
-                  width: '100%', padding: '4px 16px', fontSize: 10,
-                  color: 'var(--accent)', background: 'none', border: 'none',
-                  cursor: 'pointer', textAlign: 'left',
-                }}
-              >
-                Show all {plans.length} plans
-              </button>
-            )}
           </div>
         )}
 
         {/* Server search results */}
-        {searchResults !== null && searchResults.length > 0 && (
+        {viewMode === 'normal' && searchResults !== null && searchResults.length > 0 && (
           <div>
             <div style={{
               padding: '6px 16px', fontSize: 10, fontWeight: 700,
@@ -976,8 +1167,32 @@ export default function ChatPanel(_props: ChatPanelProps) {
               padding: '6px 16px', fontSize: 10, fontWeight: 700,
               textTransform: 'uppercase', letterSpacing: '0.08em',
               color: 'var(--text-muted)',
+              display: 'flex', alignItems: 'center', gap: 8,
             }}>
-              Sessions ({filteredSessions.length})
+              <span style={{ flex: 1 }}>
+                {viewMode === 'communication' ? 'Чаты общения' : 'Sessions'} ({filteredSessions.length})
+              </span>
+              {viewMode === 'normal' && folderTargetPath && !searchQuery && (
+                <button
+                  type="button"
+                  onClick={() => startNewChatInFolder(folderTargetPath)}
+                  title={`New chat in ${baseName(folderTargetPath)}`}
+                  style={{
+                    padding: '2px 8px', borderRadius: 10, cursor: 'pointer',
+                    fontSize: 9, fontWeight: 600, fontFamily: 'inherit',
+                    textTransform: 'none', letterSpacing: 'normal',
+                    display: 'flex', alignItems: 'center', gap: 3,
+                    background: 'rgba(var(--accent-rgb), 0.15)',
+                    border: '1px solid rgba(var(--accent-rgb), 0.4)',
+                    color: 'var(--accent-bright)',
+                  }}
+                >
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+                  </svg>
+                  New chat
+                </button>
+              )}
             </div>
             {filteredSessions.map((session) => {
               const isLaunching = launching === session.session_id;
@@ -1002,13 +1217,34 @@ export default function ChatPanel(_props: ChatPanelProps) {
                       <line x1="12" y1="19" x2="20" y2="19" />
                     </svg>
                     <div style={{ flex: 1, minWidth: 0 }}>
-                      {/* Session name — first_message as primary */}
-                      <div style={{
-                        fontSize: 12, fontWeight: 500, color: 'var(--text-primary)',
-                        overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                      }}>
-                        {sessionDisplayName(session)}
-                      </div>
+                      {/* Session name — first_message as primary (inline rename when editing) */}
+                      {renamingId === session.session_id ? (
+                        <input
+                          autoFocus
+                          value={renameValue}
+                          onChange={(e) => setRenameValue(e.target.value)}
+                          onClick={(e) => e.stopPropagation()}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') { e.preventDefault(); commitRename(session, renameValue); }
+                            else if (e.key === 'Escape') { e.preventDefault(); setRenamingId(null); }
+                          }}
+                          onBlur={() => commitRename(session, renameValue)}
+                          style={{
+                            width: '100%', fontSize: 12, fontWeight: 500,
+                            color: 'var(--text-primary)', fontFamily: 'inherit',
+                            background: 'rgba(var(--accent-rgb), 0.08)',
+                            border: '1px solid rgba(var(--accent-rgb), 0.4)',
+                            borderRadius: 4, padding: '2px 6px', outline: 'none',
+                          }}
+                        />
+                      ) : (
+                        <div style={{
+                          fontSize: 12, fontWeight: 500, color: 'var(--text-primary)',
+                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                        }}>
+                          {sessionDisplayName(session)}
+                        </div>
+                      )}
                       {/* 2-line preview of first_message */}
                       {session.first_message && (
                         <div style={{
@@ -1110,6 +1346,28 @@ export default function ChatPanel(_props: ChatPanelProps) {
                             <polygon points="5 3 19 12 5 21 5 3" />
                           </svg>
                           Open
+                        </button>
+                        {/* Rename button */}
+                        <button
+                          type="button"
+                          onClick={() => beginRename(session)}
+                          title="Переименовать сессию"
+                          style={{
+                            background: 'rgba(var(--accent-rgb), 0.06)',
+                            border: '1px solid var(--glass-border)',
+                            borderRadius: 4, padding: '3px 6px',
+                            cursor: 'pointer', display: 'flex', alignItems: 'center',
+                            color: 'var(--text-muted)',
+                            fontSize: 10, fontFamily: 'inherit',
+                            transition: 'all 0.15s',
+                          }}
+                          onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--accent)'; e.currentTarget.style.background = 'rgba(var(--accent-rgb), 0.15)'; }}
+                          onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-muted)'; e.currentTarget.style.background = 'rgba(var(--accent-rgb), 0.06)'; }}
+                        >
+                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <path d="M12 20h9" />
+                            <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+                          </svg>
                         </button>
                         {/* Delete button */}
                         <button
@@ -1284,14 +1542,35 @@ export default function ChatPanel(_props: ChatPanelProps) {
           </div>
         )}
 
-        {/* No sessions for selected folder */}
-        {!searchQuery && !isEmpty && filteredSessions.length === 0 && selectedFolder && (
+        {/* No sessions for selected folder (tree node or picked folder) */}
+        {viewMode === 'normal' && !searchQuery && filteredSessions.length === 0 && (selectedFolder || pickedFolderPath) && (
           <div style={{
             padding: '20px 16px', textAlign: 'center',
             color: 'var(--text-muted)', fontSize: 12,
           }}>
             No sessions in this folder
-            {!includeSubfolders && (
+            {folderTargetPath && (
+              <div style={{ marginTop: 10 }}>
+                <button
+                  type="button"
+                  onClick={() => startNewChatInFolder(folderTargetPath)}
+                  style={{
+                    display: 'inline-flex', alignItems: 'center', gap: 6,
+                    background: 'rgba(var(--accent-rgb), 0.15)',
+                    border: '1px solid rgba(var(--accent-rgb), 0.4)',
+                    borderRadius: 8, padding: '6px 14px',
+                    cursor: 'pointer', color: 'var(--accent-bright)',
+                    fontSize: 12, fontWeight: 600, fontFamily: 'inherit',
+                  }}
+                >
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+                  </svg>
+                  New chat
+                </button>
+              </div>
+            )}
+            {selectedFolder && !includeSubfolders && (
               <div style={{ marginTop: 6 }}>
                 <button
                   type="button"
@@ -1311,6 +1590,18 @@ export default function ChatPanel(_props: ChatPanelProps) {
           </div>
         )}
       </div>
+
+      {pickerOpen && user?.workspace_dir && (
+        <FolderPicker
+          startPath={user.workspace_dir}
+          onSelect={(p) => {
+            setPickedFolderPath(p);
+            setSelectedFolder(null);
+            setPickerOpen(false);
+          }}
+          onClose={() => setPickerOpen(false)}
+        />
+      )}
       </>}
     </div>
   );
