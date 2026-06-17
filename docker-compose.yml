@@ -37,6 +37,11 @@ services:
     restart: unless-stopped
     cap_add:
       - SYS_ADMIN
+    # Ubuntu 24.04: docker-default AppArmor profile blocks the mount-namespace
+    # operations sandboxed-shell needs (unshare --mount). Unconfine just this
+    # container so per-user terminal isolation works (still limited by SYS_ADMIN scope).
+    security_opt:
+      - apparmor:unconfined
     deploy:
       resources:
         limits:

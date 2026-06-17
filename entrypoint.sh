@@ -10,6 +10,11 @@ CLAUDE_MD_DST="$WORKSPACE/CLAUDE.md"
 # Ensure per-user workspaces root exists
 mkdir -p "$WORKSPACES"
 
+# /tmp is bind-mounted from host (/tmp/nebulide). If it isn't world-writable+sticky,
+# non-admin sandboxed users can't write/delete in /tmp (breaks rm of sandbox env,
+# pip, builds, git). Force standard /tmp perms on every start.
+chmod 1777 /tmp 2>/dev/null || true
+
 # Shared folder — read+write for all users (setgid so new files inherit group)
 SHARED="/home/nebulide/shared"
 mkdir -p "$SHARED"
