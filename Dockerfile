@@ -23,9 +23,8 @@ RUN chmod +x /entrypoint.sh
 # Persist helpers: install packages that survive container rebuilds
 COPY scripts/apk-persist /usr/local/bin/apk-persist
 COPY scripts/pip-persist /usr/local/bin/pip-persist
-COPY scripts/sandboxed-shell /usr/local/bin/sandboxed-shell
 COPY scripts/tg-send /usr/local/bin/tg-send
-RUN chmod +x /usr/local/bin/apk-persist /usr/local/bin/pip-persist /usr/local/bin/sandboxed-shell /usr/local/bin/tg-send
+RUN chmod +x /usr/local/bin/apk-persist /usr/local/bin/pip-persist /usr/local/bin/tg-send
 
 # Create user nebulide with sudo access
 RUN adduser -D -s /bin/bash -h /home/nebulide nebulide \
