@@ -139,6 +139,10 @@ chown "$USERNAME" "$ENV_FILE"
 
 # 10. Drop privileges and launch shell.
 #     su -c sources the env file, cleans it up, activates venv, and starts bash.
+#     The script body is fed to the outer `sh` via a heredoc, so this process's
+#     stdin is the heredoc (now at EOF), NOT the PTY. Without reconnecting stdin
+#     to the controlling terminal, bash --login reads EOF and exits immediately
+#     ("Shell exited" reconnect loop). `</dev/tty` restores the interactive PTY.
 cd "$WORKSPACE"
-exec su -s /bin/bash - "$USERNAME" -c ". $ENV_FILE; rm -f $ENV_FILE; cd $WORKSPACE; [ -f $WORKSPACE/.venv/bin/activate ] && . $WORKSPACE/.venv/bin/activate; exec /bin/bash --login"
+exec su -s /bin/bash - "$USERNAME" -c ". $ENV_FILE; rm -f $ENV_FILE; cd $WORKSPACE; [ -f $WORKSPACE/.venv/bin/activate ] && . $WORKSPACE/.venv/bin/activate; exec /bin/bash --login </dev/tty"
 SCRIPT
