@@ -68,7 +68,7 @@ function inputSummary(input: unknown): string {
 function ThinkingBlock({ text }: { text: string }) {
   return (
     <details style={{ margin: '4px 0', borderRadius: 8, background: 'rgba(255,255,255,0.025)', border: '1px solid var(--glass-border)' }}>
-      <summary style={{ cursor: 'pointer', padding: '6px 10px', listStyle: 'none', fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic' }}>
+      <summary style={{ cursor: 'pointer', padding: '8px 10px', listStyle: 'none', fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic' }}>
         💭 Размышления
       </summary>
       <div style={{ padding: '4px 10px 8px', fontSize: 12, lineHeight: 1.5, color: 'var(--text-tertiary)', fontStyle: 'italic', whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 320, overflow: 'auto' }}>
@@ -90,7 +90,7 @@ function TodoWriteBlock({ input }: { input: unknown }) {
         const active = t.status === 'in_progress';
         return (
           <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 7, fontSize: 12, lineHeight: 1.5, padding: '1px 0' }}>
-            <span style={{ flexShrink: 0, width: 14, color: done ? '#4ade80' : active ? 'var(--accent)' : 'var(--text-muted)' }}>
+            <span style={{ flexShrink: 0, width: 14, color: done ? 'var(--success)' : active ? 'var(--accent)' : 'var(--text-muted)' }}>
               {done ? '✓' : active ? '●' : '○'}
             </span>
             <span style={{
@@ -132,8 +132,8 @@ function DiffView({ rows }: { rows: DiffRow[] }) {
       {capped.map((r, i) => (
         <div key={i} style={{
           padding: '0 10px', whiteSpace: 'pre-wrap', wordBreak: 'break-word',
-          background: r.t === 'add' ? 'rgba(74,222,128,0.12)' : r.t === 'del' ? 'rgba(255,80,80,0.12)' : 'transparent',
-          color: r.t === 'add' ? '#9ff0b5' : r.t === 'del' ? '#ffb3b3' : 'var(--text-muted)',
+          background: r.t === 'add' ? 'rgba(var(--success-rgb),0.12)' : r.t === 'del' ? 'rgba(var(--danger-rgb),0.12)' : 'transparent',
+          color: r.t === 'add' ? 'var(--success)' : r.t === 'del' ? 'rgba(var(--danger-rgb),0.9)' : 'var(--text-muted)',
         }}>
           {r.t === 'add' ? '+ ' : r.t === 'del' ? '− ' : '  '}{r.s}
         </div>
@@ -157,7 +157,7 @@ function EditBlock({ name, input }: { name: string; input: unknown }) {
   }
   return (
     <details open style={{ margin: '4px 0', borderRadius: 8, overflow: 'hidden', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--glass-border)' }}>
-      <summary style={{ cursor: 'pointer', padding: '6px 10px', listStyle: 'none', display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 600, color: 'var(--accent)' }}>
+      <summary style={{ cursor: 'pointer', padding: '8px 10px', listStyle: 'none', display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, fontWeight: 600, color: 'var(--accent)' }}>
         <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
           <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
           <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
@@ -188,7 +188,7 @@ function ToolUseBlock({ block }: { block: ChatBlock }) {
   const icon = TOOL_ICON[name] || '🔧';
   return (
     <details style={{ margin: '4px 0', borderRadius: 8, overflow: 'hidden', background: 'rgba(var(--accent-rgb),0.06)', border: '1px solid rgba(var(--accent-rgb),0.22)' }}>
-      <summary style={{ cursor: 'pointer', padding: '6px 10px', listStyle: 'none', display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--accent)', fontWeight: 600 }}>
+      <summary style={{ cursor: 'pointer', padding: '8px 10px', listStyle: 'none', display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--accent)', fontWeight: 600 }}>
         <span style={{ flexShrink: 0, width: 14, textAlign: 'center' }}>{icon}</span>
         <span style={{ color: 'var(--text-primary)' }}>{name}</span>
         {summary && (
@@ -210,8 +210,8 @@ function ToolResultBlock({ block }: { block: ChatBlock }) {
   const content = block.content || '';
   const err = !!block.is_error;
   return (
-    <details style={{ margin: '4px 0', borderRadius: 8, overflow: 'hidden', background: err ? 'rgba(255,60,60,0.06)' : 'rgba(255,255,255,0.03)', border: `1px solid ${err ? 'rgba(255,60,60,0.3)' : 'var(--glass-border)'}` }}>
-      <summary style={{ cursor: 'pointer', padding: '6px 10px', listStyle: 'none', display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: err ? '#ff6b6b' : 'var(--text-muted)', fontWeight: 600 }}>
+    <details style={{ margin: '4px 0', borderRadius: 8, overflow: 'hidden', background: err ? 'rgba(var(--danger-rgb),0.06)' : 'rgba(255,255,255,0.03)', border: `1px solid ${err ? 'rgba(var(--danger-rgb),0.3)' : 'var(--glass-border)'}` }}>
+      <summary style={{ cursor: 'pointer', padding: '8px 10px', listStyle: 'none', display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: err ? 'var(--danger)' : 'var(--text-muted)', fontWeight: 600 }}>
         {err ? '✗' : '↳'} <span>{err ? 'Ошибка' : 'Результат'}</span>
         {content && (
           <span style={{ flex: 1, minWidth: 0, fontWeight: 400, fontSize: 11, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'monospace' }}>
@@ -220,7 +220,7 @@ function ToolResultBlock({ block }: { block: ChatBlock }) {
         )}
       </summary>
       {content && (
-        <pre style={{ margin: 0, padding: '8px 10px', fontSize: 11, lineHeight: 1.45, color: err ? '#ffb3b3' : 'var(--text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'monospace', maxHeight: 320, overflow: 'auto', borderTop: `1px solid ${err ? 'rgba(255,60,60,0.2)' : 'var(--glass-border)'}` }}>
+        <pre style={{ margin: 0, padding: '8px 10px', fontSize: 11, lineHeight: 1.45, color: err ? 'rgba(var(--danger-rgb),0.9)' : 'var(--text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'monospace', maxHeight: 320, overflow: 'auto', borderTop: `1px solid ${err ? 'rgba(var(--danger-rgb),0.2)' : 'var(--glass-border)'}` }}>
           {content}
         </pre>
       )}

@@ -27,7 +27,7 @@ export default function TerminalChatPanel({ instanceId, persistent, active }: Pr
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
       {/* Mode toggle */}
       <div style={{
-        flexShrink: 0, display: 'flex', gap: 4, padding: '4px 6px',
+        flexShrink: 0, display: 'flex', flexWrap: 'wrap', gap: 4, padding: '4px 6px',
         borderBottom: '1px solid var(--glass-border)', background: 'rgba(0,0,0,0.12)',
       }}>
         <button
@@ -76,8 +76,8 @@ export default function TerminalChatPanel({ instanceId, persistent, active }: Pr
 
 function modeBtnStyle(activeMode: boolean): React.CSSProperties {
   return {
-    display: 'flex', alignItems: 'center', gap: 5, padding: '4px 10px', borderRadius: 6,
-    fontSize: 11, fontWeight: 500, fontFamily: 'inherit', cursor: 'pointer',
+    display: 'flex', alignItems: 'center', gap: 5, padding: '6px 12px', borderRadius: 6,
+    fontSize: 12, fontWeight: 500, fontFamily: 'inherit', cursor: 'pointer',
     background: activeMode ? 'rgba(var(--accent-rgb),0.2)' : 'rgba(255,255,255,0.04)',
     border: `1px solid ${activeMode ? 'rgba(var(--accent-rgb),0.4)' : 'var(--glass-border)'}`,
     color: activeMode ? 'var(--accent-bright)' : 'var(--text-muted)',

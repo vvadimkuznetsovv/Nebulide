@@ -254,7 +254,7 @@ export default function ClaudeChatView({ instanceId, cwd, project, sessionFile, 
               { label: 'n', data: 'n\r' },
             ].map(k => (
               <button key={k.label} type="button" onClick={() => sendKey(k.data)}
-                style={{ padding: '3px 9px', borderRadius: 6, fontSize: 11, fontFamily: 'inherit', cursor: 'pointer',
+                style={{ padding: '5px 11px', borderRadius: 6, fontSize: 11, fontFamily: 'inherit', cursor: 'pointer',
                   background: 'rgba(var(--accent-rgb),0.08)', border: '1px solid var(--glass-border)', color: 'var(--text-secondary)' }}>
                 {k.label}
               </button>

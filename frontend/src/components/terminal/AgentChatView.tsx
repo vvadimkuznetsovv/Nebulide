@@ -154,7 +154,7 @@ export default function AgentChatView({ instanceId, cwd, resume, historyProject,
         {MODES.map(mo => (
           <button key={mo.id} type="button" onClick={() => changeMode(mo.id)}
             style={{
-              padding: '3px 9px', borderRadius: 6, fontSize: 10, fontFamily: 'inherit', cursor: 'pointer',
+              padding: '5px 11px', borderRadius: 6, fontSize: 11, fontFamily: 'inherit', cursor: 'pointer',
               background: mode === mo.id ? 'rgba(var(--accent-rgb),0.2)' : 'rgba(255,255,255,0.04)',
               border: `1px solid ${mode === mo.id ? 'rgba(var(--accent-rgb),0.4)' : 'var(--glass-border)'}`,
               color: mode === mo.id ? 'var(--accent-bright)' : 'var(--text-muted)',
@@ -165,8 +165,8 @@ export default function AgentChatView({ instanceId, cwd, resume, historyProject,
         <span style={{ flex: 1 }} />
         {status === 'working' && (
           <button type="button" onClick={() => send({ type: 'abort' })} title="Остановить"
-            style={{ padding: '3px 9px', borderRadius: 6, fontSize: 10, cursor: 'pointer', fontFamily: 'inherit',
-              background: 'rgba(255,60,60,0.1)', border: '1px solid rgba(255,60,60,0.3)', color: '#ff6b6b' }}>
+            style={{ padding: '5px 11px', borderRadius: 6, fontSize: 10, cursor: 'pointer', fontFamily: 'inherit',
+              background: 'rgba(var(--danger-rgb),0.1)', border: '1px solid rgba(var(--danger-rgb),0.3)', color: 'var(--danger)' }}>
             ■ Стоп
           </button>
         )}
@@ -200,15 +200,15 @@ export default function AgentChatView({ instanceId, cwd, resume, historyProject,
           </div>
           <div style={{ display: 'flex', gap: 8, position: 'relative', flexWrap: 'wrap' }}>
             <button type="button" onClick={() => decide('allow')}
-              style={btn('rgba(74,222,128,0.18)', 'rgba(74,222,128,0.4)', '#9ff0b5')}>Да</button>
+              style={btn('rgba(var(--success-rgb),0.18)', 'rgba(var(--success-rgb),0.4)', 'var(--success)')}>Да</button>
             <div style={{ position: 'relative' }}>
               <button type="button" onClick={() => setScopeOpen(v => !v)}
                 style={btn('rgba(var(--accent-rgb),0.18)', 'rgba(var(--accent-rgb),0.4)', 'var(--accent-bright)')}>
                 Да навсегда ▾
               </button>
               {scopeOpen && (
-                <div style={{ position: 'absolute', bottom: '110%', left: 0, zIndex: 10, minWidth: 160,
-                  background: 'var(--glass-bg, rgba(20,8,36,0.96))', border: '1px solid var(--glass-border)', borderRadius: 8, overflow: 'hidden' }}>
+                <div style={{ position: 'absolute', bottom: '110%', right: 0, zIndex: 10, minWidth: 160,
+                  background: 'var(--glass-bg)', border: '1px solid var(--glass-border)', borderRadius: 8, overflow: 'hidden' }}>
                   {([['session', 'Эта сессия'], ['project', 'Этот проект'], ['always', 'Навсегда']] as [PermissionScope, string][]).map(([s, l]) => (
                     <button key={s} type="button" onClick={() => decide('allow', true, s)}
                       style={{ display: 'block', width: '100%', textAlign: 'left', padding: '7px 12px', fontSize: 12, fontFamily: 'inherit',
@@ -222,7 +222,7 @@ export default function AgentChatView({ instanceId, cwd, resume, historyProject,
               )}
             </div>
             <button type="button" onClick={() => decide('deny')}
-              style={btn('rgba(255,60,60,0.12)', 'rgba(255,60,60,0.35)', '#ff6b6b')}>Нет</button>
+              style={btn('rgba(var(--danger-rgb),0.12)', 'rgba(var(--danger-rgb),0.35)', 'var(--danger)')}>Нет</button>
           </div>
         </div>
       )}
