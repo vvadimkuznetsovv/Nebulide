@@ -7,7 +7,7 @@ import ChatPanel from '../chat/ChatPanel';
 import EditorPanel from '../editor/EditorPanel';
 import CodeEditor from '../editor/CodeEditor';
 import PreviewPanel from '../preview/PreviewPanel';
-import TerminalComponent from '../terminal/Terminal';
+import TerminalChatPanel from '../terminal/TerminalChatPanel';
 import TamagotchiPanel from '../pet/TamagotchiPanel';
 import LLMPanel from '../llm/LLMPanel';
 
@@ -115,7 +115,7 @@ export default function PanelContent({ panelId }: { panelId: PanelId }) {
   // Handle detached terminal panels
   if (isDetachedTerminal(panelId)) {
     const instanceId = getDetachedTerminalId(panelId)!;
-    return <TerminalComponent instanceId={instanceId} persistent active={visibility[panelId]} />;
+    return <TerminalChatPanel instanceId={instanceId} persistent active={visibility[panelId]} />;
   }
 
   switch (panelId) {
@@ -139,7 +139,7 @@ export default function PanelContent({ panelId }: { panelId: PanelId }) {
       return <PreviewPanel />;
 
     case 'terminal':
-      return <TerminalComponent instanceId="default" persistent active={visibility.terminal} />;
+      return <TerminalChatPanel instanceId="default" persistent active={visibility.terminal} />;
 
     case 'pet':
       return <TamagotchiPanel />;

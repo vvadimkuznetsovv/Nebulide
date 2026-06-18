@@ -16,6 +16,10 @@ COPY backend/nebulide .
 # Copy pre-built frontend
 COPY frontend/dist ./static
 
+# Agent SDK sidecar (headless chat: streaming + in-app permission prompts)
+COPY agent-bridge /app/agent-bridge
+RUN cd /app/agent-bridge && npm install --omit=dev
+
 # Entrypoint: auto-installs persisted packages on startup
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh

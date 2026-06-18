@@ -88,6 +88,7 @@ func main() {
 	adminHandler := handlers.NewAdminHandler(cfg, terminalService, presenceService)
 	workspaceSessionsHandler := handlers.NewWorkspaceSessionsHandler(cfg)
 	claudeSessionsHandler := handlers.NewClaudeSessionsHandler(cfg)
+	agentHandler := handlers.NewAgentHandler(cfg)
 	syncHandler := handlers.NewSyncHandler(cfg, presenceService, terminalService)
 	hookHandler := handlers.NewHookHandler(cfg)
 	llmHandler := handlers.NewLLMHandler(cfg)
@@ -217,6 +218,8 @@ func main() {
 		// Claude CLI sessions & plans
 		protected.GET("/claude-sessions", claudeSessionsHandler.List)
 		protected.GET("/claude-sessions/search", claudeSessionsHandler.SearchSessions)
+		protected.GET("/claude-sessions/live", claudeSessionsHandler.ResolveLive)
+		protected.GET("/claude-sessions/:project/:sessionFile/tail", claudeSessionsHandler.TailSession)
 		protected.GET("/claude-sessions/:project/:sessionFile/branches", claudeSessionsHandler.ListBranches)
 		protected.GET("/claude-sessions/:project/:sessionFile", claudeSessionsHandler.ReadSession)
 		protected.DELETE("/claude-sessions/:project/:sessionFile", claudeSessionsHandler.DeleteSession)
@@ -237,6 +240,7 @@ func main() {
 	// WebSocket routes (auth via query param)
 	r.GET("/ws/chat/:id", chatHandler.HandleWebSocket)
 	r.GET("/ws/terminal", terminalHandler.HandleWebSocket)
+	r.GET("/ws/agent", agentHandler.HandleWebSocket)
 	r.GET("/ws/sync", syncHandler.HandleWebSocket)
 
 	// Code-server reverse proxy (auth via ?token= query param or cookie)

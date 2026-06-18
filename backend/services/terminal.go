@@ -240,6 +240,11 @@ type TerminalSession struct {
 	// (from the @ws: suffix of the connect query). Set on every attach;
 	// used to scope active_claude_terminals / pet events per workspace.
 	WorkspaceID string
+
+	// WorkDir is the directory the shell was started in. Used to map a
+	// terminal → its Claude project dir (~/.claude/projects/<slug>) when
+	// resolving the live JSONL for the chat-view wrapper.
+	WorkDir string
 }
 
 func NewTerminalService() *TerminalService {
@@ -249,6 +254,17 @@ func NewTerminalService() *TerminalService {
 	go ts.reapLoop()
 	go ts.childWatchLoop()
 	return ts
+}
+
+// GetWorkDir returns the working directory a terminal session was started in,
+// or "" if no such session exists. Used to map a terminal → its Claude project.
+func (s *TerminalService) GetWorkDir(sessionKey string) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if sess, ok := s.sessions[sessionKey]; ok {
+		return sess.WorkDir
+	}
+	return ""
 }
 
 // reapLoop periodically removes dead terminal sessions and logs status.
@@ -509,6 +525,7 @@ func (s *TerminalService) createLocked(sessionKey string, workingDir string, san
 		Done:        make(chan struct{}),
 		mw:          newMultiWriter(scrollbackPath(sessionKey)),
 		OrphanSince: time.Now(), // starts orphaned until a WebSocket connects
+		WorkDir:     workingDir,
 	}
 
 	log.Printf("[TerminalService] shell started pid=%d key=%s", cmd.Process.Pid, sessionKey)

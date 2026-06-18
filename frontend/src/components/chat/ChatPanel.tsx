@@ -8,6 +8,12 @@ import toast from 'react-hot-toast';
 import { log } from '../../utils/logger';
 import LLMPanel from '../llm/LLMPanel';
 import FolderPicker from './FolderPicker';
+import ClaudeChatView from '../terminal/ClaudeChatView';
+import { mkdirFile } from '../../api/files';
+import {
+  getClaudeOpenMode, setClaudeOpenMode, useClaudeOpenMode,
+  setInitialTerminalViewMode, setTerminalCwdHint, setAgentLaunch,
+} from '../../utils/terminalViewMode';
 
 /** Normalize a path for cross-OS comparison: forward slashes, no trailing slash. */
 const normPath = (p?: string) => (p || '').replace(/\\/g, '/').replace(/\/+$/, '');
@@ -200,6 +206,7 @@ export default function ChatPanel(_props: ChatPanelProps) {
 
   const openTerminalWithId = useLayoutStore((s) => s.openTerminalWithId);
   const user = useAuthStore((s) => s.user);
+  const openMode = useClaudeOpenMode();
 
   // Dedicated per-user folder that holds "communication" chats (talking to Claude
   // outside of any project). Hidden from the file manager by the backend.
@@ -216,6 +223,16 @@ export default function ChatPanel(_props: ChatPanelProps) {
   // Open a fresh terminal, cd into the folder (creating it if needed) and run claude.
   const startNewChatInFolder = useCallback(async (absPath: string) => {
     const instanceId = `claude-${Date.now()}`;
+    setTerminalCwdHint(instanceId, absPath);
+    if (getClaudeOpenMode() === 'chat') {
+      // Headless agent chat: ensure the dir exists, open the agent panel (no PTY command).
+      try { await mkdirFile(absPath); } catch { /* already exists */ }
+      setAgentLaunch(instanceId, {});
+      setInitialTerminalViewMode(instanceId, 'agent');
+      openTerminalWithId(instanceId);
+      return;
+    }
+    setInitialTerminalViewMode(instanceId, 'terminal');
     openTerminalWithId(instanceId);
     const ok = await typeCommandInTerminal(instanceId, `mkdir -p "${absPath}" && cd "${absPath}" && claude`);
     if (!ok) toast.error('Failed to connect to terminal');
@@ -345,11 +362,23 @@ export default function ChatPanel(_props: ChatPanelProps) {
     return null;
   }, [pickedFolderPath, selectedFolder, normalSessions]);
 
-  const handleOpenSession = useCallback(async (session: { session_id: string; cwd?: string }) => {
+  const handleOpenSession = useCallback(async (session: { session_id: string; cwd?: string; project?: string }) => {
     if (launching) return;
     setLaunching(session.session_id);
 
     const instanceId = `claude-${Date.now()}`;
+    if (session.cwd) setTerminalCwdHint(instanceId, session.cwd);
+
+    if (getClaudeOpenMode() === 'chat') {
+      // Resume the session in the headless agent chat (history preloaded from JSONL).
+      setAgentLaunch(instanceId, { resume: session.session_id, historyProject: session.project, historySessionFile: session.session_id });
+      setInitialTerminalViewMode(instanceId, 'agent');
+      openTerminalWithId(instanceId);
+      setLaunching(null);
+      return;
+    }
+
+    setInitialTerminalViewMode(instanceId, 'terminal');
     openTerminalWithId(instanceId);
 
     const resumeCmd = `claude --resume ${session.session_id}`;
@@ -463,7 +492,7 @@ export default function ChatPanel(_props: ChatPanelProps) {
   }, []);
 
   const handleOpenSearchResult = useCallback(async (result: ClaudeSearchResult) => {
-    handleOpenSession({ session_id: result.session_id, cwd: result.cwd });
+    handleOpenSession({ session_id: result.session_id, cwd: result.cwd, project: result.project });
   }, [handleOpenSession]);
 
   const handleToggleBranches = useCallback(async (session: ClaudeSession & { project: string }) => {
@@ -674,6 +703,27 @@ export default function ChatPanel(_props: ChatPanelProps) {
             color: viewMode === 'communication' ? 'var(--accent-bright)' : 'var(--text-muted)',
           }}
         >💬 Чаты общения</button>
+      </div>
+
+      {/* Open-as preference: launch sessions directly as terminal or chat interface */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 12px 6px', flexShrink: 0 }}>
+        <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Открывать как:</span>
+        {(['terminal', 'chat'] as const).map((m) => (
+          <button
+            key={m}
+            type="button"
+            onClick={() => setClaudeOpenMode(m)}
+            style={{
+              padding: '2px 10px', borderRadius: 10, fontSize: 10, fontFamily: 'inherit', cursor: 'pointer',
+              background: openMode === m ? 'rgba(var(--accent-rgb), 0.15)' : 'rgba(var(--accent-rgb), 0.04)',
+              border: `1px solid ${openMode === m ? 'rgba(var(--accent-rgb), 0.4)' : 'var(--glass-border)'}`,
+              color: openMode === m ? 'var(--accent)' : 'var(--text-muted)',
+              fontWeight: openMode === m ? 600 : 400,
+            }}
+          >
+            {m === 'terminal' ? 'Терминал' : 'Чат'}
+          </button>
+        ))}
       </div>
 
       {/* Search */}
@@ -1472,48 +1522,16 @@ export default function ChatPanel(_props: ChatPanelProps) {
                     </div>
                   )}
 
-                  {/* Expanded preview */}
+                  {/* Expanded preview — rich chat renderer (history, read-only) */}
                   {isExpanded && (
                     <div style={{
-                      margin: '0 16px 8px', padding: '10px 12px',
+                      margin: '0 16px 8px',
                       borderRadius: 8,
                       background: 'rgba(var(--accent-rgb), 0.04)',
                       border: '1px solid var(--glass-border)',
-                      maxHeight: 400, overflow: 'auto',
+                      height: 380, overflow: 'hidden',
                     }}>
-                      {sessionMessages.length === 0 ? (
-                        <div style={{ color: 'var(--text-muted)', fontSize: 11, textAlign: 'center', padding: 12 }}>
-                          No messages in this session
-                        </div>
-                      ) : (
-                        sessionMessages.map((msg, i) => (
-                          <div key={i} style={{
-                            marginBottom: i < sessionMessages.length - 1 ? 10 : 0,
-                            paddingBottom: i < sessionMessages.length - 1 ? 10 : 0,
-                            borderBottom: i < sessionMessages.length - 1 ? '1px solid var(--glass-border)' : 'none',
-                          }}>
-                            <div style={{
-                              fontSize: 10, fontWeight: 600,
-                              color: msg.role === 'user' ? 'var(--accent)' : 'var(--text-secondary)',
-                              marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.05em',
-                            }}>
-                              {msg.role === 'user' ? 'You' : 'Claude'}
-                              {msg.timestamp && (
-                                <span style={{ fontWeight: 400, marginLeft: 8, color: 'var(--text-muted)' }}>
-                                  {timeAgo(msg.timestamp)}
-                                </span>
-                              )}
-                            </div>
-                            <pre style={{
-                              margin: 0, fontSize: 11, lineHeight: 1.5,
-                              color: 'var(--text-primary)', whiteSpace: 'pre-wrap',
-                              wordBreak: 'break-word', fontFamily: 'inherit',
-                            }}>
-                              {msg.content}
-                            </pre>
-                          </div>
-                        ))
-                      )}
+                      <ClaudeChatView project={session.project} sessionFile={session.session_id} readOnly />
                     </div>
                   )}
                 </div>

@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -100,6 +102,7 @@ type jsonlMeta struct {
 	CWD         string `json:"cwd"`
 	UUID        string `json:"uuid"`
 	ParentUUID  string `json:"parentUuid"`
+	IsSidechain bool   `json:"isSidechain"` // true = Task/subagent thread (skip in main view)
 	CustomTitle string `json:"customTitle"` // type == "custom-title": user-assigned session/branch name
 	Message     *struct {
 		Role    string          `json:"role"`
@@ -179,6 +182,124 @@ func extractTextContent(meta jsonlMeta) string {
 		return strings.Join(parts, "\n")
 	}
 	return ""
+}
+
+// chatBlock is one piece of a rich message: plain text, a tool invocation,
+// or a tool result. Used by the chat-view wrapper (TailSession).
+type chatBlock struct {
+	Kind      string          `json:"kind"` // "text" | "thinking" | "tool_use" | "tool_result"
+	Text      string          `json:"text,omitempty"`        // text / thinking
+	Name      string          `json:"name,omitempty"`        // tool_use
+	Input     json.RawMessage `json:"input,omitempty"`       // tool_use
+	ToolUseID string          `json:"tool_use_id,omitempty"` // tool_use / tool_result
+	Content   string          `json:"content,omitempty"`     // tool_result
+	IsError   bool            `json:"is_error,omitempty"`    // tool_result
+}
+
+type richMessage struct {
+	UUID       string      `json:"uuid"`
+	ParentUUID string      `json:"parent_uuid,omitempty"`
+	Role       string      `json:"role"` // "user" | "assistant"
+	Blocks     []chatBlock `json:"blocks"`
+	Timestamp  string      `json:"timestamp,omitempty"`
+}
+
+// toolResultText flattens a tool_result content value (string or array of
+// {type:"text",text} blocks) into a single string.
+func toolResultText(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s
+	}
+	var blocks []struct {
+		Type string `json:"type"`
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal(raw, &blocks); err == nil {
+		var parts []string
+		for _, b := range blocks {
+			if b.Text != "" {
+				parts = append(parts, b.Text)
+			}
+		}
+		return strings.Join(parts, "\n")
+	}
+	return ""
+}
+
+// extractBlocks parses a message's content into rich blocks (text, tool_use,
+// tool_result). Content may be a string (→ one text block) or an array.
+func extractBlocks(meta jsonlMeta) []chatBlock {
+	if meta.Message == nil {
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(meta.Message.Content, &s); err == nil {
+		s = strings.TrimSpace(s)
+		if s == "" {
+			return nil
+		}
+		return []chatBlock{{Kind: "text", Text: truncate(s, 16000)}}
+	}
+	var raw []json.RawMessage
+	if err := json.Unmarshal(meta.Message.Content, &raw); err != nil {
+		return nil
+	}
+	var blocks []chatBlock
+	for _, item := range raw {
+		var bt struct {
+			Type string `json:"type"`
+		}
+		if json.Unmarshal(item, &bt) != nil {
+			continue
+		}
+		switch bt.Type {
+		case "text":
+			var b struct {
+				Text string `json:"text"`
+			}
+			if json.Unmarshal(item, &b) == nil && strings.TrimSpace(b.Text) != "" {
+				blocks = append(blocks, chatBlock{Kind: "text", Text: truncate(b.Text, 16000)})
+			}
+		case "thinking":
+			var b struct {
+				Thinking string `json:"thinking"`
+			}
+			if json.Unmarshal(item, &b) == nil && strings.TrimSpace(b.Thinking) != "" {
+				blocks = append(blocks, chatBlock{Kind: "thinking", Text: truncate(b.Thinking, 16000)})
+			}
+		case "tool_use":
+			var b struct {
+				ID    string          `json:"id"`
+				Name  string          `json:"name"`
+				Input json.RawMessage `json:"input"`
+			}
+			if json.Unmarshal(item, &b) == nil {
+				if len(b.Input) > 8000 {
+					b.Input = nil // oversized tool input — drop to keep payload small
+				}
+				blocks = append(blocks, chatBlock{Kind: "tool_use", ToolUseID: b.ID, Name: b.Name, Input: b.Input})
+			}
+		case "tool_result":
+			var b struct {
+				ToolUseID string          `json:"tool_use_id"`
+				Content   json.RawMessage `json:"content"`
+				IsError   bool            `json:"is_error"`
+			}
+			if json.Unmarshal(item, &b) == nil {
+				blocks = append(blocks, chatBlock{
+					Kind:      "tool_result",
+					ToolUseID: b.ToolUseID,
+					Content:   truncate(toolResultText(b.Content), 8000),
+					IsError:   b.IsError,
+				})
+			}
+		}
+	}
+	return blocks
 }
 
 func truncate(s string, max int) string {
@@ -1017,6 +1138,328 @@ func (h *ClaudeSessionsHandler) RenameSession(c *gin.Context) {
 	h.cacheMu.Unlock()
 
 	c.JSON(http.StatusOK, gin.H{"message": "Session renamed", "name": name})
+}
+
+// --- Chat-view wrapper: live resolution + incremental tail ---
+
+// newestJSONLInDir returns the base filename (no .jsonl) of the most recently
+// modified .jsonl in dir, plus its modtime. ("", zero) if none.
+func newestJSONLInDir(dir string) (string, time.Time) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return "", time.Time{}
+	}
+	var bestBase string
+	var bestMT time.Time
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
+			continue
+		}
+		info, err := e.Info()
+		if err != nil {
+			continue
+		}
+		if info.ModTime().After(bestMT) {
+			bestMT = info.ModTime()
+			bestBase = strings.TrimSuffix(e.Name(), ".jsonl")
+		}
+	}
+	return bestBase, bestMT
+}
+
+// sessionFileBySessionID scans a project dir for the .jsonl whose internal
+// sessionId matches sid (checks filename first). Returns base name or "".
+func sessionFileBySessionID(projDir, sid string) string {
+	if _, err := os.Stat(filepath.Join(projDir, sid+".jsonl")); err == nil {
+		return sid
+	}
+	entries, err := os.ReadDir(projDir)
+	if err != nil {
+		return ""
+	}
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), ".jsonl") {
+			continue
+		}
+		fp := filepath.Join(projDir, e.Name())
+		file, err := os.Open(fp)
+		if err != nil {
+			continue
+		}
+		scanner := bufio.NewScanner(file)
+		scanner.Buffer(make([]byte, 0, 64*1024), 256*1024)
+		found := false
+		for i := 0; i < 5 && scanner.Scan(); i++ {
+			var meta jsonlMeta
+			if json.Unmarshal([]byte(scanner.Text()), &meta) == nil && meta.SessionID == sid {
+				found = true
+				break
+			}
+		}
+		file.Close()
+		if found {
+			return strings.TrimSuffix(e.Name(), ".jsonl")
+		}
+	}
+	return ""
+}
+
+// ResolveLive maps a running terminal → its live Claude session JSONL.
+// Priority: 1) hook-tracked sessionId+cwd (exact), 2) frontend cwd hint
+// (newest .jsonl in that project dir), 3) newest .jsonl across the user's
+// whole workspace (handles `cd` into subdirs without hooks).
+func (h *ClaudeSessionsHandler) ResolveLive(c *gin.Context) {
+	instanceID := c.Query("instanceId")
+	cwdHint := c.Query("cwd")
+	wsSlug := h.userWorkspaceSlug(c)
+	projectsDir := filepath.Join(h.claudeBaseDir(), "projects")
+
+	respond := func(project, sessionFile, sessionID, cwd string) {
+		c.JSON(http.StatusOK, gin.H{
+			"project":      project,
+			"session_file": sessionFile,
+			"session_id":   sessionID,
+			"cwd":          cwd,
+			"active":       true,
+		})
+	}
+
+	// 1) Hook-tracked exact session.
+	if instanceID != "" {
+		if sid, cwd, ok := GetLiveSession(instanceID); ok && sid != "" {
+			slug := workspaceSlug(cwd)
+			if cwd != "" && matchesWorkspace(slug, wsSlug) {
+				if file := sessionFileBySessionID(filepath.Join(projectsDir, slug), sid); file != "" {
+					respond(slug, file, sid, cwd)
+					return
+				}
+			}
+		}
+	}
+
+	// 2) Frontend-provided cwd hint → newest .jsonl in that project dir.
+	if cwdHint != "" {
+		slug := workspaceSlug(cwdHint)
+		if matchesWorkspace(slug, wsSlug) {
+			if file, _ := newestJSONLInDir(filepath.Join(projectsDir, slug)); file != "" {
+				respond(slug, file, "", cwdHint)
+				return
+			}
+		}
+	}
+
+	// 3) Newest .jsonl across all of the user's workspace projects.
+	entries, err := os.ReadDir(projectsDir)
+	if err == nil {
+		var bestProj, bestFile string
+		var bestMT time.Time
+		for _, e := range entries {
+			if !e.IsDir() || !matchesWorkspace(e.Name(), wsSlug) {
+				continue
+			}
+			if base, mt := newestJSONLInDir(filepath.Join(projectsDir, e.Name())); base != "" && mt.After(bestMT) {
+				bestMT, bestProj, bestFile = mt, e.Name(), base
+			}
+		}
+		if bestFile != "" {
+			respond(bestProj, bestFile, "", "")
+			return
+		}
+	}
+
+	c.JSON(http.StatusNotFound, gin.H{"error": "No live session found"})
+}
+
+// TailSession returns rich messages appended after byte `offset`. The JSONL is
+// append-only, so the frontend keeps an offset and only ever gets new messages
+// (stable, no repaint). A trailing partial line (mid-write) is never consumed.
+func (h *ClaudeSessionsHandler) TailSession(c *gin.Context) {
+	project := c.Param("project")
+	sessionFile := c.Param("sessionFile")
+
+	if !slugRe.MatchString(project) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid project"})
+		return
+	}
+	wsSlug := h.userWorkspaceSlug(c)
+	if !matchesWorkspace(project, wsSlug) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "Access denied"})
+		return
+	}
+
+	var offset int64
+	if v := c.Query("offset"); v != "" {
+		if parsed, err := strconv.ParseInt(v, 10, 64); err == nil && parsed >= 0 {
+			offset = parsed
+		}
+	}
+
+	projDir := filepath.Join(h.claudeBaseDir(), "projects", project)
+	fullPath := filepath.Join(projDir, sessionFile+".jsonl")
+	if _, err := os.Stat(fullPath); err != nil {
+		if base := sessionFileBySessionID(projDir, sessionFile); base != "" {
+			fullPath = filepath.Join(projDir, base+".jsonl")
+		}
+	}
+
+	fi, err := os.Stat(fullPath)
+	if err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
+		return
+	}
+	size := fi.Size()
+
+	// File shrank/rotated (offset past EOF) → restart from the beginning.
+	if offset > size {
+		offset = 0
+	}
+	if offset == size {
+		c.JSON(http.StatusOK, gin.H{"messages": []richMessage{}, "offset": size, "size": size, "eof": true})
+		return
+	}
+
+	f, err := os.Open(fullPath)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to open session"})
+		return
+	}
+	defer f.Close()
+	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Seek failed"})
+		return
+	}
+
+	const maxRead = 24 * 1024 * 1024 // 24MB per call
+	data, _ := io.ReadAll(io.LimitReader(f, maxRead))
+
+	// Only consume up to the last complete line (newline-terminated).
+	nl := bytes.LastIndexByte(data, '\n')
+	if nl < 0 {
+		c.JSON(http.StatusOK, gin.H{"messages": []richMessage{}, "offset": offset, "size": size, "eof": offset >= size})
+		return
+	}
+	complete := data[:nl+1]
+	newOffset := offset + int64(nl+1)
+
+	msgs := make([]richMessage, 0, 32)
+	sessionID := ""
+	title := ""
+
+	newScanner := func() *bufio.Scanner {
+		s := bufio.NewScanner(bytes.NewReader(complete))
+		s.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+		return s
+	}
+
+	if offset == 0 {
+		// Full load → reconstruct the ACTIVE branch: path from the newest
+		// non-sidechain message up to the root via parentUuid. This drops
+		// abandoned branches (rewind) and Task subagent threads (sidechains).
+		parentByUUID := make(map[string]string)
+		sidechainByUUID := make(map[string]bool)
+		msgByUUID := make(map[string]richMessage)
+		tip, tipIdx := "", -1
+		i := 0
+		scanner := newScanner()
+		for scanner.Scan() {
+			line := scanner.Text()
+			i++
+			if line == "" {
+				continue
+			}
+			var meta jsonlMeta
+			if json.Unmarshal([]byte(line), &meta) != nil {
+				continue
+			}
+			if meta.Type == "custom-title" && meta.CustomTitle != "" {
+				title = meta.CustomTitle
+				continue
+			}
+			if meta.SessionID != "" {
+				sessionID = meta.SessionID
+			}
+			if meta.UUID != "" {
+				parentByUUID[meta.UUID] = meta.ParentUUID
+				sidechainByUUID[meta.UUID] = meta.IsSidechain
+			}
+			if meta.Type != "user" && meta.Type != "assistant" {
+				continue
+			}
+			blocks := extractBlocks(meta)
+			if len(blocks) == 0 {
+				continue
+			}
+			if meta.UUID == "" {
+				msgs = append(msgs, richMessage{Role: meta.Type, Blocks: blocks, Timestamp: meta.Timestamp})
+				continue
+			}
+			msgByUUID[meta.UUID] = richMessage{UUID: meta.UUID, ParentUUID: meta.ParentUUID, Role: meta.Type, Blocks: blocks, Timestamp: meta.Timestamp}
+			if !meta.IsSidechain {
+				tip, tipIdx = meta.UUID, i
+			}
+		}
+		_ = tipIdx
+		if tip != "" {
+			var path []richMessage
+			seen := make(map[string]bool)
+			for u := tip; u != "" && !seen[u]; u = parentByUUID[u] {
+				seen[u] = true
+				if sidechainByUUID[u] {
+					continue
+				}
+				if m, ok := msgByUUID[u]; ok {
+					path = append(path, m)
+				}
+			}
+			for j := len(path) - 1; j >= 0; j-- { // reverse: root → tip
+				msgs = append(msgs, path[j])
+			}
+		}
+	} else {
+		// Incremental append (linear). Frontend detects rewinds via parent_uuid
+		// discontinuity and re-requests a full reload.
+		scanner := newScanner()
+		for scanner.Scan() {
+			line := scanner.Text()
+			if line == "" {
+				continue
+			}
+			var meta jsonlMeta
+			if json.Unmarshal([]byte(line), &meta) != nil {
+				continue
+			}
+			if meta.Type == "custom-title" && meta.CustomTitle != "" {
+				title = meta.CustomTitle
+				continue
+			}
+			if meta.SessionID != "" {
+				sessionID = meta.SessionID
+			}
+			if meta.IsSidechain || (meta.Type != "user" && meta.Type != "assistant") {
+				continue
+			}
+			blocks := extractBlocks(meta)
+			if len(blocks) == 0 {
+				continue
+			}
+			msgs = append(msgs, richMessage{UUID: meta.UUID, ParentUUID: meta.ParentUUID, Role: meta.Type, Blocks: blocks, Timestamp: meta.Timestamp})
+		}
+	}
+
+	// Keep payloads bounded on a huge first load — return the most recent.
+	const maxMsgs = 3000
+	if len(msgs) > maxMsgs {
+		msgs = msgs[len(msgs)-maxMsgs:]
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"messages":   msgs,
+		"offset":     newOffset,
+		"size":       size,
+		"session_id": sessionID,
+		"name":       title,
+		"eof":        newOffset >= size,
+	})
 }
 
 // --- List Branches ---

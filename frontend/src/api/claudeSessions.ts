@@ -75,3 +75,52 @@ export const deleteClaudeSession = (project: string, sessionId: string) =>
 
 export const renameClaudeSession = (project: string, sessionId: string, name: string) =>
   api.put(`/claude-sessions/${encodeURIComponent(project)}/${encodeURIComponent(sessionId)}/rename`, { name });
+
+// ── Chat-view wrapper: rich messages + incremental tail ──
+
+export interface ChatBlock {
+  kind: 'text' | 'thinking' | 'tool_use' | 'tool_result';
+  text?: string;            // text / thinking
+  name?: string;            // tool_use
+  input?: unknown;          // tool_use
+  tool_use_id?: string;     // tool_use / tool_result
+  content?: string;         // tool_result
+  is_error?: boolean;       // tool_result
+}
+
+export interface RichMessage {
+  uuid: string;
+  parent_uuid?: string;
+  role: 'user' | 'assistant';
+  blocks: ChatBlock[];
+  timestamp?: string;
+}
+
+export interface LiveSessionInfo {
+  project: string;
+  session_file: string;
+  session_id: string;
+  cwd: string;
+  active: boolean;
+}
+
+export interface TailResponse {
+  messages: RichMessage[];
+  offset: number;
+  size: number;
+  session_id?: string;
+  name?: string;
+  eof: boolean;
+}
+
+// Resolve the live Claude session JSONL for a running terminal instance.
+// `cwd` is an optional hint (the dir the frontend launched claude in).
+export const resolveLiveSession = (instanceId: string, cwd?: string) =>
+  api.get<LiveSessionInfo>('/claude-sessions/live', { params: { instanceId, cwd } });
+
+// Read messages appended after `offset` (append-only → stable incremental updates).
+export const tailClaudeSession = (project: string, sessionFile: string, offset: number) =>
+  api.get<TailResponse>(
+    `/claude-sessions/${encodeURIComponent(project)}/${encodeURIComponent(sessionFile)}/tail`,
+    { params: { offset } }
+  );
