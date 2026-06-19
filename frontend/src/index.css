@@ -38,11 +38,12 @@
      --app-height is set by visualViewport resize listener in main.tsx. */
   html {
     position: fixed;
-    top: 0;
+    /* Follow the VISUAL viewport (top + height) so the app is always glued to the
+       visible area on iOS — no reachable empty space below when the keyboard pans
+       the visual viewport. --app-top / --app-height set in main.tsx. */
+    top: var(--app-top, 0px);
     left: 0;
     right: 0;
-    /* Bound to the keyboard-adjusted height (not full layout viewport), else the
-       gap between #root and the full-height html is scrollable empty space. */
     height: var(--app-height, 100%);
     overflow: hidden;
     overscroll-behavior: none;
