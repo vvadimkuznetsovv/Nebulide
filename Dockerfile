@@ -8,6 +8,14 @@ RUN apk add --no-cache nodejs npm git openssh-client python3 py3-pip postgresql-
 # Install Claude Code CLI
 RUN npm install -g @anthropic-ai/claude-code@2.1.175
 
+# Tailscale — pinned static binary (Alpine apk lags far behind + gets wiped on every
+# rebuild). Static binaries are musl-safe. entrypoint.sh starts tailscaled with the
+# persisted state so the node reconnects automatically after each deploy.
+RUN curl -fsSL https://pkgs.tailscale.com/stable/tailscale_1.98.4_amd64.tgz -o /tmp/ts.tgz \
+    && tar -xzf /tmp/ts.tgz -C /tmp \
+    && mv /tmp/tailscale_1.98.4_amd64/tailscale /tmp/tailscale_1.98.4_amd64/tailscaled /usr/local/bin/ \
+    && rm -rf /tmp/ts.tgz /tmp/tailscale_1.98.4_amd64
+
 WORKDIR /app
 
 # Copy pre-built Go binary

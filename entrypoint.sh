@@ -140,4 +140,17 @@ fi
 chown -R nebulide:nebulide /home/nebulide/workspace 2>/dev/null || true
 chown -R nebulide:nebulide /home/nebulide/workspaces 2>/dev/null || true
 
+# Tailscale — auto-start with the PERSISTED state (lives in the workspace volume) so the
+# node reconnects after every deploy WITHOUT re-auth. Userspace networking = no TUN/caps.
+# `up` is wrapped in `timeout` so a (rare) re-auth prompt can never hang container boot.
+TS_STATE="/home/nebulide/workspace/.tailscale/tailscaled.state"
+TS_SOCK="/var/run/tailscale/tailscaled.sock"
+if command -v tailscaled >/dev/null 2>&1 && ! pidof tailscaled >/dev/null 2>&1; then
+  mkdir -p "$(dirname "$TS_STATE")" /var/run/tailscale
+  tailscaled --tun=userspace-networking --state="$TS_STATE" --socket="$TS_SOCK" >/tmp/tailscaled.log 2>&1 &
+  sleep 2
+  timeout 10 tailscale --socket="$TS_SOCK" up --hostname=nebulide-claude-1 >/dev/null 2>&1 || true
+  echo "[entrypoint] tailscaled started ($(tailscale --socket="$TS_SOCK" version 2>/dev/null | head -1))"
+fi
+
 exec "$@"
