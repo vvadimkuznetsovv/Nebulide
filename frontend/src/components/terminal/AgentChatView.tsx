@@ -659,7 +659,7 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
                 {perm.question || 'Claude запрашивает доступ'}
               </div>
               {perm.detail && (
-                <pre style={{ margin: 0, padding: '8px 10px', fontSize: 11, lineHeight: 1.45, fontFamily: 'monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--text-secondary)', background: 'rgba(0,0,0,0.25)', border: '1px solid var(--glass-border)', borderRadius: 8, maxHeight: 200, overflow: 'auto' }}>
+                <pre style={{ margin: 0, padding: '8px 10px', fontSize: 11, lineHeight: 1.45, fontFamily: 'monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--text-secondary)', background: 'rgba(0,0,0,0.25)', border: '1px solid var(--glass-border)', borderRadius: 8, maxHeight: 320, overflow: 'auto' }}>
                   {perm.detail}
                 </pre>
               )}

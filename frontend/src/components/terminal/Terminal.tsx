@@ -169,13 +169,21 @@ function scrapeMenu(buf: string): ScrapedMenu | null {
   // Футер у самого низа → тип меню.
   let footerIdx = -1;
   let kind: 'permission' | 'question' = 'permission';
+  // План-меню (ExitPlanMode «Ready to code?») — УНИКАЛЬНЫЙ футер без «Esc to cancel»:
+  // «ctrl+g to edit in Vim · ~/.claude/plans/…». Проверяем первым.
+  let isPlan = false;
+  for (let i = lines.length - 1; i >= 0 && lines.length - i <= 40; i--) {
+    if (/ctrl\+g to edit|\.claude[\\/]plans[\\/]/.test(lines[i])) { footerIdx = i; kind = 'question'; isPlan = true; break; }
+  }
   // СТРОГО: permission = «… Tab to amend …», question = «… Enter to select …».
   // Прочие select-меню (/model, /clear и т.п.) НЕ перехватываем (иначе кривая карта).
-  for (let i = lines.length - 1; i >= 0 && lines.length - i <= 30; i--) {
-    const t = lines[i];
-    if (!t.includes('Esc to cancel')) continue;
-    if (/Tab to amend/.test(t)) { footerIdx = i; kind = 'permission'; break; }
-    if (/Enter to select/.test(t)) { footerIdx = i; kind = 'question'; break; }
+  if (footerIdx < 0) {
+    for (let i = lines.length - 1; i >= 0 && lines.length - i <= 30; i--) {
+      const t = lines[i];
+      if (!t.includes('Esc to cancel')) continue;
+      if (/Tab to amend/.test(t)) { footerIdx = i; kind = 'permission'; break; }
+      if (/Enter to select/.test(t)) { footerIdx = i; kind = 'question'; break; }
+    }
   }
   if (footerIdx < 0) return null;
   // Пункт «1.» ближайший НАД футером — начало блока вариантов.
@@ -228,6 +236,21 @@ function scrapeMenu(buf: string): ScrapedMenu | null {
     while (raw.length && !raw[0].trim()) raw.shift();
     while (raw.length && !raw[raw.length - 1].trim()) raw.pop();
     detail = raw.join('\n').slice(0, 800);
+  } else if (isPlan) {
+    // Текст плана = блок между «Here is Claude's plan:» и вопросом (без линий-разделителей).
+    let hdr = -1;
+    for (let i = qIdx - 1; i >= 0 && qIdx - i <= 80; i--) {
+      if (/Here is Claude.s plan:/.test(lines[i])) { hdr = i; break; }
+    }
+    const from = hdr >= 0 ? hdr + 1 : Math.max(0, qIdx - 40);
+    const raw: string[] = [];
+    for (let i = from; i < qIdx; i++) {
+      if (/^[╌╴─—═]+$/.test(lines[i].trim())) continue;
+      raw.push(lines[i].replace(/\s+$/, ''));
+    }
+    while (raw.length && !raw[0].trim()) raw.shift();
+    while (raw.length && !raw[raw.length - 1].trim()) raw.pop();
+    detail = raw.join('\n').slice(0, 2500);
   }
   return { kind, multi, question, options, detail };
 }
