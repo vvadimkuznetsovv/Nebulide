@@ -47,6 +47,19 @@ export function setTerminalCwdHint(instanceId: string, cwd: string) {
   if (cwd) cwdHints.set(instanceId, cwd);
 }
 
+// Точный sessionId, который пользователь открыл через --resume. Передаём в резолвер
+// как детерминированную подсказку, чтобы чат сразу показал ИМЕННО эту сессию, а не
+// «новейший» JSONL из фолбэка (хук-карта всё равно приоритетнее — переживёт форк).
+const sessionHints = new Map<string, string>();
+
+export function setSessionHint(instanceId: string, sessionId: string) {
+  if (sessionId) sessionHints.set(instanceId, sessionId);
+}
+
+export function getSessionHint(instanceId: string): string | undefined {
+  return sessionHints.get(instanceId);
+}
+
 export function markTrustPending(instanceId: string) {
   trustPending.add(instanceId);
 }
@@ -63,6 +76,7 @@ export function clearTerminalViewMode(instanceId: string) {
   modes.delete(instanceId);
   cwdHints.delete(instanceId);
   trustPending.delete(instanceId);
+  sessionHints.delete(instanceId);
   bump();
 }
 

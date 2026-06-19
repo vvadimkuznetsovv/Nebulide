@@ -1211,6 +1211,7 @@ func sessionFileBySessionID(projDir, sid string) string {
 func (h *ClaudeSessionsHandler) ResolveLive(c *gin.Context) {
 	instanceID := c.Query("instanceId")
 	cwdHint := c.Query("cwd")
+	sessionHint := c.Query("sessionId") // exact session opened via --resume (frontend knows the id)
 	wsSlug := h.userWorkspaceSlug(c)
 	projectsDir := filepath.Join(h.claudeBaseDir(), "projects")
 
@@ -1231,6 +1232,32 @@ func (h *ClaudeSessionsHandler) ResolveLive(c *gin.Context) {
 			if cwd != "" && matchesWorkspace(slug, wsSlug) {
 				if file := sessionFileBySessionID(filepath.Join(projectsDir, slug), sid); file != "" {
 					respond(slug, file, sid, cwd)
+					return
+				}
+			}
+		}
+	}
+
+	// 1.5) Explicit sessionId hint (opened via --resume) — exact session, before
+	// weak fallbacks. Hook-tracked (tier 1) still wins so a fork to a new session
+	// id corrects this. Search the cwd slug first, then all workspace project dirs.
+	if sessionHint != "" {
+		if cwdHint != "" {
+			slug := workspaceSlug(cwdHint)
+			if matchesWorkspace(slug, wsSlug) {
+				if file := sessionFileBySessionID(filepath.Join(projectsDir, slug), sessionHint); file != "" {
+					respond(slug, file, sessionHint, cwdHint)
+					return
+				}
+			}
+		}
+		if entries, err := os.ReadDir(projectsDir); err == nil {
+			for _, e := range entries {
+				if !e.IsDir() || !matchesWorkspace(e.Name(), wsSlug) {
+					continue
+				}
+				if file := sessionFileBySessionID(filepath.Join(projectsDir, e.Name()), sessionHint); file != "" {
+					respond(e.Name(), file, sessionHint, cwdHint)
 					return
 				}
 			}

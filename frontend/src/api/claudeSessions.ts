@@ -115,8 +115,8 @@ export interface TailResponse {
 
 // Resolve the live Claude session JSONL for a running terminal instance.
 // `cwd` is an optional hint (the dir the frontend launched claude in).
-export const resolveLiveSession = (instanceId: string, cwd?: string) =>
-  api.get<LiveSessionInfo>('/claude-sessions/live', { params: { instanceId, cwd } });
+export const resolveLiveSession = (instanceId: string, cwd?: string, sessionId?: string) =>
+  api.get<LiveSessionInfo>('/claude-sessions/live', { params: { instanceId, cwd, sessionId } });
 
 // Read messages appended after `offset` (append-only → stable incremental updates).
 export const tailClaudeSession = (project: string, sessionFile: string, offset: number) =>

@@ -4,6 +4,7 @@ import { resolveLiveSession, tailClaudeSession } from '../../api/claudeSessions'
 import type { RichMessage } from '../../api/claudeSessions';
 import { sendToTerminal, sendCommandWhenReady } from './Terminal';
 import { onActivity } from '../../utils/activityBus';
+import { getSessionHint } from '../../utils/terminalViewMode';
 import ClaudeMessage from '../chat/ClaudeMessage';
 
 // "Чат" — тонкая обёртка над живым `claude` в PTY: лента из JSONL, действия → клавиши в PTY.
@@ -141,7 +142,7 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
   // и следует за перезапуском claude / сменой сессии (--resume) в том же терминале.
   const reconcile = useCallback(async () => {
     try {
-      const { data } = await resolveLiveSession(instanceId, cwd);
+      const { data } = await resolveLiveSession(instanceId, cwd, getSessionHint(instanceId));
       if (!data.session_file) return;
       const cur = targetRef.current;
       const authoritative = !!data.session_id; // непустой = точная сессия из хука

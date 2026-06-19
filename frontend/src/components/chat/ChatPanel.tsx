@@ -11,7 +11,7 @@ import FolderPicker from './FolderPicker';
 import ClaudeChatView from '../terminal/ClaudeChatView';
 import {
   getClaudeOpenMode, setClaudeOpenMode, useClaudeOpenMode,
-  setInitialTerminalViewMode, setTerminalCwdHint, markTrustPending,
+  setInitialTerminalViewMode, setTerminalCwdHint, markTrustPending, setSessionHint,
 } from '../../utils/terminalViewMode';
 
 /** Normalize a path for cross-OS comparison: forward slashes, no trailing slash. */
@@ -363,6 +363,7 @@ export default function ChatPanel(_props: ChatPanelProps) {
 
     const instanceId = `claude-${Date.now()}`;
     if (session.cwd) setTerminalCwdHint(instanceId, session.cwd);
+    setSessionHint(instanceId, session.session_id); // детерминированный резолв именно этой сессии
     // Resume the real claude in a PTY; initial view = Чат (обёртка) or Терминал.
     setInitialTerminalViewMode(instanceId, getClaudeOpenMode() === 'chat' ? 'chat' : 'terminal');
     openTerminalWithId(instanceId);
