@@ -1,6 +1,6 @@
 FROM alpine:3.20
 
-RUN apk add --no-cache ca-certificates tzdata bash curl sudo util-linux libreoffice jq
+RUN apk add --no-cache ca-certificates tzdata bash curl sudo util-linux libreoffice jq tmux
 
 # Install Node.js, Python, Git, SSH (required for Claude Code CLI + git ops)
 RUN apk add --no-cache nodejs npm git openssh-client python3 py3-pip postgresql-client
