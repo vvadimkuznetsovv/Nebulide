@@ -108,25 +108,6 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
     if (t) tailCache.set(instanceId, { project: t.project, sessionFile: t.sessionFile, sessionId: t.sessionId, offset: t.offset, messages: messagesRef.current });
   }, [instanceId]);
 
-  // ── Resolve the live session (which JSONL this terminal's claude writes) ──
-  useEffect(() => {
-    let cancelled = false;
-    async function resolve() {
-      if (targetRef.current) { if (!cancelled) setStatus('ready'); return; }
-      try {
-        const { data } = await resolveLiveSession(instanceId, cwd);
-        if (cancelled) return;
-        if (data.session_file) {
-          targetRef.current = { project: data.project, sessionFile: data.session_file, offset: 0, sessionId: data.session_id || '' };
-          setStatus('ready');
-        }
-      } catch { /* claude not started yet — retry */ }
-    }
-    resolve();
-    const retry = setInterval(() => { if (!targetRef.current) resolve(); }, 2000);
-    return () => { cancelled = true; clearInterval(retry); recognitionRef.current?.abort(); };
-  }, [instanceId, cwd]);
-
   // ── Poll the JSONL tail (incremental; rewind → full reload via parent_uuid break) ──
   const poll = useCallback(async (full = false): Promise<void> => {
     const t = targetRef.current;
@@ -153,6 +134,39 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
     finally { pollingRef.current = false; persist(); }
   }, [persist]);
 
+  // ── Resolve + keep reconciling which JSONL this terminal's claude writes ──
+  // Backend tier-1 (hook-tracked instanceId→session) даёт ТОЧНУЮ сессию (непустой
+  // session_id) и переопределяет слабый cwd/новейший фолбэк. Резолвим периодически,
+  // НЕ завязываясь на разовое событие хука: чинит «два терминала тянут одну историю»
+  // и следует за перезапуском claude / сменой сессии (--resume) в том же терминале.
+  const reconcile = useCallback(async () => {
+    try {
+      const { data } = await resolveLiveSession(instanceId, cwd);
+      if (!data.session_file) return;
+      const cur = targetRef.current;
+      const authoritative = !!data.session_id; // непустой = точная сессия из хука
+      if (!cur) {
+        targetRef.current = { project: data.project, sessionFile: data.session_file, offset: 0, sessionId: data.session_id || '' };
+        setStatus('ready');
+        poll(true);
+      } else if (authoritative && data.session_id !== cur.sessionId) {
+        // tier-1 указал другую сессию (чужой фолбэк / перезапуск) → переключаемся
+        tailCache.delete(instanceId);
+        targetRef.current = { project: data.project, sessionFile: data.session_file, offset: 0, sessionId: data.session_id };
+        setMessages([]);
+        messagesRef.current = []; // синхронно, чтобы параллельный poll не подмешал старую сессию
+        setStatus('ready');
+        poll(true);
+      }
+    } catch { /* claude ещё не стартовал — ретраим */ }
+  }, [instanceId, cwd, poll]);
+
+  useEffect(() => {
+    reconcile();
+    const iv = setInterval(reconcile, 3000);
+    return () => { clearInterval(iv); recognitionRef.current?.abort(); };
+  }, [reconcile]);
+
   useEffect(() => {
     poll();
     const id = setInterval(() => poll(), POLL_MS);
@@ -164,17 +178,9 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
     return onActivity((e) => {
       if ('instanceId' in e && e.instanceId !== instanceId) return;
       if (e.type === 'claude_hook') {
-        // Хук авторитетен для сессии ИМЕННО этого instanceId. Если резолв подтянул
-        // другую (слабый фолбэк cwd/новейший взял сессию соседнего терминала) —
-        // сбрасываем кэш; интервал ре-резолва (≤2s) подтянет правильную через
-        // tier-1 (карта хуков instanceId→session уже наполнена этим же событием).
-        if (e.sessionId && targetRef.current?.sessionId && e.sessionId !== targetRef.current.sessionId) {
-          targetRef.current = null;
-          tailCache.delete(instanceId);
-          setMessages([]);
-          setStatus('connecting');
-          return;
-        }
+        // Хук сообщил session_id для этого instanceId — если он отличается от текущей
+        // резолвнутой, сразу реконсилимся (tier-1 подтянет правильную сессию).
+        if (e.sessionId && e.sessionId !== targetRef.current?.sessionId) reconcile();
         if (e.permissionMode && e.permissionMode in MODE_INFO) setMode(e.permissionMode as PermissionMode);
         // PermissionRequest несёт tool+input; Notification (permission_prompt) — без tool отсеиваем
         // (это idle-уведомление, не запрос доступа).
@@ -195,7 +201,7 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
         setStatus('ready'); poll();
       }
     });
-  }, [instanceId, poll]);
+  }, [instanceId, poll, reconcile]);
 
   useEffect(() => {
     const sc = scrollRef.current;
@@ -263,6 +269,13 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
     });
   }, [applyRaw]);
 
+  const scrollToBottom = useCallback(() => {
+    const sc = scrollRef.current;
+    if (!sc) return;
+    stick.current = true;
+    sc.scrollTo({ top: sc.scrollHeight, behavior: 'smooth' });
+  }, []);
+
   const expandComposer = useCallback(() => {
     const sc = scrollRef.current;
     if (sc) sc.scrollTo({ top: sc.scrollHeight, behavior: 'smooth' });
@@ -275,8 +288,9 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
     setStatus('working');
     stick.current = true;
     sendCommandWhenReady(instanceId, text); // текст + Enter в реальный claude (PTY)
+    scrollToBottom();
     setTimeout(() => poll(), 400);
-  }, [input, instanceId, poll]);
+  }, [input, instanceId, poll, scrollToBottom]);
 
   // "Вернуться к сообщению" → открыть РОДНОЙ rewind в claude (Esc Esc на пустом вводе) и
   // показать настоящий экран терминала; выбор сообщения/охвата человек делает в родном меню.
@@ -359,6 +373,9 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
         ) : (
           <>
             <span style={{ flex: 1 }} />
+            <button type="button" onClick={scrollToBottom} title="Вниз" style={iconBtn}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><polyline points="19 12 12 19 5 12" /></svg>
+            </button>
             <button type="button" onClick={() => setFindOpen(true)} title="Поиск" style={iconBtn}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
             </button>

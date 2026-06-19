@@ -45,7 +45,7 @@ function RewindBtn({ onClick }: { onClick: () => void }) {
 // Shared markdown renderer (same code/inline config as MessageBubble).
 function Markdown({ children }: { children: string }) {
   return (
-    <div className="prose prose-invert prose-sm max-w-none" style={{ fontSize: 'var(--chat-fs, 13px)', lineHeight: 1.55 }}>
+    <div className="prose prose-invert prose-sm max-w-none" style={{ fontSize: 'var(--chat-fs, 13px)', lineHeight: 1.55, maxWidth: '100%', overflowX: 'auto' }}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
@@ -69,7 +69,7 @@ function Markdown({ children }: { children: string }) {
                 language={match[1]}
                 PreTag="div"
                 className="rounded-xl !my-2 text-xs"
-                customStyle={{ background: 'rgba(0,0,0,0.4)', border: '1px solid var(--glass-border)', borderRadius: 12 }}
+                customStyle={{ background: 'rgba(0,0,0,0.4)', border: '1px solid var(--glass-border)', borderRadius: 12, maxWidth: '100%', overflowX: 'auto' }}
               >
                 {String(children).replace(/\n$/, '')}
               </SyntaxHighlighter>
@@ -300,7 +300,7 @@ export default function ClaudeMessage({ msg, onRewind }: Props) {
           maxWidth: '85%', borderRadius: 14, borderBottomRightRadius: 4, padding: '8px 12px',
           background: 'linear-gradient(135deg, rgba(var(--accent-rgb),0.28), rgba(var(--accent-rgb),0.14))',
           border: '1px solid rgba(var(--accent-rgb),0.35)', color: '#fff',
-          fontSize: 'var(--chat-fs, 13px)', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+          fontSize: 'var(--chat-fs, 13px)', lineHeight: 1.5, whiteSpace: 'pre-wrap', overflowX: 'auto',
         }}>
           {text}
         </div>
