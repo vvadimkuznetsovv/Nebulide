@@ -18,7 +18,8 @@ interface Props {
   onRequestTerminal?: () => void;
 }
 
-interface PermReq { tool: string; input: unknown }
+interface PermOption { digit: string; label: string; raw: string }
+interface PermReq { question?: string; detail?: string; options: PermOption[]; tool?: string; input?: unknown }
 
 // Tail-кэш на instanceId (переживает перемонтирование вида).
 interface TailCache { project: string; sessionFile: string; sessionId: string; offset: number; messages: RichMessage[] }
@@ -71,18 +72,6 @@ const MODE_INFO: Record<PermissionMode, { label: string; color: string }> = {
   dontAsk: { label: 'Не спрашивать', color: 'var(--warning)' },
   bypassPermissions: { label: 'Без ограничений', color: 'var(--danger)' },
 };
-
-function permSummary(input: unknown): string {
-  if (input && typeof input === 'object') {
-    const o = input as Record<string, unknown>;
-    for (const k of ['command', 'file_path', 'path', 'url', 'pattern']) {
-      const v = o[k];
-      if (typeof v === 'string' && v.trim()) return v;
-    }
-    try { return JSON.stringify(o, null, 2); } catch { /* ignore */ }
-  }
-  return '';
-}
 
 function messageText(m: RichMessage): string {
   return m.blocks.map(b => b.text || b.content || b.name || '').join(' ').toLowerCase();
@@ -257,7 +246,7 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
   // ── Частый опрос ТЕКУЩЕГО состояния экрана claude (250мс). Надёжно — НЕ теряется при
   //    ремоунте/смене вида. Источник правды для стоп-кнопки, индикатора, resume/perm-меню. ──
   useEffect(() => {
-    const la = { busy: undefined as boolean | undefined, ws: '', resume: false, perm: false, mode: '' };
+    const la = { busy: undefined as boolean | undefined, ws: '', resume: false, permSig: '', mode: '' };
     const tick = () => {
       const st = getTerminalScreenState(instanceId);
       if (!st) return;
@@ -272,10 +261,14 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
       const ws = st.busy ? st.workStatus : '';
       if (ws !== la.ws) { la.ws = ws; setWorkStatus(ws); }
       if (st.resumeMenu !== la.resume) { la.resume = st.resumeMenu; setResumeMenu(st.resumeMenu ? { info: st.resumeInfo } : null); }
-      if (st.permMenu !== la.perm) {
-        la.perm = st.permMenu;
-        if (st.permMenu) { const d = permDetailsRef.current; setPerm({ tool: d?.tool || st.permQuestion, input: d?.input }); }
-        else { setPerm(null); permDetailsRef.current = null; }
+      // permission — варианты СКРЕЙПЛЕНЫ с экрана (2 или 3); сигнатура = вопрос+цифры.
+      const permSig = st.permMenu ? st.permQuestion + '|' + (st.permOptions || []).map(o => o.digit).join('') : '';
+      if (permSig !== la.permSig) {
+        la.permSig = permSig;
+        if (st.permMenu) {
+          const d = permDetailsRef.current;
+          setPerm({ question: st.permQuestion, detail: st.permDetail, options: st.permOptions || [], tool: d?.tool, input: d?.input });
+        } else { setPerm(null); permDetailsRef.current = null; }
       }
     };
     tick();
@@ -448,7 +441,7 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
   // Ответ на запрос доступа: цифра в нумерованное меню claude (1=да / 2=да навсегда / 3=нет).
   // Калибровано на claude 2.1.175: нумерованные меню срабатывают по нажатию цифры БЕЗ Enter
   // (проверено на trust-промпте — «1» подтверждает сразу). Лишний \r отправил бы пустой ввод.
-  const decide = useCallback((digit: '1' | '2' | '3') => {
+  const decide = useCallback((digit: string) => {
     sendKey(digit);
     setPerm(null);
     setTimeout(() => poll(), 400);
@@ -567,30 +560,32 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
           </div>
         )}
 
-        {/* (4) permission lives in the conversation flow — never overlays the input */}
+        {/* (4) permission — варианты и текст СКРЕЙПЛЕНЫ с реального экрана (2 или 3 кнопки) */}
         {!query && perm && (
           <div style={{ margin: '10px 0', borderRadius: 12, overflow: 'hidden', border: '1px solid rgba(var(--accent-rgb),0.45)', background: 'rgba(var(--accent-rgb),0.1)' }}>
             <div style={{ padding: '10px 12px' }}>
-              <div style={{ fontSize: 12, color: 'var(--text-primary)', marginBottom: 6 }}>
-                Claude запрашивает доступ: <b style={{ color: 'var(--accent-bright)' }}>{perm.tool}</b>
+              <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)', marginBottom: perm.detail ? 6 : 0 }}>
+                {perm.question || 'Claude запрашивает доступ'}
               </div>
-              {/* (1) expandable full request */}
-              <details style={{ background: 'rgba(0,0,0,0.25)', border: '1px solid var(--glass-border)', borderRadius: 8 }}>
-                <summary style={{ cursor: 'pointer', padding: '6px 10px', listStyle: 'none', display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--text-muted)', fontFamily: 'monospace' }}>
-                  <span style={{ flexShrink: 0 }}>▸</span>
-                  <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{permSummary(perm.input).split('\n')[0]}</span>
-                </summary>
-                <pre style={{ margin: 0, padding: '8px 10px', fontSize: 11, lineHeight: 1.45, fontFamily: 'monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--text-secondary)', borderTop: '1px solid var(--glass-border)', maxHeight: 220, overflow: 'auto' }}>
-                  {permSummary(perm.input)}
+              {perm.detail && (
+                <pre style={{ margin: 0, padding: '8px 10px', fontSize: 11, lineHeight: 1.45, fontFamily: 'monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--text-secondary)', background: 'rgba(0,0,0,0.25)', border: '1px solid var(--glass-border)', borderRadius: 8, maxHeight: 200, overflow: 'auto' }}>
+                  {perm.detail}
                 </pre>
-              </details>
+              )}
             </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', padding: '10px 12px', borderTop: '1px solid var(--glass-border)' }}>
-              <button type="button" onClick={() => decide('1')} style={pbtn('rgba(var(--success-rgb),0.18)', 'rgba(var(--success-rgb),0.4)', 'var(--success)')}>Да</button>
-              <button type="button" onClick={() => decide('2')} style={pbtn('rgba(var(--accent-rgb),0.18)', 'rgba(var(--accent-rgb),0.4)', 'var(--accent-bright)')}>Да навсегда</button>
-              <button type="button" onClick={() => decide('3')} style={pbtn('rgba(var(--danger-rgb),0.12)', 'rgba(var(--danger-rgb),0.35)', 'var(--danger)')}>Нет</button>
+              {perm.options.map((o) => {
+                const isNo = /^нет/i.test(o.label) || /^no\b/i.test(o.raw);
+                const isPlainYes = o.label === 'Да';
+                const style = isNo
+                  ? pbtn('rgba(var(--danger-rgb),0.12)', 'rgba(var(--danger-rgb),0.35)', 'var(--danger)')
+                  : isPlainYes
+                    ? pbtn('rgba(var(--success-rgb),0.18)', 'rgba(var(--success-rgb),0.4)', 'var(--success)')
+                    : pbtn('rgba(var(--accent-rgb),0.18)', 'rgba(var(--accent-rgb),0.4)', 'var(--accent-bright)');
+                return <button key={o.digit} type="button" title={o.raw} onClick={() => decide(o.digit)} style={style}>{o.label}</button>;
+              })}
               {onRequestTerminal && (
-                <button type="button" onClick={() => { setPerm(null); onRequestTerminal(); }} style={pbtn('rgba(255,255,255,0.05)', 'var(--glass-border)', 'var(--text-secondary)')}>⌨ Открыть терминал</button>
+                <button type="button" onClick={() => { setPerm(null); onRequestTerminal(); }} style={pbtn('rgba(255,255,255,0.05)', 'var(--glass-border)', 'var(--text-secondary)')}>⌨ Терминал</button>
               )}
             </div>
           </div>

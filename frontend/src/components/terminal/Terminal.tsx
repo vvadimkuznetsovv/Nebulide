@@ -79,6 +79,9 @@ interface TermSession {
   resumeInfo: string;
   permMenuShown: boolean;
   permQuestion: string;
+  /** Скрейпнутые варианты permission-меню (2 или 3) + деталь (команда/файл). */
+  permOptions: { digit: string; label: string; raw: string }[];
+  permDetail: string;
   workStatusCur: string;
   /** claude TUI присутствует на экране (загрузился) — для гейта отложенной отправки. */
   claudeAlive: boolean;
@@ -139,6 +142,46 @@ const IDLE_MARKS: { s: string; mode: string }[] = [
   { s: 'auto mode on', mode: 'auto' },
 ];
 
+/** Чистим лейбл варианта permission в краткий русский (полный текст идёт в title). */
+function cleanPermLabel(raw: string): string {
+  const r = raw.replace(/\s*\(shift\+tab\)\s*$/i, '').trim();
+  if (/^no\b/i.test(r)) return 'Нет';
+  if (/^yes$/i.test(r)) return 'Да';
+  if (/^yes\b/i.test(r)) return /all edits|don'?t ask|allow all/i.test(r) ? 'Да, всегда' : 'Да, разрешить';
+  return r.slice(0, 40);
+}
+
+/** Скрейп permission-меню из rawTail: вопрос + варианты (2/3) + деталь (команда/файл).
+ *  Точно по сочетанию: «Do you want to …?» + нумерованные пункты + футер Esc/Tab amend.
+ *  null если меню не показано. Снято вживую с claude 2.1.175 (Write 3 / Bash 2-3). */
+function scrapePermMenu(buf: string): { question: string; options: { digit: string; label: string; raw: string }[]; detail: string } | null {
+  const lines = buf.split('\n');
+  let qIdx = -1;
+  for (let i = lines.length - 1; i >= 0; i--) {
+    if (lines[i].includes('Do you want to ')) { qIdx = i; break; }
+  }
+  if (qIdx < 0) return null;
+  let footerIdx = -1;
+  for (let i = qIdx + 1; i < lines.length && i < qIdx + 12; i++) {
+    if (/Esc to cancel|Tab to amend/.test(lines[i])) { footerIdx = i; break; }
+  }
+  if (footerIdx < 0) return null;
+  const options: { digit: string; label: string; raw: string }[] = [];
+  for (let i = qIdx + 1; i < footerIdx; i++) {
+    const m = lines[i].match(/^\s*[❯>]?\s*(\d)\.\s+(.+?)\s*$/);
+    if (m) options.push({ digit: m[1], label: cleanPermLabel(m[2]), raw: m[2].trim() });
+  }
+  if (options.length < 2) return null; // минимум Yes/No
+  const question = lines[qIdx].replace(/\s+/g, ' ').trim().slice(0, 100);
+  const detail: string[] = [];
+  for (let i = qIdx - 1; i >= 0 && detail.length < 6; i--) {
+    const t = lines[i].trim();
+    if (!t || /^[╌╴─]+$/.test(t)) { if (detail.length) break; else continue; }
+    detail.unshift(t);
+  }
+  return { question, options, detail: detail.join('\n').slice(0, 400) };
+}
+
 /** Detect claude's CURRENT state from the raw rolling output buffer (session.rawTail) — это
  *  НЕ зависит от xterm DOM, поэтому переключение видов (Terminal↔Chat) не ломает детект.
  *  busy/idle по «последний маркер статус-строки побеждает» (claude перерисовывает её часто).
@@ -153,11 +196,16 @@ function detectClaudeScreen(session: TermSession, instanceId: string) {
     const m = buf.match(/This session is[^\n]*?tokens?\./);
     session.resumeInfo = m ? m[0].trim() : '';
   }
-  // Permission-меню "Do you want to …?" + нумерованные Yes/No.
-  session.permMenuShown = /Do you want to /.test(buf) && /1\.\s*Yes/.test(buf) && /3\.\s*No/.test(buf);
-  if (session.permMenuShown) {
-    const q = buf.match(/Do you want to [^\n]*/g);
-    session.permQuestion = q ? q[q.length - 1].replace(/\s+/g, ' ').trim().slice(0, 90) : 'Разрешить действие?';
+  // Permission-меню — динамический скрейп (2 ИЛИ 3 варианта, разный текст).
+  const pm = scrapePermMenu(buf);
+  session.permMenuShown = !!pm;
+  if (pm) {
+    session.permQuestion = pm.question;
+    session.permOptions = pm.options;
+    session.permDetail = pm.detail;
+  } else {
+    session.permOptions = [];
+    session.permDetail = '';
   }
 
   // busy vs idle — позиция последнего маркера в потоке.
@@ -193,6 +241,8 @@ export function getTerminalScreenState(instanceId: string) {
     resumeInfo: s.resumeInfo,
     permMenu: s.permMenuShown,
     permQuestion: s.permQuestion,
+    permOptions: s.permOptions,
+    permDetail: s.permDetail,
     workStatus: s.workStatusCur,
   };
 }
@@ -370,6 +420,8 @@ function createXterm(instanceId: string): TermSession {
     resumeInfo: '',
     permMenuShown: false,
     permQuestion: '',
+    permOptions: [],
+    permDetail: '',
     workStatusCur: '',
     claudeAlive: false,
     claudeMode: 'default',
