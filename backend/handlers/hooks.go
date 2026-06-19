@@ -50,6 +50,20 @@ func recordLiveSession(instanceID, sessionID, cwd, event string) {
 	liveSessMu.Unlock()
 }
 
+// clearLiveSession drops the instance→session entry when claude exits (SessionEnd).
+// Without this, a REUSED terminal keeps the OLD session in the map; opening a new
+// session there (claude --resume blocks on the resume-mode menu before SessionStart
+// updates the map) makes the resolver return the STALE/ancient session. Cleared → the
+// resolver falls through to the explicit sessionId hint / cwd → the correct session.
+func clearLiveSession(instanceID string) {
+	if instanceID == "" {
+		return
+	}
+	liveSessMu.Lock()
+	delete(liveSess, instanceID)
+	liveSessMu.Unlock()
+}
+
 // GetLiveSession returns the latest hook-tracked session for a terminal instance.
 func GetLiveSession(instanceID string) (sessionID, cwd string, ok bool) {
 	liveSessMu.RLock()
@@ -118,7 +132,13 @@ func (h *HookHandler) HandleClaudeHook(c *gin.Context) {
 		event.Event, event.InstanceID, event.Tool, event.SessionID, claims.Username)
 
 	// Track instance → live session so the chat-view wrapper can resolve the JSONL.
-	recordLiveSession(event.InstanceID, event.SessionID, event.CWD, event.Event)
+	// On SessionEnd, CLEAR the entry (claude exited) — иначе переиспользованный терминал
+	// держит старую сессию и резолвер отдаёт древний чат вместо открытого.
+	if event.Event == "SessionEnd" {
+		clearLiveSession(event.InstanceID)
+	} else {
+		recordLiveSession(event.InstanceID, event.SessionID, event.CWD, event.Event)
+	}
 
 	if database.RDB != nil {
 		payload := map[string]interface{}{
