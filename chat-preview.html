@@ -1,0 +1,412 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Nebulide — превью чат-интерфейса (ПК + телефон)</title>
+<style>
+  :root {
+    --bg-primary: #030108;
+    --accent: #7F00FF;
+    --accent-rgb: 127, 0, 255;
+    --accent-bright: #A64DFF;
+    --text-primary: rgba(255,255,255,0.95);
+    --text-secondary: rgba(255,255,255,0.55);
+    --text-tertiary: rgba(255,255,255,0.3);
+    --text-muted: rgba(255,255,255,0.45);
+    --glass-border: rgba(255,255,255,0.15);
+    --glass: rgba(255,255,255,0.04);
+    --glass-hover: rgba(255,255,255,0.08);
+    --glass-bg: rgba(20,12,35,0.92);
+    --danger: #f87171;  --danger-rgb: 248,113,113;
+    --success: #4ade80; --success-rgb: 74,222,128;
+    --gold: #fbbf24;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Inter', system-ui, sans-serif;
+    color: var(--text-primary); min-height: 100vh;
+    background:
+      radial-gradient(ellipse 60% 50% at 12% 18%, rgba(var(--accent-rgb),0.22) 0%, transparent 60%),
+      radial-gradient(ellipse 50% 55% at 88% 82%, rgba(var(--accent-rgb),0.16) 0%, transparent 55%),
+      var(--bg-primary);
+    padding: 28px 20px 60px;
+  }
+  h1 { font-size: 18px; font-weight: 600; margin-bottom: 4px; }
+  .sub { color: var(--text-muted); font-size: 13px; margin-bottom: 22px; max-width: 880px; }
+  .stage { display: flex; gap: 40px; flex-wrap: wrap; align-items: flex-start; }
+  .frame-label { font-size: 12px; color: var(--text-muted); margin-bottom: 10px; text-transform: uppercase; letter-spacing: .08em; }
+
+  .desktop .screen { width: 460px; height: 780px; border: 1px solid var(--glass-border); border-radius: 14px; overflow: hidden;
+    background: rgba(255,255,255,0.015); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
+  .phone .screen { width: 375px; height: 780px; border: 10px solid #14101f; border-radius: 38px; overflow: hidden;
+    background: rgba(255,255,255,0.015); box-shadow: 0 20px 60px rgba(0,0,0,0.55), inset 0 0 0 1px var(--glass-border); }
+
+  .chat { display: flex; flex-direction: column; height: 100%; overflow: hidden; position: relative; }
+  .grow { flex: 1; }
+  .topbar { flex-shrink: 0; display: flex; align-items: center; gap: 4px; padding: 4px 8px; border-bottom: 1px solid var(--glass-border); background: rgba(0,0,0,0.12); }
+  .ib { min-width: 28px; height: 26px; padding: 0 7px; border-radius: 6px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.04); border: 1px solid var(--glass-border); color: var(--text-muted); }
+  .mic { flex-shrink: 0; width: 38px; height: 38px; border-radius: 10px; cursor: pointer; display: flex; align-items: center; justify-content: center; background: rgba(255,255,255,0.04); border: 1px solid var(--glass-border); color: var(--text-muted); }
+  .scroll { flex: 1; overflow-y: auto; padding: 10px 12px; }
+  .scroll::-webkit-scrollbar { width: 8px; } .scroll::-webkit-scrollbar-thumb { background: rgba(var(--accent-rgb),0.3); border-radius: 4px; }
+
+  /* messages */
+  .row { display: flex; margin: 8px 0; }
+  .row.me { justify-content: flex-end; }
+  .bubble-me { max-width: 85%; border-radius: 14px; border-bottom-right-radius: 4px; padding: 8px 12px;
+    background: linear-gradient(135deg, rgba(var(--accent-rgb),0.28), rgba(var(--accent-rgb),0.14));
+    border: 1px solid rgba(var(--accent-rgb),0.35); color: #fff; font-size: var(--chat-fs, 13px); line-height: 1.5; white-space: pre-wrap; }
+  .bubble { max-width: 92%; min-width: 0; border-radius: 14px; border-bottom-left-radius: 4px; padding: 8px 12px;
+    background: var(--glass); border: 1px solid var(--glass-border); color: var(--text-primary); font-size: var(--chat-fs, 13px); line-height: 1.55; }
+  .bubble p { margin: 0 0 8px; } .bubble p:last-child { margin-bottom: 0; }
+  .bubble code { background: rgba(0,0,0,0.4); border: 1px solid var(--glass-border); border-radius: 4px; padding: 1px 5px; font-family: var(--mono); font-size: 12px; }
+  .bubble pre.code { background: rgba(0,0,0,0.4); border: 1px solid var(--glass-border); border-radius: 12px; padding: 10px 12px; margin: 8px 0; overflow: auto; font-family: var(--mono); font-size: 12px; line-height: 1.5; color: #c8d3f5; }
+
+  details { margin: 4px 0; border-radius: 8px; overflow: hidden; }
+  summary { cursor: pointer; padding: 8px 10px; list-style: none; display: flex; align-items: center; gap: 8px; font-size: 12px; font-weight: 600; }
+  summary::-webkit-details-marker { display: none; }
+  .tool { background: rgba(var(--accent-rgb),0.06); border: 1px solid rgba(var(--accent-rgb),0.22); }
+  .tool summary { color: var(--accent); } .tool .name { color: var(--text-primary); }
+  .arg { flex: 1; min-width: 0; font-weight: 400; color: var(--text-muted); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--mono); }
+  .tool pre, .res pre { margin: 0; padding: 8px 10px; font-size: 11px; line-height: 1.45; font-family: var(--mono); white-space: pre-wrap; word-break: break-word; max-height: 280px; overflow: auto; border-top: 1px solid var(--glass-border); color: var(--text-secondary); }
+  .think { background: rgba(255,255,255,0.025); border: 1px solid var(--glass-border); }
+  .think summary { color: var(--text-muted); font-style: italic; font-weight: 400; }
+  .think .body { padding: 4px 10px 8px; font-size: 12px; line-height: 1.5; color: var(--text-tertiary); font-style: italic; white-space: pre-wrap; }
+  .res { background: rgba(255,255,255,0.03); border: 1px solid var(--glass-border); } .res summary { color: var(--text-muted); }
+
+  .diff { background: rgba(255,255,255,0.03); border: 1px solid var(--glass-border); }
+  .diff summary { color: var(--accent); } .diff .lbl { color: var(--text-secondary); }
+  .diff pre { margin: 0; padding: 6px 0; font-size: 11px; line-height: 1.5; font-family: var(--mono); border-top: 1px solid var(--glass-border); }
+  .diff .ln { padding: 0 10px; white-space: pre-wrap; word-break: break-word; }
+  .diff .add { background: rgba(var(--success-rgb),0.12); color: var(--success); }
+  .diff .del { background: rgba(var(--danger-rgb),0.12); color: rgba(var(--danger-rgb),0.9); }
+  .diff .ctx { color: var(--text-muted); }
+
+  /* (1) permission INLINE in the message flow, with expandable full request (4) */
+  .perm { margin: 10px 0; border-radius: 12px; border: 1px solid rgba(var(--accent-rgb),0.45); background: rgba(var(--accent-rgb),0.1); overflow: hidden; }
+  .perm .head { padding: 10px 12px; }
+  .perm .t { font-size: 12px; margin-bottom: 6px; } .perm .t b { color: var(--accent-bright); }
+  .perm details.req { margin: 0; background: rgba(0,0,0,0.25); border: 1px solid var(--glass-border); border-radius: 8px; }
+  .perm details.req summary { padding: 6px 10px; font-size: 11px; font-weight: 400; color: var(--text-muted); font-family: var(--mono); }
+  .perm details.req summary .chev { transition: transform .15s; } .perm details.req[open] summary .chev { transform: rotate(90deg); }
+  .perm details.req summary .clip { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .perm details.req pre { margin: 0; padding: 8px 10px; font-size: 11px; line-height: 1.45; font-family: var(--mono); white-space: pre-wrap; word-break: break-word; color: var(--text-secondary); border-top: 1px solid var(--glass-border); max-height: 200px; overflow: auto; }
+  .perm .btns { display: flex; gap: 8px; flex-wrap: wrap; padding: 10px 12px; border-top: 1px solid var(--glass-border); }
+  .pbtn { padding: 7px 14px; border-radius: 8px; font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .yes { background: rgba(var(--success-rgb),0.18); border: 1px solid rgba(var(--success-rgb),0.4); color: var(--success); }
+  .always { background: rgba(var(--accent-rgb),0.18); border: 1px solid rgba(var(--accent-rgb),0.4); color: var(--accent-bright); }
+  .no  { background: rgba(var(--danger-rgb),0.12); border: 1px solid rgba(var(--danger-rgb),0.35); color: var(--danger); }
+
+  /* (5) red stop button anchored directly ABOVE the send button — swipe right → edge strip */
+  .workwrap { position: absolute; right: 8px; bottom: calc(100% + 6px); z-index: 6; }
+  .collapsed.workwrap { right: 0; }
+  .pill { width: 38px; height: 38px; border-radius: 10px; display: flex; align-items: center; justify-content: center; cursor: pointer; touch-action: pan-y;
+    background: rgba(var(--danger-rgb),0.22); border: 1px solid rgba(var(--danger-rgb),0.5); color: var(--danger); }
+  .sidetab { width: 20px; height: 38px; border-radius: 10px 0 0 10px; display: none; align-items: center; justify-content: center; cursor: pointer; touch-action: pan-y;
+    background: rgba(var(--danger-rgb),0.22); border: 1px solid rgba(var(--danger-rgb),0.5); border-right: none; color: var(--danger); }
+  .collapsed .pill { display: none; } .collapsed .sidetab { display: flex; }
+  @keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.35;transform:scale(.7)} }
+
+  /* input */
+  .input { position: relative; flex-shrink: 0; border-top: 1px solid var(--glass-border); padding: 8px; background: rgba(0,0,0,0.15); display: flex; gap: 8px; align-items: flex-end; }
+  .input textarea { flex: 1; resize: none; min-height: 38px; padding: 9px 12px; border-radius: 10px; font: inherit; font-size: 13px; line-height: 1.4; background: rgba(var(--accent-rgb),0.06); border: 1px solid var(--glass-border); color: var(--text-primary); outline: none; scrollbar-width: thin; scrollbar-color: rgba(var(--accent-rgb),0.45) transparent; }
+  .input textarea::-webkit-scrollbar { width: 8px; }
+  .input textarea::-webkit-scrollbar-track { background: transparent; }
+  .input textarea::-webkit-scrollbar-thumb { background: rgba(var(--accent-rgb),0.4); border-radius: 4px; }
+  .input textarea::-webkit-scrollbar-thumb:hover { background: rgba(var(--accent-rgb),0.6); }
+  /* composer в потоке: вся история всегда НАД вводом */
+  .composer { flex-shrink: 0; }
+  .reveal { position: absolute; bottom: 6px; left: 50%; transform: translateX(-50%); z-index: 6; display: none;
+    align-items: center; justify-content: center; width: 46px; height: 18px; border-radius: 9px; cursor: pointer;
+    background: var(--glass-bg); border: 1px solid rgba(var(--accent-rgb),0.4); color: var(--accent-bright); box-shadow: 0 4px 14px rgba(0,0,0,0.45); }
+  .send { flex-shrink: 0; width: 38px; height: 38px; border-radius: 10px; cursor: pointer; display: flex; align-items: center; justify-content: center; background: rgba(var(--accent-rgb),0.2); border: 1px solid rgba(var(--accent-rgb),0.4); color: var(--accent-bright); }
+
+  /* (6) mode footer UNDER the input — colored by mode, click / Shift+Tab cycles */
+  .modefoot { flex-shrink: 0; padding: 6px 12px 9px; background: rgba(0,0,0,0.15); display: flex; align-items: center; gap: 8px; font-size: 12px; }
+  .modefoot .mode { cursor: pointer; font-weight: 600; user-select: none; }
+  .modefoot .hint { color: var(--text-tertiary); font-size: 11px; }
+
+  /* (1) theme color picker */
+  .palette { display: flex; gap: 8px; margin-bottom: 22px; flex-wrap: wrap; align-items: center; }
+  .palette .lbl { font-size: 12px; color: var(--text-muted); margin-right: 4px; }
+  .sw { width: 24px; height: 24px; border-radius: 7px; cursor: pointer; border: 2px solid transparent; box-shadow: 0 0 0 1px rgba(255,255,255,0.15); }
+  .sw.on { border-color: #fff; }
+  /* (4) copy / rewind ghost buttons + period dropdown */
+  .ghost { background: none; border: none; cursor: pointer; color: var(--text-muted); display: inline-flex; align-items: center; padding: 3px; border-radius: 5px; }
+  .ghost:hover { color: var(--accent); }
+  .msgtools { display: flex; gap: 2px; margin-top: 2px; }
+  .rewrap { position: relative; }
+  .rewrap .menu, .always-wrap .menu { position: absolute; bottom: 120%; z-index: 20; min-width: 200px; background: var(--glass-bg); border: 1px solid var(--glass-border); border-radius: 8px; overflow: hidden; box-shadow: 0 6px 20px rgba(0,0,0,0.45); display: none; }
+  .rewrap .menu { right: 0; } .always-wrap .menu { left: 0; }
+  .rewrap.open .menu, .always-wrap.open .menu { display: block; }
+  .menu .hd { padding: 7px 12px; font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .06em; border-bottom: 1px solid var(--glass-border); }
+  .menu button { display: block; width: 100%; text-align: left; padding: 9px 12px; font: inherit; font-size: 12px; background: none; border: none; cursor: pointer; color: var(--text-primary); }
+  .menu button:hover { background: var(--glass-hover); }
+  .always-wrap { position: relative; }
+</style>
+</head>
+<body>
+  <h1>Nebulide — превью агент-чата (с правками)</h1>
+  <div class="sub">Режимы под вводом (клик/Shift+Tab). Стоп — над вводом, свайп вправо в бок. Запрос доступа в ленте, ▸ разворачивает. Кнопки копирования и «вернуться к сообщению» под сообщениями. Слева ПК, справа телефон.</div>
+
+  <!-- (1) выбор цвета темы (те же, что в реальных темах) -->
+  <div class="palette" id="palette"><span class="lbl">Тема:</span></div>
+
+  <div class="stage">
+    <div class="desktop"><div class="frame-label">ПК · панель Chat (460px)</div><div class="screen"><div class="chat" data-chat></div></div></div>
+    <div class="phone"><div class="frame-label">Телефон · 375px</div><div class="screen"><div class="chat" data-chat></div></div></div>
+  </div>
+
+<template id="tpl">
+  <div class="topbar">
+    <span class="grow"></span>
+    <button class="ib" title="Поиск по чату"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg></button>
+    <button class="ib" title="Меньше шрифт">A−</button>
+    <button class="ib" title="Больше шрифт">A+</button>
+  </div>
+  <div class="scroll">
+    <div class="row me" style="flex-direction:column;align-items:flex-end">
+      <div class="bubble-me">Привет! Поправь баг в auth.py и добавь тест.</div>
+      <div class="msgtools rewrap">
+        <button class="ghost rebtn" title="Вернуться к этому сообщению"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg></button>
+        <button class="ghost copybtn" data-copy="Привет! Поправь баг в auth.py и добавь тест." title="Скопировать"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+        <div class="menu"><div class="hd">Вернуться к сообщению</div><button>✏️ Изменить и отправить</button><button>↻ Отправить заново</button></div>
+      </div>
+    </div>
+
+    <div class="row" style="flex-direction:column;align-items:flex-start">
+      <div class="bubble">
+      <details class="think"><summary>💭 Размышления</summary><div class="body">Прочитаю auth.py, найду валидацию токена, добавлю проверку срока и тест.</div></details>
+      <p>Нашёл: в <code>verify_token()</code> не проверяется срок действия. Исправляю.</p>
+      <details class="diff" open><summary>
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+        <span class="lbl">Правка</span><span class="arg" style="flex:1">auth.py</span>
+        <button class="ghost copybtn" data-copy="- return decode(token)&#10;+ claims = decode(token)&#10;+ if claims.exp < now(): return None&#10;+ return claims" title="Скопировать дифф"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button>
+        </summary>
+        <pre><div class="ln ctx">  def verify_token(token):</div><div class="ln del">−     return decode(token)</div><div class="ln add">+     claims = decode(token)</div><div class="ln add">+     if claims.exp < now(): return None</div><div class="ln add">+     return claims</div></pre>
+      </details>
+      </div>
+      <div class="msgtools"><button class="ghost copybtn" data-copy="Нашёл: в verify_token() не проверяется срок действия. Исправляю." title="Скопировать ответ"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></button></div>
+    </div>
+
+    <!-- (1)(4): permission INLINE, with expandable full request -->
+    <div class="perm">
+      <div class="head">
+        <div class="t">Claude запрашивает доступ: <b>Bash</b></div>
+        <details class="req">
+          <summary><span class="chev">▸</span><span class="clip">pytest tests/test_auth.py -q --maxfail=1 -k "token or expiry" …</span></summary>
+          <pre>pytest tests/test_auth.py -q --maxfail=1 \
+  -k "token or expiry" \
+  --disable-warnings \
+  --cov=auth --cov-report=term-missing</pre>
+        </details>
+      </div>
+      <div class="btns">
+        <button class="pbtn yes">Да</button>
+        <div class="always-wrap">
+          <button class="pbtn always">Да навсегда ▾</button>
+          <div class="menu">
+            <div class="hd">На какой период</div>
+            <button>Эта сессия</button>
+            <button>Этот проект</button>
+            <button>Навсегда</button>
+          </div>
+        </div>
+        <button class="pbtn no">Нет</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- composer в потоке: pill + input + footer; история всегда над вводом -->
+  <div class="composer">
+    <div class="input">
+      <!-- (5): кнопка-стоп ровно над send; свайпом вправо прячется в бок -->
+      <div class="workwrap">
+        <div class="pill" title="Остановить (смахни вправо, чтобы свернуть)"><svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor"><rect x="3.5" y="3.5" width="17" height="17" rx="2.5"/></svg></div>
+        <div class="sidetab" title="Показать"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg></div>
+      </div>
+      <textarea rows="1" placeholder="Сообщение для Claude…"></textarea>
+      <button class="mic" title="Голосовой ввод"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg></button>
+      <button class="send"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
+    </div>
+    <!-- (6): mode footer under input -->
+    <div class="modefoot">
+      <span class="mode">⏵ Обычный</span>
+      <span class="hint">shift+tab — сменить режим</span>
+    </div>
+  </div>
+
+  <!-- mini arrow on the composer's top edge — appears when collapsed -->
+  <button class="reveal" title="Развернуть ввод"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 15 12 9 6 15"/></svg></button>
+</template>
+
+<script>
+  // (1) палитра тем — те же цвета, что в реальных темах (utils/theme.ts)
+  const ACCENTS = [['Purple','#7F00FF'],['Blue','#0066FF'],['Cyan','#00B4D8'],['Green','#00CC66'],['Pink','#FF0099'],['Red','#FF3355'],['Orange','#FF6600'],['Gold','#CCAA00']];
+  const hexRgb = h => [parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)];
+  const lite = (h,a) => { const [r,g,b]=hexRgb(h); const f=x=>Math.round(Math.min(255,x+(255-x)*a)); return `${f(r)}, ${f(g)}, ${f(b)}`; };
+  function applyAccent(hex){
+    const [r,g,b]=hexRgb(hex); const s=document.documentElement.style;
+    s.setProperty('--accent',hex); s.setProperty('--accent-rgb',`${r}, ${g}, ${b}`);
+    s.setProperty('--accent-bright',`rgb(${lite(hex,0.3)})`); s.setProperty('--accent-bright-rgb',lite(hex,0.25)); s.setProperty('--accent-light-rgb',lite(hex,0.4));
+  }
+  (() => {
+    const pal = document.getElementById('palette');
+    ACCENTS.forEach(([name,hex],idx) => {
+      const b = document.createElement('span'); b.className = 'sw' + (idx===0?' on':''); b.style.background = hex; b.title = name;
+      b.onclick = () => { document.querySelectorAll('.sw').forEach(x=>x.classList.remove('on')); b.classList.add('on'); applyAccent(hex); };
+      pal.appendChild(b);
+    });
+  })();
+
+  const MODES = [
+    { label: '⏵ Обычный',       color: 'var(--text-muted)' },
+    { label: '⏵ План',          color: 'var(--success)' },
+    { label: '⏵ Авто-правки',   color: 'var(--accent-bright)' },
+    { label: '⏵ Всё разрешено', color: 'var(--gold)' },
+  ];
+  // ── большая история для теста скролла ──
+  const U = [
+    'Привет! Помоги разобраться с проектом.',
+    'А можешь объяснить, как работает кэш сессий?',
+    'Окей, теперь поправь баг с токеном.',
+    'Добавь, пожалуйста, тесты на это.',
+    'Спасибо. А что по производительности?',
+    'Хорошо, давай отрефакторим этот модуль.',
+  ];
+  const A = [
+    'Конечно. Сейчас посмотрю структуру и расскажу по шагам.',
+    'Кэш хранит разобранные сессии по mtime+size — пока файл не менялся, повторно не парсим.',
+    'Нашёл проблему в <code>verify_token()</code> — не проверяется срок действия. Исправляю и добавляю проверку.',
+    'Добавил три теста: валидный токен, просроченный и битый. Все зелёные.',
+    'Узкое место — повторный парсинг JSONL. Включил инкрементальный тейл по offset, стало заметно быстрее.',
+    'Разбил большой обработчик на несколько чистых функций, логика стала прозрачнее.',
+  ];
+  const COPY_SVG = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+  const REW_SVG  = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 14 4 9 9 4"/><path d="M20 20v-7a4 4 0 0 0-4-4H4"/></svg>';
+  const REW_MENU = '<div class="menu"><div class="hd">Вернуться к сообщению</div><button>✏️ Изменить и отправить</button><button>↻ Отправить заново</button></div>';
+  let HISTORY = '';
+  for (let i = 0; i < 24; i++) {
+    if (i % 2 === 0) {
+      const u = U[(i/2|0) % U.length];
+      HISTORY += '<div class="row me" style="flex-direction:column;align-items:flex-end"><div class="bubble-me">' + u + '</div>'
+        + '<div class="msgtools rewrap"><button class="ghost rebtn" title="Вернуться к сообщению">' + REW_SVG + '</button>'
+        + '<button class="ghost copybtn" data-copy="' + u.replace(/"/g,'&quot;') + '" title="Скопировать">' + COPY_SVG + '</button>' + REW_MENU + '</div></div>';
+    } else {
+      const a = A[(i/2|0) % A.length];
+      HISTORY += '<div class="row" style="flex-direction:column;align-items:flex-start"><div class="bubble"><p>' + a + '</p></div>'
+        + '<div class="msgtools"><button class="ghost copybtn" data-copy="' + a.replace(/<[^>]+>/g,'').replace(/"/g,'&quot;') + '" title="Скопировать ответ">' + COPY_SVG + '</button></div></div>';
+    }
+  }
+
+  const tpl = document.getElementById('tpl');
+  document.querySelectorAll('[data-chat]').forEach(host => {
+    host.appendChild(tpl.content.cloneNode(true));
+    const sc = host.querySelector('.scroll');
+    sc.insertAdjacentHTML('afterbegin', HISTORY);     // длинная история сверху
+    sc.scrollTop = sc.scrollHeight;
+
+    // (5) кнопка-стоп показывается ТОЛЬКО когда Claude работает (демо: по «Отправить» на 4с)
+    const ww = host.querySelector('.workwrap');
+    const pill = ww.querySelector('.pill');
+    const sidetab = ww.querySelector('.sidetab');
+    ww.style.display = 'none';
+    let workTimer = 0;
+    host.querySelector('.send').addEventListener('click', () => {
+      ww.classList.remove('collapsed');
+      ww.style.display = '';
+      clearTimeout(workTimer);
+      workTimer = setTimeout(() => { ww.style.display = 'none'; }, 4000);
+    });
+    let px = 0, moved = false;
+    pill.addEventListener('pointerdown', e => { px = e.clientX; moved = false; });
+    pill.addEventListener('pointermove', e => { if (Math.abs(e.clientX - px) > 8) moved = true; });
+    pill.addEventListener('pointerup',   e => { if (e.clientX - px > 36) ww.classList.add('collapsed'); });
+    pill.addEventListener('click',       () => { if (!moved) {/* демо: стоп */} });
+    sidetab.addEventListener('click', () => ww.classList.remove('collapsed'));
+    let sx = 0;
+    sidetab.addEventListener('pointerdown', e => { sx = e.clientX; });
+    sidetab.addEventListener('pointerup',   e => { if (e.clientX - sx < -28) ww.classList.remove('collapsed'); });
+
+    // (6) cycle mode on click + Shift+Tab
+    const m = host.querySelector('.mode'); let i = 0;
+    const apply = () => { m.textContent = MODES[i].label; m.style.color = MODES[i].color; };
+    apply();
+    m.onclick = () => { i = (i + 1) % MODES.length; apply(); };
+
+    // ── авто-рост поля (макс 50%) + сжатие НА МЕСТЕ; коллапс стартует, ОТОЙДЯ от низа ──
+    const ta = host.querySelector('.input textarea');
+    const footer = host.querySelector('.modefoot');
+    footer.style.overflow = 'hidden'; footer.style.boxSizing = 'border-box';   // без transition — scroll-linked напрямую
+    const RANGE = 120, MIN_ROW = 38, FOOTER_H = 32;
+    let raw = 1, raf = 0, lastTop = 0, ignore = false, contentH = 38;
+
+    const measure = () => { const p = ta.style.height; ta.style.height = 'auto'; contentH = ta.scrollHeight; ta.style.height = p; };
+    const grow = () => {
+      const half = Math.floor(host.clientHeight * 0.5);
+      const maxH = Math.round(MIN_ROW + (half - MIN_ROW) * raw);
+      ta.style.height = Math.min(contentH, maxH) + 'px';
+      ta.style.overflowY = contentH > maxH ? 'auto' : 'hidden';
+    };
+    const applyRaw = (nr) => { raw = nr; footer.style.height = Math.round(FOOTER_H * raw) + 'px'; footer.style.opacity = raw < 0.04 ? '0' : '1'; grow(); };
+
+    ta.addEventListener('input', () => { measure(); grow(); });
+    ta.addEventListener('focus', () => sc.scrollTo({ top: sc.scrollHeight, behavior: 'smooth' }));
+    ta.addEventListener('keydown', e => { if (e.key === 'Tab' && e.shiftKey) { e.preventDefault(); i = (i + 1) % MODES.length; apply(); } });
+
+    // НАПРАВЛЕННАЯ модель: вниз — раскрывает (даже из середины), вверх — сворачивает, у низа — полностью.
+    sc.addEventListener('scroll', () => {
+      if (ignore) { lastTop = sc.scrollTop; return; }
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        const top = sc.scrollTop;
+        const dist = sc.scrollHeight - top - sc.clientHeight;
+        const delta = top - lastTop; lastTop = top;
+        let nr = dist < 6 ? 1 : raw + delta / RANGE;
+        nr = Math.min(1, Math.max(0, nr));
+        if (Math.abs(nr - raw) < 0.003) return;
+        ignore = true; applyRaw(nr); requestAnimationFrame(() => { ignore = false; });
+      });
+    });
+
+    ta.value = 'Это пример длинного сообщения.\nДопиши ещё строк — поле растёт, но максимум до половины.\nЛистай ВНИЗ — поле раскрывается даже из середины; ВВЕРХ — сжимается на месте до одной строки.\nУ самого низа — всегда полностью. Без рывков. У поля — тематический скроллбар.';
+    measure(); grow();
+
+    // (3) шрифт A− / A+ (как в реале — через --chat-fs)
+    let fs = 13;
+    const ibs = host.querySelectorAll('.topbar .ib');
+    const setFs = () => host.style.setProperty('--chat-fs', fs + 'px');
+    ibs[1].addEventListener('click', () => { fs = Math.max(11, fs - 1); setFs(); });
+    ibs[2].addEventListener('click', () => { fs = Math.min(20, fs + 1); setFs(); });
+    setFs();
+
+    // (2) период при «Да навсегда»
+    const aw = host.querySelector('.always-wrap');
+    if (aw) {
+      aw.querySelector('.pbtn.always').addEventListener('click', e => { e.stopPropagation(); aw.classList.toggle('open'); });
+      aw.querySelectorAll('.menu button').forEach(b => b.addEventListener('click', () => aw.classList.remove('open')));
+    }
+
+    // (4) rewind-меню под сообщениями
+    host.querySelectorAll('.rewrap').forEach(rw => {
+      rw.querySelector('.rebtn').addEventListener('click', e => { e.stopPropagation(); rw.classList.toggle('open'); });
+      rw.querySelectorAll('.menu button').forEach(b => b.addEventListener('click', () => rw.classList.remove('open')));
+    });
+
+    // (4) копирование
+    host.querySelectorAll('.copybtn').forEach(cb => {
+      cb.addEventListener('click', e => {
+        e.preventDefault(); e.stopPropagation();
+        navigator.clipboard.writeText(cb.dataset.copy || '');
+        const o = cb.style.color; cb.style.color = 'var(--success)'; setTimeout(() => { cb.style.color = o; }, 700);
+      });
+    });
+
+    // закрывать выпадашки по клику вне
+    host.addEventListener('click', () => host.querySelectorAll('.open').forEach(x => x.classList.remove('open')));
+  });
+</script>
+</body>
+</html>

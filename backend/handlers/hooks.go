@@ -134,6 +134,12 @@ func (h *HookHandler) HandleClaudeHook(c *gin.Context) {
 		if event.Status != "" {
 			payload["status"] = event.Status
 		}
+		if event.PermissionMode != "" {
+			payload["permission_mode"] = event.PermissionMode
+		}
+		if len(event.ToolInput) > 0 {
+			payload["tool_input"] = event.ToolInput
+		}
 
 		data, _ := json.Marshal(payload)
 		channel := "ws:user:" + claims.UserID.String()

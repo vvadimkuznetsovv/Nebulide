@@ -454,6 +454,13 @@
   @keyframes claudeChatPulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.35; transform: scale(0.7); } }
   .claude-chat-pulse { animation: claudeChatPulse 1.1s ease-in-out infinite; }
 
+  /* Themed scrollbar for the agent chat input (textarea) */
+  .agent-input { scrollbar-width: thin; scrollbar-color: rgba(var(--accent-rgb), 0.45) transparent; }
+  .agent-input::-webkit-scrollbar { width: 8px; }
+  .agent-input::-webkit-scrollbar-track { background: transparent; }
+  .agent-input::-webkit-scrollbar-thumb { background: rgba(var(--accent-rgb), 0.4); border-radius: 4px; }
+  .agent-input::-webkit-scrollbar-thumb:hover { background: rgba(var(--accent-rgb), 0.6); }
+
   /* ==========================================
      WORKSPACE — glass panels
      ========================================== */

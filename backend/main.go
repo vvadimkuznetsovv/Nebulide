@@ -88,7 +88,6 @@ func main() {
 	adminHandler := handlers.NewAdminHandler(cfg, terminalService, presenceService)
 	workspaceSessionsHandler := handlers.NewWorkspaceSessionsHandler(cfg)
 	claudeSessionsHandler := handlers.NewClaudeSessionsHandler(cfg)
-	agentHandler := handlers.NewAgentHandler(cfg)
 	syncHandler := handlers.NewSyncHandler(cfg, presenceService, terminalService)
 	hookHandler := handlers.NewHookHandler(cfg)
 	llmHandler := handlers.NewLLMHandler(cfg)
@@ -240,7 +239,6 @@ func main() {
 	// WebSocket routes (auth via query param)
 	r.GET("/ws/chat/:id", chatHandler.HandleWebSocket)
 	r.GET("/ws/terminal", terminalHandler.HandleWebSocket)
-	r.GET("/ws/agent", agentHandler.HandleWebSocket)
 	r.GET("/ws/sync", syncHandler.HandleWebSocket)
 
 	// Code-server reverse proxy (auth via ?token= query param or cookie)

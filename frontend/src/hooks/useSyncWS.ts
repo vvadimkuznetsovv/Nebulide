@@ -188,6 +188,8 @@ export function useSyncWS() {
                   status: msg.status,
                   sessionId: msg.session_id,
                   cwd: msg.cwd,
+                  permissionMode: msg.permission_mode,
+                  toolInput: msg.tool_input,
                 });
               }
               break;

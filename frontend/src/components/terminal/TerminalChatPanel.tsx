@@ -1,8 +1,10 @@
+import { useState, useEffect } from 'react';
 import TerminalComponent from './Terminal';
-import ClaudeChatView from './ClaudeChatView';
-import AgentChatView from './AgentChatView';
+import ClaudeChatView from './AgentChatView';
+import { resolveLiveSession } from '../../api/claudeSessions';
 import {
-  getTerminalViewMode, setTerminalViewMode, getTerminalCwdHint, getAgentLaunch, useTerminalViewModeVersion,
+  getTerminalViewMode, setTerminalViewMode, getTerminalCwdHint, useTerminalViewModeVersion,
+  hasTrustPending, consumeTrustPending,
 } from '../../utils/terminalViewMode';
 
 interface Props {
@@ -12,63 +14,80 @@ interface Props {
 }
 
 /**
- * Wraps a terminal instance with a Terminal ⇄ Chat toggle. In chat mode the
- * raw xterm is unmounted but its module-level PTY/WebSocket session stays alive
- * (same as panel hide/show), so Claude keeps running underneath and the chat
- * view tails its JSONL.
+ * 2 режима: Терминал (сырой xterm) и Чат (тонкая обёртка над тем же живым `claude`
+ * в PTY — лента из JSONL, действия → клавиши в PTY). Внутри Чата по требованию
+ * (permission/rewind/resume) показываем НАСТОЯЩИЙ экран терминала того же PTY.
+ * PTY живёт в module-level session — переключение видов его не рвёт.
  */
 export default function TerminalChatPanel({ instanceId, persistent, active }: Props) {
   useTerminalViewModeVersion(); // re-render on mode change
-  const mode = getTerminalViewMode(instanceId);
+  const mode = getTerminalViewMode(instanceId) === 'terminal' ? 'terminal' : 'chat';
   const cwd = getTerminalCwdHint(instanceId);
-  const agentLaunch = getAgentLaunch(instanceId);
+  // Trust-gate: новая папка → claude показывает родной trust-промпт первым экраном.
+  // Стартуем с настоящего терминала, чтобы юзер его увидел и подтвердил.
+  const [trustGate, setTrustGate] = useState(() => hasTrustPending(instanceId));
+  const [showRawInChat, setShowRawInChat] = useState(() => hasTrustPending(instanceId));
+
+  const inChatTerminal = mode === 'chat' && showRawInChat;
+
+  // Пока ждём подтверждения доступа — поллим резолв сессии; как только claude
+  // реально стартовал (появился JSONL) — авто-возврат к красивой ленте.
+  useEffect(() => {
+    if (mode !== 'chat' || !trustGate) return;
+    let alive = true;
+    const iv = window.setInterval(async () => {
+      try {
+        const { data } = await resolveLiveSession(instanceId, cwd);
+        if (alive && data?.session_file) {
+          consumeTrustPending(instanceId);
+          setTrustGate(false);
+          setShowRawInChat(false);
+        }
+      } catch { /* claude ещё не стартовал — ждём */ }
+    }, 1500);
+    return () => { alive = false; clearInterval(iv); };
+  }, [mode, trustGate, instanceId, cwd]);
+
+  // Любое ручное переключение режима снимает trust-gate — юзер берёт управление.
+  const dropTrustGate = () => { consumeTrustPending(instanceId); setTrustGate(false); };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
       {/* Mode toggle */}
       <div style={{
-        flexShrink: 0, display: 'flex', flexWrap: 'wrap', gap: 4, padding: '4px 6px',
+        flexShrink: 0, display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 4, padding: '4px 6px',
         borderBottom: '1px solid var(--glass-border)', background: 'rgba(0,0,0,0.12)',
       }}>
-        <button
-          type="button"
-          onClick={() => setTerminalViewMode(instanceId, 'terminal')}
-          style={modeBtnStyle(mode === 'terminal')}
-        >
+        <button type="button" onClick={() => { dropTrustGate(); setShowRawInChat(false); setTerminalViewMode(instanceId, 'terminal'); }} style={modeBtnStyle(mode === 'terminal')}>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="4 17 10 11 4 5" /><line x1="12" y1="19" x2="20" y2="19" />
           </svg>
           Терминал
         </button>
-        <button
-          type="button"
-          onClick={() => setTerminalViewMode(instanceId, 'agent')}
-          style={modeBtnStyle(mode === 'agent')}
-        >
+        <button type="button" onClick={() => { dropTrustGate(); setShowRawInChat(false); setTerminalViewMode(instanceId, 'chat'); }} style={modeBtnStyle(mode === 'chat')}>
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8z" />
+            <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
           </svg>
           Чат
         </button>
-        <button
-          type="button"
-          onClick={() => setTerminalViewMode(instanceId, 'chat')}
-          title="Монитор сессии (только чтение JSONL)"
-          style={modeBtnStyle(mode === 'chat')}
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" />
-          </svg>
-          Монитор
-        </button>
+        {inChatTerminal && (
+          <button type="button" onClick={() => { dropTrustGate(); setShowRawInChat(false); }} title="Вернуться к чату" style={{ ...modeBtnStyle(false), marginLeft: 'auto', color: 'var(--accent-bright)' }}>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
+            Назад к чату
+          </button>
+        )}
       </div>
 
+      {inChatTerminal && trustGate && (
+        <div style={{ flexShrink: 0, padding: '7px 12px', fontSize: 12, lineHeight: 1.45, color: 'var(--accent-bright)', background: 'rgba(var(--accent-rgb),0.12)', borderBottom: '1px solid var(--glass-border)' }}>
+          Новая папка — Claude спрашивает доступ. Подтвердите ниже (нажмите «1»); чат откроется автоматически после первого сообщения.
+        </div>
+      )}
+
       <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
-        {mode === 'agent'
-          ? <AgentChatView instanceId={instanceId} cwd={cwd} resume={agentLaunch?.resume} historyProject={agentLaunch?.historyProject} historySessionFile={agentLaunch?.historySessionFile} />
-          : mode === 'chat'
-            ? <ClaudeChatView instanceId={instanceId} cwd={cwd} />
-            : <TerminalComponent instanceId={instanceId} persistent={persistent} active={active} />}
+        {mode === 'terminal' || inChatTerminal
+          ? <TerminalComponent instanceId={instanceId} persistent={persistent} active={active} />
+          : <ClaudeChatView instanceId={instanceId} cwd={cwd} onRequestTerminal={() => setShowRawInChat(true)} />}
       </div>
     </div>
   );

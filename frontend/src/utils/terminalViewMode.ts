@@ -4,17 +4,16 @@ import { useSyncExternalStore } from 'react';
 // wrapper. Module-level so it survives panel hide/show remounts. Also stores an
 // optional cwd hint (the dir claude was launched in) to improve live resolution.
 
-export type TerminalViewMode = 'terminal' | 'chat' | 'agent';
-
-export interface AgentLaunch {
-  resume?: string;
-  historyProject?: string;
-  historySessionFile?: string;
-}
+export type TerminalViewMode = 'terminal' | 'chat';
 
 const modes = new Map<string, TerminalViewMode>();
 const cwdHints = new Map<string, string>();
-const agentLaunches = new Map<string, AgentLaunch>();
+// Instances launched in a possibly-untrusted (new) folder. Claude shows a
+// "Is this a project you trust?" prompt as its FIRST screen there, which blocks
+// the session and produces no JSONL yet. For these we surface the real terminal
+// first (so the user answers the native prompt), then flip to the chat ribbon
+// once the session JSONL resolves. Only set for brand-new "chat in folder".
+const trustPending = new Set<string>();
 const listeners = new Set<() => void>();
 let version = 0;
 
@@ -48,18 +47,22 @@ export function setTerminalCwdHint(instanceId: string, cwd: string) {
   if (cwd) cwdHints.set(instanceId, cwd);
 }
 
-export function getAgentLaunch(instanceId: string): AgentLaunch | undefined {
-  return agentLaunches.get(instanceId);
+export function markTrustPending(instanceId: string) {
+  trustPending.add(instanceId);
 }
 
-export function setAgentLaunch(instanceId: string, info: AgentLaunch) {
-  agentLaunches.set(instanceId, info);
+export function hasTrustPending(instanceId: string): boolean {
+  return trustPending.has(instanceId);
+}
+
+export function consumeTrustPending(instanceId: string) {
+  trustPending.delete(instanceId);
 }
 
 export function clearTerminalViewMode(instanceId: string) {
   modes.delete(instanceId);
   cwdHints.delete(instanceId);
-  agentLaunches.delete(instanceId);
+  trustPending.delete(instanceId);
   bump();
 }
 

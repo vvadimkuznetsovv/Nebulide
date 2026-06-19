@@ -9,10 +9,9 @@ import { log } from '../../utils/logger';
 import LLMPanel from '../llm/LLMPanel';
 import FolderPicker from './FolderPicker';
 import ClaudeChatView from '../terminal/ClaudeChatView';
-import { mkdirFile } from '../../api/files';
 import {
   getClaudeOpenMode, setClaudeOpenMode, useClaudeOpenMode,
-  setInitialTerminalViewMode, setTerminalCwdHint, setAgentLaunch,
+  setInitialTerminalViewMode, setTerminalCwdHint, markTrustPending,
 } from '../../utils/terminalViewMode';
 
 /** Normalize a path for cross-OS comparison: forward slashes, no trailing slash. */
@@ -221,18 +220,14 @@ export default function ChatPanel(_props: ChatPanelProps) {
   );
 
   // Open a fresh terminal, cd into the folder (creating it if needed) and run claude.
+  // Always runs the real `claude` in the PTY; initial view = Терминал or Чат (обёртка над тем же PTY).
   const startNewChatInFolder = useCallback(async (absPath: string) => {
     const instanceId = `claude-${Date.now()}`;
     setTerminalCwdHint(instanceId, absPath);
-    if (getClaudeOpenMode() === 'chat') {
-      // Headless agent chat: ensure the dir exists, open the agent panel (no PTY command).
-      try { await mkdirFile(absPath); } catch { /* already exists */ }
-      setAgentLaunch(instanceId, {});
-      setInitialTerminalViewMode(instanceId, 'agent');
-      openTerminalWithId(instanceId);
-      return;
-    }
-    setInitialTerminalViewMode(instanceId, 'terminal');
+    setInitialTerminalViewMode(instanceId, getClaudeOpenMode() === 'chat' ? 'chat' : 'terminal');
+    // Новая/недоверенная папка → claude покажет родной trust-промпт первым экраном.
+    // Чат покажет настоящий терминал, пока сессия не стартует (см. TerminalChatPanel).
+    markTrustPending(instanceId);
     openTerminalWithId(instanceId);
     const ok = await typeCommandInTerminal(instanceId, `mkdir -p "${absPath}" && cd "${absPath}" && claude`);
     if (!ok) toast.error('Failed to connect to terminal');
@@ -368,17 +363,8 @@ export default function ChatPanel(_props: ChatPanelProps) {
 
     const instanceId = `claude-${Date.now()}`;
     if (session.cwd) setTerminalCwdHint(instanceId, session.cwd);
-
-    if (getClaudeOpenMode() === 'chat') {
-      // Resume the session in the headless agent chat (history preloaded from JSONL).
-      setAgentLaunch(instanceId, { resume: session.session_id, historyProject: session.project, historySessionFile: session.session_id });
-      setInitialTerminalViewMode(instanceId, 'agent');
-      openTerminalWithId(instanceId);
-      setLaunching(null);
-      return;
-    }
-
-    setInitialTerminalViewMode(instanceId, 'terminal');
+    // Resume the real claude in a PTY; initial view = Чат (обёртка) or Терминал.
+    setInitialTerminalViewMode(instanceId, getClaudeOpenMode() === 'chat' ? 'chat' : 'terminal');
     openTerminalWithId(instanceId);
 
     const resumeCmd = `claude --resume ${session.session_id}`;

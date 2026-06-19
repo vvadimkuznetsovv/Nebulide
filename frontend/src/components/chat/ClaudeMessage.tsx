@@ -2,12 +2,50 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
+import toast from 'react-hot-toast';
 import type { ChatBlock, RichMessage } from '../../api/claudeSessions';
+
+function copyText(text: string) {
+  if (!text) return;
+  navigator.clipboard.writeText(text).then(
+    () => toast.success('Скопировано', { duration: 1000 }),
+    () => toast.error('Не удалось скопировать'),
+  );
+}
+
+const ghostBtn: React.CSSProperties = {
+  background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)',
+  display: 'flex', alignItems: 'center', padding: 3, borderRadius: 5, flexShrink: 0,
+};
+
+function CopyBtn({ text, title }: { text: string; title?: string }) {
+  return (
+    <button type="button" title={title || 'Скопировать'}
+      onClick={(e) => { e.preventDefault(); e.stopPropagation(); copyText(text); }}
+      style={ghostBtn}
+      onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--accent)'; }}
+      onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-muted)'; }}>
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>
+    </button>
+  );
+}
+
+// Rewind control — opens Claude Code's native rewind (Esc Esc) on the real terminal.
+function RewindBtn({ onClick }: { onClick: () => void }) {
+  return (
+    <button type="button" title="Вернуться к этому сообщению (откат Claude Code)" onClick={onClick}
+      style={ghostBtn}
+      onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--accent)'; }}
+      onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-muted)'; }}>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="9 14 4 9 9 4" /><path d="M20 20v-7a4 4 0 0 0-4-4H4" /></svg>
+    </button>
+  );
+}
 
 // Shared markdown renderer (same code/inline config as MessageBubble).
 function Markdown({ children }: { children: string }) {
   return (
-    <div className="prose prose-invert prose-sm max-w-none" style={{ fontSize: 13, lineHeight: 1.55 }}>
+    <div className="prose prose-invert prose-sm max-w-none" style={{ fontSize: 'var(--chat-fs, 13px)', lineHeight: 1.55 }}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{
@@ -68,8 +106,9 @@ function inputSummary(input: unknown): string {
 function ThinkingBlock({ text }: { text: string }) {
   return (
     <details style={{ margin: '4px 0', borderRadius: 8, background: 'rgba(255,255,255,0.025)', border: '1px solid var(--glass-border)' }}>
-      <summary style={{ cursor: 'pointer', padding: '8px 10px', listStyle: 'none', fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic' }}>
-        💭 Размышления
+      <summary style={{ cursor: 'pointer', padding: '8px 10px', listStyle: 'none', display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--text-muted)', fontStyle: 'italic' }}>
+        <span style={{ flex: 1 }}>💭 Размышления</span>
+        <CopyBtn text={text} title="Скопировать размышления" />
       </summary>
       <div style={{ padding: '4px 10px 8px', fontSize: 12, lineHeight: 1.5, color: 'var(--text-tertiary)', fontStyle: 'italic', whiteSpace: 'pre-wrap', wordBreak: 'break-word', maxHeight: 320, overflow: 'auto' }}>
         {text}
@@ -125,6 +164,10 @@ function simpleDiff(oldS: string, newS: string): DiffRow[] {
   return rows;
 }
 
+function rowsToPatch(rows: DiffRow[]): string {
+  return rows.map(r => (r.t === 'add' ? '+ ' : r.t === 'del' ? '- ' : '  ') + r.s).join('\n');
+}
+
 function DiffView({ rows }: { rows: DiffRow[] }) {
   const capped = rows.slice(0, 80);
   return (
@@ -166,6 +209,7 @@ function EditBlock({ name, input }: { name: string; input: unknown }) {
         <span style={{ flex: 1, minWidth: 0, fontWeight: 400, color: 'var(--text-muted)', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'monospace' }}>
           {baseName(file)}
         </span>
+        <CopyBtn text={rowsToPatch(rows)} title="Скопировать дифф" />
       </summary>
       <div style={{ borderTop: '1px solid var(--glass-border)' }}>
         <DiffView rows={rows} />
@@ -185,17 +229,18 @@ function ToolUseBlock({ block }: { block: ChatBlock }) {
 
   const summary = inputSummary(block.input);
   const json = block.input != null ? JSON.stringify(block.input, null, 2) : '';
+  const cmd = asObj(block.input).command;
+  const copyVal = typeof cmd === 'string' ? cmd : json;
   const icon = TOOL_ICON[name] || '🔧';
   return (
     <details style={{ margin: '4px 0', borderRadius: 8, overflow: 'hidden', background: 'rgba(var(--accent-rgb),0.06)', border: '1px solid rgba(var(--accent-rgb),0.22)' }}>
       <summary style={{ cursor: 'pointer', padding: '8px 10px', listStyle: 'none', display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--accent)', fontWeight: 600 }}>
         <span style={{ flexShrink: 0, width: 14, textAlign: 'center' }}>{icon}</span>
         <span style={{ color: 'var(--text-primary)' }}>{name}</span>
-        {summary && (
-          <span style={{ flex: 1, minWidth: 0, fontWeight: 400, color: 'var(--text-muted)', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'monospace' }}>
-            {summary}
-          </span>
-        )}
+        <span style={{ flex: 1, minWidth: 0, fontWeight: 400, color: 'var(--text-muted)', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'monospace' }}>
+          {summary}
+        </span>
+        {copyVal && <CopyBtn text={copyVal} title="Скопировать команду" />}
       </summary>
       {json && (
         <pre style={{ margin: 0, padding: '8px 10px', fontSize: 11, lineHeight: 1.45, color: 'var(--text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'monospace', maxHeight: 280, overflow: 'auto', borderTop: '1px solid var(--glass-border)' }}>
@@ -213,11 +258,10 @@ function ToolResultBlock({ block }: { block: ChatBlock }) {
     <details style={{ margin: '4px 0', borderRadius: 8, overflow: 'hidden', background: err ? 'rgba(var(--danger-rgb),0.06)' : 'rgba(255,255,255,0.03)', border: `1px solid ${err ? 'rgba(var(--danger-rgb),0.3)' : 'var(--glass-border)'}` }}>
       <summary style={{ cursor: 'pointer', padding: '8px 10px', listStyle: 'none', display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: err ? 'var(--danger)' : 'var(--text-muted)', fontWeight: 600 }}>
         {err ? '✗' : '↳'} <span>{err ? 'Ошибка' : 'Результат'}</span>
-        {content && (
-          <span style={{ flex: 1, minWidth: 0, fontWeight: 400, fontSize: 11, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'monospace' }}>
-            {content.split('\n')[0]}
-          </span>
-        )}
+        <span style={{ flex: 1, minWidth: 0, fontWeight: 400, fontSize: 11, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: 'monospace' }}>
+          {content.split('\n')[0]}
+        </span>
+        {content && <CopyBtn text={content} title="Скопировать результат" />}
       </summary>
       {content && (
         <pre style={{ margin: 0, padding: '8px 10px', fontSize: 11, lineHeight: 1.45, color: err ? 'rgba(var(--danger-rgb),0.9)' : 'var(--text-secondary)', whiteSpace: 'pre-wrap', wordBreak: 'break-word', fontFamily: 'monospace', maxHeight: 320, overflow: 'auto', borderTop: `1px solid ${err ? 'rgba(var(--danger-rgb),0.2)' : 'var(--glass-border)'}` }}>
@@ -236,29 +280,41 @@ function renderBlock(b: ChatBlock, i: number) {
   return null;
 }
 
-export default function ClaudeMessage({ msg }: { msg: RichMessage }) {
+interface Props {
+  msg: RichMessage;
+  /** When provided, user messages get a "return to message" control (native rewind). */
+  onRewind?: (msg: RichMessage) => void;
+}
+
+export default function ClaudeMessage({ msg, onRewind }: Props) {
   const isUser = msg.role === 'user';
   const hasText = msg.blocks.some(b => b.kind === 'text');
   const userPrompt = isUser && hasText;
+  const textOf = (m: RichMessage) => m.blocks.filter(b => b.kind === 'text').map(b => b.text).join('\n\n');
 
   if (userPrompt) {
-    const text = msg.blocks.filter(b => b.kind === 'text').map(b => b.text).join('\n\n');
+    const text = textOf(msg);
     return (
-      <div style={{ display: 'flex', justifyContent: 'flex-end', margin: '8px 0' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', margin: '8px 0' }}>
         <div style={{
           maxWidth: '85%', borderRadius: 14, borderBottomRightRadius: 4, padding: '8px 12px',
           background: 'linear-gradient(135deg, rgba(var(--accent-rgb),0.28), rgba(var(--accent-rgb),0.14))',
           border: '1px solid rgba(var(--accent-rgb),0.35)', color: '#fff',
-          fontSize: 13, lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
+          fontSize: 'var(--chat-fs, 13px)', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word',
         }}>
           {text}
+        </div>
+        <div style={{ display: 'flex', gap: 2, marginTop: 2, paddingRight: 2 }}>
+          {onRewind && <RewindBtn onClick={() => onRewind(msg)} />}
+          <CopyBtn text={text} />
         </div>
       </div>
     );
   }
 
+  const answer = textOf(msg);
   return (
-    <div style={{ display: 'flex', justifyContent: 'flex-start', margin: '8px 0' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', margin: '8px 0' }}>
       <div style={{
         maxWidth: '92%', minWidth: 0, borderRadius: 14, borderBottomLeftRadius: 4, padding: '8px 12px',
         background: 'var(--glass, rgba(255,255,255,0.04))',
@@ -266,6 +322,11 @@ export default function ClaudeMessage({ msg }: { msg: RichMessage }) {
       }}>
         {msg.blocks.map(renderBlock)}
       </div>
+      {answer && (
+        <div style={{ display: 'flex', gap: 2, marginTop: 2, paddingLeft: 2 }}>
+          <CopyBtn text={answer} title="Скопировать ответ" />
+        </div>
+      )}
     </div>
   );
 }
