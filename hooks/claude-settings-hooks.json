@@ -1,5 +1,5 @@
 {
-  "_comment": "Add the 'hooks' section below to ~/.claude/settings.json on the server. Path must point to the actual location of nebulide-hook.sh",
+  "_comment": "REFERENCE ONLY — entrypoint.sh auto-merges these into /root/.claude/settings.json on container start (via jq). Path points to /app/hooks/nebulide-hook.sh inside the container.",
   "hooks": {
     "UserPromptSubmit": [
       {
@@ -7,7 +7,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/opt/nebulide/hooks/nebulide-hook.sh"
+            "command": "/app/hooks/nebulide-hook.sh"
           }
         ]
       }
@@ -18,7 +18,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/opt/nebulide/hooks/nebulide-hook.sh"
+            "command": "/app/hooks/nebulide-hook.sh"
           }
         ]
       }
@@ -29,7 +29,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/opt/nebulide/hooks/nebulide-hook.sh"
+            "command": "/app/hooks/nebulide-hook.sh"
           }
         ]
       }
@@ -40,7 +40,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/opt/nebulide/hooks/nebulide-hook.sh"
+            "command": "/app/hooks/nebulide-hook.sh"
           }
         ]
       }
@@ -51,7 +51,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/opt/nebulide/hooks/nebulide-hook.sh"
+            "command": "/app/hooks/nebulide-hook.sh"
           }
         ]
       }
@@ -62,7 +62,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/opt/nebulide/hooks/nebulide-hook.sh"
+            "command": "/app/hooks/nebulide-hook.sh"
           }
         ]
       }
@@ -73,7 +73,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/opt/nebulide/hooks/nebulide-hook.sh"
+            "command": "/app/hooks/nebulide-hook.sh"
           }
         ]
       }
@@ -84,7 +84,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/opt/nebulide/hooks/nebulide-hook.sh"
+            "command": "/app/hooks/nebulide-hook.sh"
           }
         ]
       }
@@ -95,7 +95,18 @@
         "hooks": [
           {
             "type": "command",
-            "command": "/opt/nebulide/hooks/nebulide-hook.sh"
+            "command": "/app/hooks/nebulide-hook.sh"
+          }
+        ]
+      }
+    ],
+    "Notification": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "/app/hooks/nebulide-hook.sh"
           }
         ]
       }

@@ -1,6 +1,6 @@
 FROM alpine:3.20
 
-RUN apk add --no-cache ca-certificates tzdata bash curl sudo util-linux libreoffice
+RUN apk add --no-cache ca-certificates tzdata bash curl sudo util-linux libreoffice jq
 
 # Install Node.js, Python, Git, SSH (required for Claude Code CLI + git ops)
 RUN apk add --no-cache nodejs npm git openssh-client python3 py3-pip postgresql-client
@@ -15,6 +15,11 @@ COPY backend/nebulide .
 
 # Copy pre-built frontend
 COPY frontend/dist ./static
+
+# Claude Code hooks — signal permission/mode/working status to the backend
+# (registered into ~/.claude/settings.json by entrypoint.sh on startup)
+COPY hooks/nebulide-hook.sh /app/hooks/nebulide-hook.sh
+RUN chmod +x /app/hooks/nebulide-hook.sh
 
 # Entrypoint: auto-installs persisted packages on startup
 COPY entrypoint.sh /entrypoint.sh

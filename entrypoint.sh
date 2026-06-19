@@ -79,6 +79,31 @@ elif [ ! -e "$CLAUDE_JSON" ]; then
   echo "[entrypoint] Claude CLI config created."
 fi
 
+# Claude Code hooks — register nebulide-hook.sh for all events we consume
+# (permission banner, mode reconcile, working status) in root's settings.json.
+# Admin terminal runs as root → claude reads /root/.claude/settings.json.
+# Merge so existing keys (permissions, plugins, effortLevel) are preserved.
+CLAUDE_SETTINGS="/root/.claude/settings.json"
+HOOK_SCRIPT="/app/hooks/nebulide-hook.sh"
+if command -v jq >/dev/null 2>&1 && [ -f "$HOOK_SCRIPT" ]; then
+  mkdir -p /root/.claude
+  [ -f "$CLAUDE_SETTINGS" ] || echo '{}' > "$CLAUDE_SETTINGS"
+  HOOK_DEF=$(jq -n --arg cmd "$HOOK_SCRIPT" '[{matcher:"",hooks:[{type:"command",command:$cmd}]}]')
+  TMP_SETTINGS=$(mktemp)
+  if jq --argjson h "$HOOK_DEF" '
+        .hooks = ((.hooks // {}) + {
+          UserPromptSubmit: $h, PreToolUse: $h, PostToolUse: $h,
+          Stop: $h, SessionStart: $h, SessionEnd: $h,
+          Notification: $h, PermissionRequest: $h
+        })' "$CLAUDE_SETTINGS" > "$TMP_SETTINGS" 2>/dev/null; then
+    mv "$TMP_SETTINGS" "$CLAUDE_SETTINGS"
+    echo "[entrypoint] Claude Code hooks registered in $CLAUDE_SETTINGS"
+  else
+    rm -f "$TMP_SETTINGS"
+    echo "[entrypoint] WARN: failed to register Claude hooks"
+  fi
+fi
+
 # Persistent Python venv — admin workspace only
 VENV_DIR="$WORKSPACE/.venv"
 if [ ! -d "$VENV_DIR" ]; then

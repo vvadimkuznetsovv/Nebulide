@@ -7,7 +7,7 @@ import { onActivity } from '../../utils/activityBus';
 import ClaudeMessage from '../chat/ClaudeMessage';
 
 // "Чат" — тонкая обёртка над живым `claude` в PTY: лента из JSONL, действия → клавиши в PTY.
-type PermissionMode = 'default' | 'plan' | 'acceptEdits' | 'bypassPermissions';
+type PermissionMode = 'default' | 'acceptEdits' | 'plan' | 'auto' | 'dontAsk' | 'bypassPermissions';
 
 interface Props {
   instanceId: string;
@@ -31,14 +31,20 @@ function mergeMsgs(prev: RichMessage[], inc: RichMessage[]): RichMessage[] {
 
 const FONT_KEY = 'nebulide-agent-font-size';
 
-// Permission modes — shown as a footer label under the input, cycled by
-// click / Shift+Tab, colored per mode (classic Claude Code style).
-const MODES: { id: PermissionMode; label: string; color: string }[] = [
-  { id: 'default', label: 'Обычный', color: 'var(--text-muted)' },
-  { id: 'plan', label: 'План', color: 'var(--success)' },
-  { id: 'acceptEdits', label: 'Авто-правки', color: 'var(--accent-bright)' },
-  { id: 'bypassPermissions', label: 'Всё разрешено', color: 'var(--warning)' },
-];
+// Permission modes — shown as a footer label under the input, colored per mode.
+// Точный порядок Shift+Tab-цикла claude 2.1.x (выверено на сервере):
+// default → acceptEdits → plan → auto → default. bypassPermissions/dontAsk — вне цикла
+// (только через флаги), но могут прийти в hook permission_mode, поэтому есть в карте меток.
+const MODE_CYCLE: PermissionMode[] = ['default', 'acceptEdits', 'plan', 'auto'];
+
+const MODE_INFO: Record<PermissionMode, { label: string; color: string }> = {
+  default: { label: 'Обычный', color: 'var(--text-muted)' },
+  acceptEdits: { label: 'Авто-правки', color: 'var(--accent-bright)' },
+  plan: { label: 'План', color: 'var(--success)' },
+  auto: { label: 'Авто', color: 'var(--warning)' },
+  dontAsk: { label: 'Не спрашивать', color: 'var(--warning)' },
+  bypassPermissions: { label: 'Без ограничений', color: 'var(--danger)' },
+};
 
 function permSummary(input: unknown): string {
   if (input && typeof input === 'object') {
@@ -158,12 +164,18 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
     return onActivity((e) => {
       if ('instanceId' in e && e.instanceId !== instanceId) return;
       if (e.type === 'claude_hook') {
-        if (e.permissionMode) setMode(e.permissionMode as PermissionMode);
-        if (e.event === 'PreToolUse' || e.event === 'UserPromptSubmit') setStatus('working');
-        else if (e.event === 'Stop' || e.event === 'SessionEnd') { setStatus('ready'); setPerm(null); }
-        if (e.event === 'PermissionRequest' || e.event === 'Notification') {
+        if (e.permissionMode && e.permissionMode in MODE_INFO) setMode(e.permissionMode as PermissionMode);
+        // PermissionRequest несёт tool+input; Notification (permission_prompt) — без tool отсеиваем
+        // (это idle-уведомление, не запрос доступа).
+        if (e.event === 'PermissionRequest' || (e.event === 'Notification' && e.tool)) {
           setPillCollapsed(false);
           setPerm({ tool: e.tool || 'инструмент', input: e.toolInput });
+        } else if (e.event === 'PreToolUse' || e.event === 'UserPromptSubmit') {
+          setStatus('working');
+        } else if (e.event === 'PostToolUse') {
+          setPerm(null); // инструмент выполнился → доступ выдан, баннер убираем
+        } else if (e.event === 'Stop' || e.event === 'SessionEnd') {
+          setStatus('ready'); setPerm(null);
         }
         poll();
       } else if (e.type === 'terminal_streaming_start') {
@@ -271,11 +283,12 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
     setTimeout(() => poll(), 400);
   }, [sendKey, poll]);
 
-  // Сменить режим = Shift+Tab в реальный claude (циклит default→acceptEdits→plan…).
+  // Сменить режим = Shift+Tab в реальный claude (циклит default→acceptEdits→plan→auto).
+  // Оптимистично крутим метку в ТОМ ЖЕ порядке, что и claude; точный режим придёт по hook.
   const cycleMode = useCallback(() => {
     sendKey('\x1b[Z');
-    const i = MODES.findIndex(x => x.id === mode);
-    setMode(MODES[(i + 1) % MODES.length].id); // оптимистично; точный режим придёт по hook
+    const i = MODE_CYCLE.indexOf(mode);
+    setMode(MODE_CYCLE[(i + 1) % MODE_CYCLE.length]);
   }, [sendKey, mode]);
 
   const changeFont = useCallback((delta: number) => {
@@ -314,7 +327,7 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
   const visibleMessages = query.trim()
     ? messages.filter(m => messageText(m).includes(query.trim().toLowerCase()))
     : messages;
-  const modeInfo = MODES.find(x => x.id === mode) || MODES[0];
+  const modeInfo = MODE_INFO[mode] || MODE_INFO.default;
 
   return (
     <div ref={rootRef} style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', position: 'relative' }}>
