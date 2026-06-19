@@ -132,9 +132,12 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
       if (full) { setMessages(data.messages); return; }
       const cur = messagesRef.current;
       const first = data.messages[0];
-      const lastUuid = cur.length ? cur[cur.length - 1].uuid : '';
-      const known = new Set(cur.map(m => m.uuid));
-      if (cur.length > 0 && first.parent_uuid && lastUuid && first.parent_uuid !== lastUuid && !known.has(first.uuid)) {
+      // Игнорируем оптимистичные плейсхолдеры при rewind-детекции — иначе их uuid
+      // (optimistic-*) рвёт цепочку parent_uuid и вызывает лишний full-reload на каждой отправке.
+      const real = cur.filter(m => !m.uuid.startsWith('optimistic-'));
+      const lastUuid = real.length ? real[real.length - 1].uuid : '';
+      const known = new Set(real.map(m => m.uuid));
+      if (real.length > 0 && first.parent_uuid && lastUuid && first.parent_uuid !== lastUuid && !known.has(first.uuid)) {
         pollingRef.current = false;
         return poll(true);
       }

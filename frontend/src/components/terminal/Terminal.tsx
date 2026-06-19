@@ -171,6 +171,7 @@ export function sendToActiveTerminal(text: string): boolean {
  *  bracketed-paste markers (so multiline stays literal) then send Enter as a SEPARATE write
  *  after a short delay → reliable submit. */
 export async function submitPromptToTerminal(instanceId: string, text: string): Promise<boolean> {
+  getOrCreateSession(instanceId); // ensure WS/PTY exists even when xterm isn't mounted (chat mode)
   for (let i = 0; i < 50; i++) {
     const sess = sessions.get(instanceId);
     if (sess?.ws?.readyState === WebSocket.OPEN) {
@@ -189,6 +190,7 @@ export async function submitPromptToTerminal(instanceId: string, text: string): 
 
 /** Wait for a specific terminal instance WS to be ready, then send command + Enter */
 export async function sendCommandWhenReady(instanceId: string, command: string): Promise<boolean> {
+  getOrCreateSession(instanceId); // ensure WS/PTY exists even when xterm isn't mounted (chat mode)
   // Poll for up to 5 seconds
   for (let i = 0; i < 50; i++) {
     const sess = sessions.get(instanceId);
@@ -205,6 +207,7 @@ export async function sendCommandWhenReady(instanceId: string, command: string):
 
 /** Type command character-by-character for visual effect, then press Enter */
 export async function typeCommandInTerminal(instanceId: string, command: string): Promise<boolean> {
+  getOrCreateSession(instanceId); // ensure WS/PTY exists even when xterm isn't mounted (chat mode)
   // Poll for up to 5 seconds
   for (let i = 0; i < 50; i++) {
     const sess = sessions.get(instanceId);
