@@ -82,6 +82,11 @@ interface TermSession {
   workStatusCur: string;
   /** claude TUI присутствует на экране (загрузился) — для гейта отложенной отправки. */
   claudeAlive: boolean;
+  /** Текущий режim claude из экрана (default/acceptEdits/plan/auto). */
+  claudeMode: string;
+  /** Сырой rolling-буфер вывода (ANSI убран), независим от xterm → детект не ломается
+   *  при переключении видов. Держим хвост ~16КБ. */
+  rawTail: string;
 }
 
 const sessions = new Map<string, TermSession>();
@@ -113,69 +118,66 @@ export function focusTerminal(instanceId: string): void {
   sessions.get(instanceId)?.xterm.focus();
 }
 
-/** Scrape the live working line, e.g. "Caramelizing… (5s · ↑ 87 tokens · thought for 1s)".
- *  Prefer the variant WITH a token count (precise); the spinner-glyph fallback covers the
- *  first second before tokens appear. Anchored so chat content can't masquerade as status. */
-function extractWorkStatus(screen: string): string {
-  const withStats = screen.match(/([A-Za-z]+(?:…|\.\.\.)\s*\([^)]*tokens[^)]*\))/);
-  if (withStats) return withStats[1].replace(/\s+/g, ' ').trim().slice(0, 70);
-  const glyph = screen.match(/[✻✶✳✽✺✷✦✧·*]\s*([A-Za-z]+(?:…|\.\.\.)[^\n]*)/);
+// Strip ANSI/CSI so we can substring-scrape the raw output stream.
+const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '').replace(/\x1b[\]P][^\x07\x1b]*(?:\x07|\x1b\\)?/g, '');
+
+/** Scrape the live working line, e.g. "Caramelizing… (5s · ↑ 87 tokens)". Last match wins. */
+function extractWorkStatus(text: string): string {
+  const withStats = text.match(/([A-Za-z]+(?:…|\.\.\.)\s*\([^)]*tokens[^)]*\))/g);
+  if (withStats && withStats.length) return withStats[withStats.length - 1].replace(/\s+/g, ' ').trim().slice(0, 70);
+  const glyph = text.match(/[✻✶✳✽✺✷✦✧·*]\s*([A-Za-z]+(?:…|\.\.\.)[^\n]*)/);
   return glyph ? glyph[1].replace(/\s+/g, ' ').trim().slice(0, 50) : '';
 }
 
-/** Read the CURRENT visible xterm screen (not scrollback) as clean text. Scrolled-up chat
- *  content is excluded, so claude's reply text can't false-trigger the status detector. */
-function readVisibleScreen(session: TermSession): string {
-  const xterm = session.xterm;
-  const buf = xterm?.buffer?.active;
-  if (!buf) return '';
-  const rows = xterm.rows || 24;
-  const total = buf.length;
-  let out = '';
-  for (let y = Math.max(0, total - rows); y < total; y++) {
-    const line = buf.getLine(y);
-    if (line) out += line.translateToString(true) + '\n';
-  }
-  return out;
-}
+// Prompt-ready (idle) индикаторы нижней строки. В НЕ-default режимах "? for shortcuts"
+// заменяется на индикатор режима — поэтому idle = ЛЮБОЙ из них (иначе в acceptEdits/plan/
+// auto claude «никогда не idle» и стоп залипает). Заодно даёт текущий режим.
+const IDLE_MARKS: { s: string; mode: string }[] = [
+  { s: '? for shortcuts', mode: 'default' },
+  { s: 'accept edits on', mode: 'acceptEdits' },
+  { s: 'plan mode on', mode: 'plan' },
+  { s: 'auto mode on', mode: 'auto' },
+];
 
-/** Detect claude's CURRENT screen state PRECISELY (by word combinations, only from the
- *  visible screen — never from scrolled-up chat) and store it on the session. The chat view
- *  POLLS this state (getTerminalScreenState), so it's never lost on a remount/view switch.
- *  Markers verified on claude 2.1.175. Works without a mounted xterm. */
+/** Detect claude's CURRENT state from the raw rolling output buffer (session.rawTail) — это
+ *  НЕ зависит от xterm DOM, поэтому переключение видов (Terminal↔Chat) не ломает детект.
+ *  busy/idle по «последний маркер статус-строки побеждает» (claude перерисовывает её часто).
+ *  Чат-вью ПОЛЛИТ getTerminalScreenState → состояние не теряется. Выверено на claude 2.1.175. */
 function detectClaudeScreen(session: TermSession, instanceId: string) {
-  const screen = readVisibleScreen(session);
-  if (!screen) return;
-  const lines = screen.split('\n');
-  const tail = lines.slice(Math.max(0, lines.length - 8)).join('\n'); // нижняя строка статуса
+  const buf = session.rawTail;
+  if (!buf) return;
 
-  // Меню "как восстановить" — по СОЧЕТАНИЮ всех трёх пунктов (точно, не из контента чата).
-  session.resumeMenuShown = screen.includes('Resume from summary') && screen.includes('Resume full session') && /Don.?t ask me again/.test(screen);
+  // Меню "как восстановить" — по СОЧЕТАНИЮ всех трёх пунктов.
+  session.resumeMenuShown = buf.includes('Resume from summary') && buf.includes('Resume full session') && /Don.?t ask me again/.test(buf);
   if (session.resumeMenuShown) {
-    const m = screen.match(/This session is[^\n]*?tokens?\./);
+    const m = buf.match(/This session is[^\n]*?tokens?\./);
     session.resumeInfo = m ? m[0].trim() : '';
   }
-
-  // Permission-меню "Do you want to …?" + нумерованные Yes/No (точно по сочетанию).
-  session.permMenuShown = /Do you want to /.test(screen) && /1\.\s*Yes/.test(screen) && /3\.\s*No/.test(screen);
+  // Permission-меню "Do you want to …?" + нумерованные Yes/No.
+  session.permMenuShown = /Do you want to /.test(buf) && /1\.\s*Yes/.test(buf) && /3\.\s*No/.test(buf);
   if (session.permMenuShown) {
-    const q = screen.match(/Do you want to [^\n]*/);
-    session.permQuestion = q ? q[0].replace(/\s+/g, ' ').trim().slice(0, 90) : 'Разрешить действие?';
+    const q = buf.match(/Do you want to [^\n]*/g);
+    session.permQuestion = q ? q[q.length - 1].replace(/\s+/g, ' ').trim().slice(0, 90) : 'Разрешить действие?';
   }
 
-  // busy/idle — ТОЛЬКО из нижней строки статуса. Эмитим переходы (для pet), состояние храним.
-  const busyNow = tail.includes('esc to interrupt');
-  const idleNow = tail.includes('? for shortcuts');
-  if (busyNow) {
-    if (!session.claudeBusy) { session.claudeBusy = true; emitActivity({ type: 'terminal_busy', instanceId }); }
-    const s = extractWorkStatus(screen);
-    if (s) session.workStatusCur = s;
-  } else if (idleNow) {
-    if (session.claudeBusy) { session.claudeBusy = false; emitActivity({ type: 'terminal_idle', instanceId }); }
-    session.workStatusCur = '';
+  // busy vs idle — позиция последнего маркера в потоке.
+  const bi = buf.lastIndexOf('esc to interrupt');
+  let idleIdx = -1;
+  let idleMode = session.claudeMode;
+  for (const m of IDLE_MARKS) {
+    const idx = buf.lastIndexOf(m.s);
+    if (idx > idleIdx) { idleIdx = idx; idleMode = m.mode; }
   }
-  // claude TUI на экране = загрузился (есть статус-строка или меню).
-  session.claudeAlive = busyNow || idleNow || session.resumeMenuShown || session.permMenuShown;
+  if (bi >= 0 || idleIdx >= 0) {
+    session.claudeAlive = true;
+    const busyNow = bi > idleIdx;
+    if (busyNow && !session.claudeBusy) { session.claudeBusy = true; emitActivity({ type: 'terminal_busy', instanceId }); }
+    else if (!busyNow && session.claudeBusy) { session.claudeBusy = false; emitActivity({ type: 'terminal_idle', instanceId }); }
+    session.workStatusCur = busyNow ? extractWorkStatus(buf) : '';
+    if (!busyNow && idleIdx >= 0) session.claudeMode = idleMode; // режим виден только на prompt
+  } else if (session.resumeMenuShown || session.permMenuShown) {
+    session.claudeAlive = true;
+  }
 }
 
 /** Current claude screen state for an instance — polled by the chat view (reliable, never
@@ -186,6 +188,7 @@ export function getTerminalScreenState(instanceId: string) {
   return {
     alive: s.claudeAlive,
     busy: s.claudeBusy,
+    mode: s.claudeMode,
     resumeMenu: s.resumeMenuShown,
     resumeInfo: s.resumeInfo,
     permMenu: s.permMenuShown,
@@ -239,17 +242,40 @@ export async function submitPromptToTerminal(instanceId: string, text: string): 
   for (let i = 0; i < 50; i++) {
     const sess = sessions.get(instanceId);
     if (sess?.ws?.readyState === WebSocket.OPEN) {
-      await new Promise(r => setTimeout(r, 120));
+      await new Promise(r => setTimeout(r, 40));
       // bracketed paste: ESC[200~ <text> ESC[201~  — buffers text (incl. newlines) literally
       sess.ws.send(new TextEncoder().encode('\x1b[200~' + text + '\x1b[201~'));
       // separate Enter (after the paste settles) = submit, not newline
-      await new Promise(r => setTimeout(r, 60));
+      await new Promise(r => setTimeout(r, 40));
       sess.ws.send(new TextEncoder().encode('\r'));
+      verifySubmitted(instanceId, text); // фоном: если текст остался во вводе — дожать Enter
       return true;
     }
     await new Promise(r => setTimeout(r, 100));
   }
   return false;
+}
+
+/** Текущая строка ввода claude между линиями ───── (после '❯'). '' если поле пустое. */
+function currentInputLine(rawTail: string): string {
+  const matches = rawTail.match(/❯[^\n]*/g);
+  if (!matches || !matches.length) return '';
+  return matches[matches.length - 1].replace(/^❯\s?/, '').trim();
+}
+
+/** Проверка отправки: если введённый текст ВСЁ ЕЩЁ в поле ввода (не отправился — Enter
+ *  стал переносом / paste не сабмитнулся), дожимаем Enter. До 3 попыток. Фон, не блокирует. */
+async function verifySubmitted(instanceId: string, text: string): Promise<void> {
+  const probe = text.trim().slice(0, 24);
+  if (!probe) return;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await new Promise(r => setTimeout(r, 450));
+    const sess = sessions.get(instanceId);
+    if (!sess || sess.ws?.readyState !== WebSocket.OPEN) return;
+    const cur = currentInputLine(sess.rawTail);
+    if (!cur.includes(probe)) return; // поле очистилось → отправилось
+    sess.ws.send(new TextEncoder().encode('\r')); // остался текст → дожать Enter
+  }
 }
 
 /** Wait for a specific terminal instance WS to be ready, then send command + Enter */
@@ -346,6 +372,8 @@ function createXterm(instanceId: string): TermSession {
     permQuestion: '',
     workStatusCur: '',
     claudeAlive: false,
+    claudeMode: 'default',
+    rawTail: '',
   };
 
   const xterm = new XTerm({
@@ -565,12 +593,14 @@ async function connectWs(instanceId: string): Promise<void> {
         }
       }
       session.xterm.write(new Uint8Array(event.data));
+      session.rawTail = (session.rawTail + stripAnsi(new TextDecoder().decode(event.data))).slice(-16384);
       emitActivity({ type: 'terminal_data', instanceId, byteCount: event.data.byteLength });
     } else {
       if (event.data.length < 200 && (event.data.includes('\x1b[') || event.data.includes('1;2c'))) {
         log(`[Terminal] ws.onmessage id=${instanceId} bytes=${event.data.length} contains_escape_or_1;2c raw=${JSON.stringify(event.data).slice(0, 300)}`);
       }
       session.xterm.write(event.data);
+      session.rawTail = (session.rawTail + stripAnsi(event.data)).slice(-16384);
       emitActivity({ type: 'terminal_data', instanceId, byteCount: event.data.length });
     }
     // Sustained output detection: only substantial chunks (≥50 bytes) count.

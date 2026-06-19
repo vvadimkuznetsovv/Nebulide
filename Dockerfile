@@ -14,7 +14,8 @@ RUN npm install -g @anthropic-ai/claude-code@2.1.175
 RUN curl -fsSL https://pkgs.tailscale.com/stable/tailscale_1.98.4_amd64.tgz -o /tmp/ts.tgz \
     && tar -xzf /tmp/ts.tgz -C /tmp \
     && mv /tmp/tailscale_1.98.4_amd64/tailscale /tmp/tailscale_1.98.4_amd64/tailscaled /usr/local/bin/ \
-    && rm -rf /tmp/ts.tgz /tmp/tailscale_1.98.4_amd64
+    && rm -rf /tmp/ts.tgz /tmp/tailscale_1.98.4_amd64 \
+    && /usr/local/bin/tailscale version | head -1
 
 WORKDIR /app
 

@@ -5,6 +5,7 @@ import type { RichMessage } from '../../api/claudeSessions';
 import { sendToTerminal, submitPromptToTerminal, getTerminalScreenState } from './Terminal';
 import { onActivity } from '../../utils/activityBus';
 import { getSessionHint } from '../../utils/terminalViewMode';
+import { listFiles } from '../../api/files';
 import ClaudeMessage from '../chat/ClaudeMessage';
 
 // "Чат" — тонкая обёртка над живым `claude` в PTY: лента из JSONL, действия → клавиши в PTY.
@@ -29,6 +30,18 @@ const readyInstances = new Set<string>();
 const draftInputs = new Map<string, string>();
 const POLL_MS = 1200;
 const plainText = (m: RichMessage) => m.blocks.filter(b => b.kind === 'text').map(b => b.text || '').join('\n').trim();
+
+// Активное @-упоминание файла: последний '@' перед курсором, без пробелов после него,
+// и сам '@' в начале или после пробела. Возвращает позицию '@' и текст-запрос после него.
+function detectMention(value: string, cursor: number): { start: number; query: string } | null {
+  const head = value.slice(0, cursor);
+  const at = head.lastIndexOf('@');
+  if (at < 0) return null;
+  const between = head.slice(at + 1);
+  if (/\s/.test(between)) return null;
+  if (at > 0 && !/\s/.test(value[at - 1])) return null;
+  return { start: at, query: between };
+}
 
 function mergeMsgs(prev: RichMessage[], inc: RichMessage[]): RichMessage[] {
   if (!inc.length) return prev;
@@ -84,6 +97,10 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
   const [resumeMenu, setResumeMenu] = useState<{ info: string } | null>(null); // блокирующее меню "как восстановить"
   const [input, setInput] = useState(() => draftInputs.get(instanceId) || '');
   const [pillCollapsed, setPillCollapsed] = useState(false);
+  // @-упоминания файлов: автокомплит по дереву cwd
+  const [mention, setMention] = useState<{ start: number; query: string } | null>(null);
+  const [mentionFiles, setMentionFiles] = useState<{ name: string; is_dir: boolean }[]>([]);
+  const [mentionIdx, setMentionIdx] = useState(0);
   const [findOpen, setFindOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [fontPx, setFontPx] = useState(() => {
@@ -109,9 +126,12 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
 
   const cInit = tailCache.get(instanceId);
   const targetRef = useRef<{ project: string; sessionFile: string; offset: number; sessionId: string } | null>(
-    cInit ? { project: cInit.project, sessionFile: cInit.sessionFile, offset: cInit.offset, sessionId: cInit.sessionId } : null
+    // offset из кэша берём ТОЛЬКО если есть кэш-сообщения, иначе 0 — иначе восстановимся
+    // «в конце файла» без сообщений и чат будет пустым (хотя сессия полная).
+    cInit ? { project: cInit.project, sessionFile: cInit.sessionFile, offset: cInit.messages?.length ? cInit.offset : 0, sessionId: cInit.sessionId } : null
   );
   const pollingRef = useRef(false);
+  const emptyReloadRef = useRef(false); // один форс full-reload на сессию при offset>0 без сообщений
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
   // claude может ещё грузиться (~2-3с после запуска) — не теряем первое сообщение:
@@ -134,6 +154,14 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
   const poll = useCallback(async (full = false): Promise<void> => {
     const t = targetRef.current;
     if (!t || pollingRef.current) return;
+    // offset>0, но сообщений нет → закэшированный offset «съел» полную загрузку (чат пустой,
+    // хотя сессия полная). Принудительный full-reload подтянет активную ветку с offset=0.
+    // Гард: один раз на сессию (сбрасывается в reconcile) — чтобы не зациклить на реально
+    // пустой ветке.
+    if (!full && t.offset > 0 && messagesRef.current.length === 0 && !emptyReloadRef.current) {
+      emptyReloadRef.current = true;
+      return poll(true);
+    }
     pollingRef.current = true;
     try {
       const { data } = await tailClaudeSession(t.project, t.sessionFile, full ? 0 : t.offset);
@@ -181,6 +209,7 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
       const authoritative = !!data.session_id; // непустой = точная сессия из хука
       if (!cur) {
         targetRef.current = { project: data.project, sessionFile: data.session_file, offset: 0, sessionId: data.session_id || '' };
+        emptyReloadRef.current = false;
         setStatus('ready');
         poll(true);
       } else if (authoritative && data.session_id !== cur.sessionId) {
@@ -191,6 +220,7 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
         const keptOpt = messagesRef.current.filter(m => m.uuid.startsWith('optimistic-'));
         messagesRef.current = keptOpt; // синхронно, чтобы параллельный poll не подмешал старую сессию
         setMessages(keptOpt);
+        emptyReloadRef.current = false;
         setStatus('ready');
         poll(true);
       }
@@ -227,7 +257,7 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
   // ── Частый опрос ТЕКУЩЕГО состояния экрана claude (250мс). Надёжно — НЕ теряется при
   //    ремоунте/смене вида. Источник правды для стоп-кнопки, индикатора, resume/perm-меню. ──
   useEffect(() => {
-    const la = { busy: undefined as boolean | undefined, ws: '', resume: false, perm: false };
+    const la = { busy: undefined as boolean | undefined, ws: '', resume: false, perm: false, mode: '' };
     const tick = () => {
       const st = getTerminalScreenState(instanceId);
       if (!st) return;
@@ -236,6 +266,8 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
         const pend = pendingSendRef.current;
         if (pend && !st.resumeMenu && !st.permMenu) { pendingSendRef.current = null; submitPromptToTerminal(instanceId, pend); setTimeout(() => poll(), 600); }
       }
+      // Режим claude — из экрана (надёжно, не теряется при ремоунте/смене вида).
+      if (st.mode && st.mode !== la.mode) { la.mode = st.mode; setMode(st.mode as PermissionMode); }
       if (st.busy !== la.busy) { la.busy = st.busy; setStatus(st.busy ? 'working' : 'ready'); }
       const ws = st.busy ? st.workStatus : '';
       if (ws !== la.ws) { la.ws = ws; setWorkStatus(ws); }
@@ -296,6 +328,46 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
     if (input) draftInputs.set(instanceId, input); else draftInputs.delete(instanceId);
   }, [input, instanceId]);
 
+  // @-автокомплит: грузим файлы каталога (dir-часть запроса), фильтруем по name-части.
+  useEffect(() => {
+    if (!mention) { setMentionFiles([]); return; }
+    let alive = true;
+    const t = setTimeout(async () => {
+      const q = mention.query;
+      const slash = q.lastIndexOf('/');
+      const dir = slash >= 0 ? q.slice(0, slash) : '';
+      const namePart = (slash >= 0 ? q.slice(slash + 1) : q).toLowerCase();
+      const base = cwd ? (dir ? `${cwd}/${dir}` : cwd) : (dir || undefined);
+      try {
+        const { data } = await listFiles(base);
+        if (!alive) return;
+        const files = (data.files || [])
+          .filter(f => !namePart || f.name.toLowerCase().includes(namePart))
+          .sort((a, b) => Number(b.is_dir) - Number(a.is_dir) || a.name.localeCompare(b.name))
+          .slice(0, 8)
+          .map(f => ({ name: f.name, is_dir: f.is_dir }));
+        setMentionFiles(files);
+        setMentionIdx(0);
+      } catch { if (alive) setMentionFiles([]); }
+    }, 120);
+    return () => { alive = false; clearTimeout(t); };
+  }, [mention, cwd]);
+
+  // Вставить выбранный файл/папку вместо @-запроса. Папка → остаёмся в @-режиме (углубляемся).
+  const pickMention = useCallback((f: { name: string; is_dir: boolean }) => {
+    if (!mention) return;
+    const slash = mention.query.lastIndexOf('/');
+    const dirPrefix = slash >= 0 ? mention.query.slice(0, slash + 1) : '';
+    const inserted = '@' + dirPrefix + f.name + (f.is_dir ? '/' : ' ');
+    const before = input.slice(0, mention.start);
+    const after = input.slice(mention.start + 1 + mention.query.length);
+    const newVal = before + inserted + after;
+    setInput(newVal);
+    setMention(f.is_dir ? { start: mention.start, query: dirPrefix + f.name + '/' } : null);
+    const pos = (before + inserted).length;
+    setTimeout(() => { const ta = taRef.current; if (ta) { ta.focus(); ta.setSelectionRange(pos, pos); } }, 0);
+  }, [input, mention]);
+
   // Direction-based: scrolling DOWN opens the input (even mid-history), scrolling
   // UP closes it; pinned fully open at the very bottom. Self-induced scroll (the
   // resize clamp) is ignored so it can't feed back into a jitter loop.
@@ -338,6 +410,7 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
     const text = input.trim();
     if (!text) return;
     setInput('');
+    setMention(null);
     stick.current = true;
     // Оптимистично показываем СВОЁ сообщение сразу — реальное из JSONL дедуплицирует его
     // (mergeMsgs). Статус 'working' НЕ ставим оптимистично — он придёт из чтения экрана
@@ -558,22 +631,43 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
               onClick={() => { if (!pillRef.current.moved) sendKey('\x1b'); }}
               style={{ position: 'absolute', right: 8, bottom: 'calc(100% + 6px)', zIndex: 6, width: 38, height: 38, borderRadius: 10,
                 display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', touchAction: 'pan-y',
-                background: 'rgba(255,40,40,0.16)', border: '1px solid rgba(255,40,40,0.6)' }}>
-              <svg width="30" height="30" viewBox="0 0 24 24" fill="#ff2424"><rect x="3" y="3" width="18" height="18" rx="2.5" /></svg>
+                background: 'rgba(var(--danger-rgb),0.22)', border: '1px solid rgba(var(--danger-rgb),0.5)', color: 'var(--danger)' }}>
+              <svg width="30" height="30" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="18" height="18" rx="2.5" /></svg>
             </button>
           )
+        )}
+        {/* @-автокомплит файлов */}
+        {mention && mentionFiles.length > 0 && (
+          <div style={{ position: 'absolute', left: 8, right: 8, bottom: 'calc(100% + 4px)', zIndex: 8, maxHeight: 220, overflowY: 'auto', borderRadius: 10, background: 'rgba(10,2,16,0.97)', border: '1px solid var(--glass-border)', boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }}>
+            {mentionFiles.map((f, i) => (
+              <div key={f.name} onMouseDown={(e) => { e.preventDefault(); pickMention(f); }}
+                style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', fontSize: 12.5, cursor: 'pointer', background: i === mentionIdx ? 'rgba(var(--accent-rgb),0.2)' : 'transparent', color: 'var(--text-primary)' }}>
+                <span style={{ flexShrink: 0 }}>{f.is_dir ? '📁' : '📄'}</span>
+                <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}{f.is_dir ? '/' : ''}</span>
+              </div>
+            ))}
+          </div>
         )}
         <textarea
           ref={taRef}
           className="agent-input"
           value={input}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(e) => {
+            setInput(e.target.value);
+            setMention(detectMention(e.target.value, e.target.selectionStart ?? e.target.value.length));
+          }}
           onFocus={expandComposer}
           onKeyDown={(e) => {
+            if (mention && mentionFiles.length) {
+              if (e.key === 'ArrowDown') { e.preventDefault(); setMentionIdx(i => Math.min(i + 1, mentionFiles.length - 1)); return; }
+              if (e.key === 'ArrowUp') { e.preventDefault(); setMentionIdx(i => Math.max(i - 1, 0)); return; }
+              if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); pickMention(mentionFiles[mentionIdx]); return; }
+              if (e.key === 'Escape') { e.preventDefault(); setMention(null); return; }
+            }
             if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendUser(); }
             else if (e.key === 'Tab' && e.shiftKey) { e.preventDefault(); cycleMode(); }
           }}
-          placeholder="Сообщение для Claude…"
+          placeholder="Сообщение для Claude… (@ — файл)"
           rows={1}
           style={{ flex: 1, resize: 'none', minHeight: 38, padding: '9px 12px', borderRadius: 10, fontSize: 13, fontFamily: 'inherit', lineHeight: 1.4, background: 'rgba(var(--accent-rgb),0.06)', border: '1px solid var(--glass-border)', color: 'var(--text-primary)', outline: 'none' }}
         />
