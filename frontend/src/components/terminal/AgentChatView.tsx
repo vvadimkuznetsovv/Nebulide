@@ -79,6 +79,7 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
   const [mode, setMode] = useState<PermissionMode>('default');
   const [status, setStatus] = useState<'connecting' | 'ready' | 'working' | 'error' | 'closed'>('connecting');
   const [workStatus, setWorkStatus] = useState(''); // живой статус из экрана: "Caramelizing… (5s · ↑ 87 tokens)"
+  const [resumeMenu, setResumeMenu] = useState<{ info: string } | null>(null); // блокирующее меню "как восстановить"
   const [input, setInput] = useState('');
   const [pillCollapsed, setPillCollapsed] = useState(false);
   const [findOpen, setFindOpen] = useState(false);
@@ -221,15 +222,18 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
           setStatus('ready'); setPerm(null); setWorkStatus('');
         }
         poll();
+      } else if (e.type === 'terminal_resume_menu') {
+        // claude --resume показал блокирующее меню «как восстановить» → оборачиваем картой
+        setResumeMenu({ info: e.info || '' });
       } else if (e.type === 'terminal_busy') {
         // claude реально начал работать (экран: "esc to interrupt") → показываем стоп
-        setStatus('working');
+        setStatus('working'); setResumeMenu(null);
       } else if (e.type === 'terminal_progress') {
         // живой статус из экрана (гердунд + токены + время) — видно, что думает, а не висит
         setWorkStatus(e.status);
       } else if (e.type === 'terminal_idle') {
         // claude закончил (экран: "? for shortcuts") → прячем стоп, дотягиваем ленту
-        setStatus('ready'); setWorkStatus(''); poll();
+        setStatus('ready'); setWorkStatus(''); setResumeMenu(null); poll();
       } else if (e.type === 'terminal_streaming_start') {
         setStatus('working');
       } else if (e.type === 'terminal_streaming_end') {
@@ -356,6 +360,13 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
     setTimeout(() => poll(), 400);
   }, [sendKey, poll]);
 
+  // Ответ на меню "как восстановить" (claude --resume): 1=из сводки, 2=полностью, 3=не спрашивать.
+  const resumeChoose = useCallback((digit: '1' | '2' | '3') => {
+    sendKey(digit);
+    setResumeMenu(null);
+    setTimeout(() => poll(), 500);
+  }, [sendKey, poll]);
+
   // Сменить режим = Shift+Tab в реальный claude (циклит default→acceptEdits→plan→auto).
   // Оптимистично крутим метку в ТОМ ЖЕ порядке, что и claude; точный режим придёт по hook.
   const cycleMode = useCallback(() => {
@@ -446,6 +457,21 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
           </div>
         )}
         {visibleMessages.map(m => <ClaudeMessage key={m.uuid} msg={m} onRewind={onRewind} />)}
+
+        {/* Меню "как восстановить" (claude --resume сжатой сессии) — обёрнуто картой */}
+        {!query && resumeMenu && (
+          <div style={{ margin: '10px 0', borderRadius: 12, overflow: 'hidden', border: '1px solid rgba(var(--accent-rgb),0.45)', background: 'rgba(var(--accent-rgb),0.1)' }}>
+            <div style={{ padding: '10px 12px' }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', marginBottom: 4 }}>Восстановить чат</div>
+              {resumeMenu.info && <div style={{ fontSize: 11.5, color: 'var(--text-muted)', lineHeight: 1.4 }}>{resumeMenu.info}</div>}
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', padding: '10px 12px', borderTop: '1px solid var(--glass-border)' }}>
+              <button type="button" onClick={() => resumeChoose('1')} style={pbtn('rgba(var(--accent-rgb),0.18)', 'rgba(var(--accent-rgb),0.4)', 'var(--accent-bright)')}>Из сводки (реком.)</button>
+              <button type="button" onClick={() => resumeChoose('2')} style={pbtn('rgba(255,255,255,0.06)', 'var(--glass-border)', 'var(--text-secondary)')}>Полностью как есть</button>
+              <button type="button" onClick={() => resumeChoose('3')} style={pbtn('rgba(255,255,255,0.04)', 'var(--glass-border)', 'var(--text-muted)')}>Не спрашивать</button>
+            </div>
+          </div>
+        )}
 
         {/* (4) permission lives in the conversation flow — never overlays the input */}
         {!query && perm && (

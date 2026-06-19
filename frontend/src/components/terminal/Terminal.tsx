@@ -74,6 +74,8 @@ interface TermSession {
   /** Throttle + dedupe for scraped live work status (gerund + tokens + time). */
   lastProgressAt: number;
   lastProgressText: string;
+  /** Whether the blocking "how to resume" menu is currently on screen. */
+  resumeMenuShown: boolean;
 }
 
 const sessions = new Map<string, TermSession>();
@@ -105,39 +107,77 @@ export function focusTerminal(instanceId: string): void {
   sessions.get(instanceId)?.xterm.focus();
 }
 
-// Strip ANSI/CSI so we can substring-scrape the visible status text.
-const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '').replace(/\x1b[\]P][^\x07\x1b]*(?:\x07|\x1b\\)?/g, '');
-
 /** Scrape the live working line, e.g. "Caramelizing… (5s · ↑ 87 tokens · thought for 1s)".
- *  Spinner glyph + gerund + optional parenthetical with elapsed/tokens. Best-effort —
- *  format is claude's internal UI (may change between versions), so guarded + capped. */
-function extractWorkStatus(raw: string): string {
-  const clean = stripAnsi(raw);
-  const withStats = clean.match(/([A-Za-z]+(?:…|\.\.\.)\s*\([^)]*tokens[^)]*\))/);
+ *  Prefer the variant WITH a token count (precise); the spinner-glyph fallback covers the
+ *  first second before tokens appear. Anchored so chat content can't masquerade as status. */
+function extractWorkStatus(screen: string): string {
+  const withStats = screen.match(/([A-Za-z]+(?:…|\.\.\.)\s*\([^)]*tokens[^)]*\))/);
   if (withStats) return withStats[1].replace(/\s+/g, ' ').trim().slice(0, 70);
-  const gerund = clean.match(/([A-Za-z]+(?:…|\.\.\.))/);
-  return gerund ? gerund[1].trim().slice(0, 40) : '';
+  const glyph = screen.match(/[✻✶✳✽✺✷✦✧·*]\s*([A-Za-z]+(?:…|\.\.\.)[^\n]*)/);
+  return glyph ? glyph[1].replace(/\s+/g, ' ').trim().slice(0, 50) : '';
 }
 
-/** Detect whether claude is working from the PTY screen status line: it shows
- *  "esc to interrupt" while busy and "? for shortcuts" when idle/ready. Emits
- *  terminal_busy/terminal_idle on transitions, plus throttled terminal_progress with
- *  the live status (markers verified on claude 2.1.175). Works without a mounted xterm. */
-function detectClaudeState(session: TermSession, instanceId: string, text: string) {
-  if (text.includes('esc to interrupt')) {
+/** Read the CURRENT visible xterm screen (not scrollback) as clean text. Scrolled-up chat
+ *  content is excluded, so claude's reply text can't false-trigger the status detector. */
+function readVisibleScreen(session: TermSession): string {
+  const xterm = session.xterm;
+  const buf = xterm?.buffer?.active;
+  if (!buf) return '';
+  const rows = xterm.rows || 24;
+  const total = buf.length;
+  let out = '';
+  for (let y = Math.max(0, total - rows); y < total; y++) {
+    const line = buf.getLine(y);
+    if (line) out += line.translateToString(true) + '\n';
+  }
+  return out;
+}
+
+/** Detect claude's screen state PRECISELY (by word combinations, only from the visible
+ *  screen — never from scrolled-up chat). Emits terminal_busy/idle/progress/resume_menu.
+ *  Markers verified on claude 2.1.175. Works without a mounted xterm. */
+function detectClaudeScreen(session: TermSession, instanceId: string) {
+  const screen = readVisibleScreen(session);
+  if (!screen) return;
+  // Нижняя строка статуса (последние строки) — busy/idle берём ТОЛЬКО отсюда.
+  const lines = screen.split('\n');
+  const tail = lines.slice(Math.max(0, lines.length - 7)).join('\n');
+
+  // Блокирующее меню "как восстановить" — по СОЧЕТАНИЮ всех трёх пунктов (точно, не из чата).
+  if (screen.includes('Resume from summary') && screen.includes('Resume full session') && /Don.?t ask me again/.test(screen)) {
+    if (!session.resumeMenuShown) {
+      session.resumeMenuShown = true;
+      const m = screen.match(/This session is[^\n]*?tokens?\./);
+      emitActivity({ type: 'terminal_resume_menu', instanceId, info: m ? m[0].trim() : '' });
+    }
+    return; // claude заблокирован на меню — не busy и не idle
+  }
+  session.resumeMenuShown = false;
+
+  if (tail.includes('esc to interrupt')) {
     if (!session.claudeBusy) { session.claudeBusy = true; emitActivity({ type: 'terminal_busy', instanceId }); }
     const now = Date.now();
-    if (now - session.lastProgressAt > 350) {
-      const status = extractWorkStatus(text);
+    if (now - session.lastProgressAt > 300) {
+      const status = extractWorkStatus(screen);
       if (status && status !== session.lastProgressText) {
         session.lastProgressAt = now;
         session.lastProgressText = status;
         emitActivity({ type: 'terminal_progress', instanceId, status });
       }
     }
-  } else if (text.includes('? for shortcuts')) {
+  } else if (tail.includes('? for shortcuts')) {
     if (session.claudeBusy) { session.claudeBusy = false; session.lastProgressText = ''; emitActivity({ type: 'terminal_idle', instanceId }); }
   }
+}
+
+// Частый скан экрана всех сессий (каждые 300мс) — ловит ТЕКУЩЕЕ состояние независимо от
+// тайминга чанков, и работает без смонтированного xterm. Стартует лениво при первой сессии.
+let screenScanTimer = 0;
+function ensureScreenScan() {
+  if (screenScanTimer) return;
+  screenScanTimer = window.setInterval(() => {
+    for (const [id, sess] of sessions.entries()) detectClaudeScreen(sess, id);
+  }, 300);
 }
 
 /** Send text to a specific terminal by instanceId. */
@@ -276,6 +316,7 @@ function createXterm(instanceId: string): TermSession {
     claudeBusy: false,
     lastProgressAt: 0,
     lastProgressText: '',
+    resumeMenuShown: false,
   };
 
   const xterm = new XTerm({
@@ -495,14 +536,12 @@ async function connectWs(instanceId: string): Promise<void> {
         }
       }
       session.xterm.write(new Uint8Array(event.data));
-      detectClaudeState(session, instanceId, new TextDecoder().decode(event.data));
       emitActivity({ type: 'terminal_data', instanceId, byteCount: event.data.byteLength });
     } else {
       if (event.data.length < 200 && (event.data.includes('\x1b[') || event.data.includes('1;2c'))) {
         log(`[Terminal] ws.onmessage id=${instanceId} bytes=${event.data.length} contains_escape_or_1;2c raw=${JSON.stringify(event.data).slice(0, 300)}`);
       }
       session.xterm.write(event.data);
-      detectClaudeState(session, instanceId, event.data);
       emitActivity({ type: 'terminal_data', instanceId, byteCount: event.data.length });
     }
     // Sustained output detection: only substantial chunks (≥50 bytes) count.
@@ -602,6 +641,7 @@ function forceReconnect(instanceId: string): void {
 }
 
 function getOrCreateSession(instanceId: string): TermSession {
+  ensureScreenScan(); // частый скан экрана для детекта busy/idle/resume-menu
   let session = sessions.get(instanceId);
   if (!session) {
     session = createXterm(instanceId);

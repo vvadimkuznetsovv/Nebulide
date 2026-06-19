@@ -14,6 +14,8 @@ export type ActivityEvent =
   | { type: 'terminal_idle'; instanceId: string }
   // Live working status scraped from the PTY (e.g. "Caramelizing… (5s · ↑ 87 tokens)")
   | { type: 'terminal_progress'; instanceId: string; status: string }
+  // claude --resume на сжатой сессии показал блокирующее меню «как восстановить»
+  | { type: 'terminal_resume_menu'; instanceId: string; info?: string }
   | { type: 'terminal_prompt_submit'; instanceId: string; text: string }
   | { type: 'claude_launched'; instanceId: string }
   | { type: 'claude_stream_start'; sessionId: string; sessionTitle?: string }
