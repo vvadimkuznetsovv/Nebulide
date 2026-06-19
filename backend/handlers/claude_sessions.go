@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -50,8 +51,16 @@ func (h *ClaudeSessionsHandler) claudeBaseDir() string {
 
 // workspaceSlug converts a workspace path to Claude's project slug format.
 // /home/nebulide/workspace → -home-nebulide-workspace
+// Claude Code names its project dirs by replacing EVERY non-alphanumeric char
+// with '-' (not just '/'). Example: "/home/nebulide/workspace/.nebulide_chats"
+// → "-home-nebulide-workspace--nebulide-chats". The old version replaced only
+// '/', so any cwd containing '.', '_', space, etc. mapped to a NON-EXISTENT dir
+// → the session JSONL was never found → fallback grabbed another terminal's
+// newest session (wrong history). Must match Claude's slugification exactly.
+var slugNonAlnumRe = regexp.MustCompile(`[^a-zA-Z0-9]`)
+
 func workspaceSlug(wsPath string) string {
-	return strings.ReplaceAll(filepath.ToSlash(wsPath), "/", "-")
+	return slugNonAlnumRe.ReplaceAllString(filepath.ToSlash(wsPath), "-")
 }
 
 // slugToPath tries to convert a Claude project slug back to a filesystem path.
@@ -1215,7 +1224,12 @@ func (h *ClaudeSessionsHandler) ResolveLive(c *gin.Context) {
 	wsSlug := h.userWorkspaceSlug(c)
 	projectsDir := filepath.Join(h.claudeBaseDir(), "projects")
 
-	respond := func(project, sessionFile, sessionID, cwd string) {
+	hookSid, hookCwd, hookOk := GetLiveSession(instanceID)
+	log.Printf("[ResolveLive] instance=%s cwd=%q hint=%s wsSlug=%s hook(ok=%v sid=%s cwd=%q)",
+		instanceID, cwdHint, sessionHint, wsSlug, hookOk, hookSid, hookCwd)
+
+	respond := func(tier, project, sessionFile, sessionID, cwd string) {
+		log.Printf("[ResolveLive] → %s project=%s file=%s sid=%s", tier, project, sessionFile, sessionID)
 		c.JSON(http.StatusOK, gin.H{
 			"project":      project,
 			"session_file": sessionFile,
@@ -1225,17 +1239,15 @@ func (h *ClaudeSessionsHandler) ResolveLive(c *gin.Context) {
 		})
 	}
 
-	// 1) Hook-tracked exact session.
-	if instanceID != "" {
-		if sid, cwd, ok := GetLiveSession(instanceID); ok && sid != "" {
-			slug := workspaceSlug(cwd)
-			if cwd != "" && matchesWorkspace(slug, wsSlug) {
-				if file := sessionFileBySessionID(filepath.Join(projectsDir, slug), sid); file != "" {
-					respond(slug, file, sid, cwd)
-					return
-				}
-			}
+	// 1) Hook-tracked exact session (authoritative — instance match is proof, so
+	// NOT gated by matchesWorkspace: the hook reported this instance's real session).
+	if hookOk && hookSid != "" && hookCwd != "" {
+		slug := workspaceSlug(hookCwd)
+		if file := sessionFileBySessionID(filepath.Join(projectsDir, slug), hookSid); file != "" {
+			respond("tier1-hook", slug, file, hookSid, hookCwd)
+			return
 		}
+		log.Printf("[ResolveLive] tier1 miss: dir=%s sid=%s not found on disk", slug, hookSid)
 	}
 
 	// 1.5) Explicit sessionId hint (opened via --resume) — exact session, before
@@ -1244,20 +1256,19 @@ func (h *ClaudeSessionsHandler) ResolveLive(c *gin.Context) {
 	if sessionHint != "" {
 		if cwdHint != "" {
 			slug := workspaceSlug(cwdHint)
-			if matchesWorkspace(slug, wsSlug) {
-				if file := sessionFileBySessionID(filepath.Join(projectsDir, slug), sessionHint); file != "" {
-					respond(slug, file, sessionHint, cwdHint)
-					return
-				}
+			if file := sessionFileBySessionID(filepath.Join(projectsDir, slug), sessionHint); file != "" {
+				respond("tier1.5-hint", slug, file, sessionHint, cwdHint)
+				return
 			}
 		}
+		// scan every project dir for the exact hinted session id (explicit = authoritative)
 		if entries, err := os.ReadDir(projectsDir); err == nil {
 			for _, e := range entries {
-				if !e.IsDir() || !matchesWorkspace(e.Name(), wsSlug) {
+				if !e.IsDir() {
 					continue
 				}
 				if file := sessionFileBySessionID(filepath.Join(projectsDir, e.Name()), sessionHint); file != "" {
-					respond(e.Name(), file, sessionHint, cwdHint)
+					respond("tier1.5-hint-scan", e.Name(), file, sessionHint, cwdHint)
 					return
 				}
 			}
@@ -1269,7 +1280,7 @@ func (h *ClaudeSessionsHandler) ResolveLive(c *gin.Context) {
 		slug := workspaceSlug(cwdHint)
 		if matchesWorkspace(slug, wsSlug) {
 			if file, _ := newestJSONLInDir(filepath.Join(projectsDir, slug)); file != "" {
-				respond(slug, file, "", cwdHint)
+				respond("tier2-cwd", slug, file, "", cwdHint)
 				return
 			}
 		}
@@ -1289,11 +1300,12 @@ func (h *ClaudeSessionsHandler) ResolveLive(c *gin.Context) {
 			}
 		}
 		if bestFile != "" {
-			respond(bestProj, bestFile, "", "")
+			respond("tier3-newest", bestProj, bestFile, "", "")
 			return
 		}
 	}
 
+	log.Printf("[ResolveLive] → NOT FOUND instance=%s", instanceID)
 	c.JSON(http.StatusNotFound, gin.H{"error": "No live session found"})
 }
 
