@@ -164,6 +164,17 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
     return onActivity((e) => {
       if ('instanceId' in e && e.instanceId !== instanceId) return;
       if (e.type === 'claude_hook') {
+        // Хук авторитетен для сессии ИМЕННО этого instanceId. Если резолв подтянул
+        // другую (слабый фолбэк cwd/новейший взял сессию соседнего терминала) —
+        // сбрасываем кэш; интервал ре-резолва (≤2s) подтянет правильную через
+        // tier-1 (карта хуков instanceId→session уже наполнена этим же событием).
+        if (e.sessionId && targetRef.current?.sessionId && e.sessionId !== targetRef.current.sessionId) {
+          targetRef.current = null;
+          tailCache.delete(instanceId);
+          setMessages([]);
+          setStatus('connecting');
+          return;
+        }
         if (e.permissionMode && e.permissionMode in MODE_INFO) setMode(e.permissionMode as PermissionMode);
         // PermissionRequest несёт tool+input; Notification (permission_prompt) — без tool отсеиваем
         // (это idle-уведомление, не запрос доступа).
