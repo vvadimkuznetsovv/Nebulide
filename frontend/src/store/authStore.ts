@@ -7,6 +7,7 @@ interface User {
   totp_enabled: boolean;
   is_admin?: boolean;
   telegram_id?: number;
+  notify_telegram?: boolean;
   shared_dir?: string;
   workspace_dir?: string;
 }

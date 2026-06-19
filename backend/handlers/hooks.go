@@ -5,14 +5,18 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 
 	"nebulide/config"
 	"nebulide/database"
+	"nebulide/models"
 	"nebulide/utils"
 )
 
@@ -146,5 +150,55 @@ func (h *HookHandler) HandleClaudeHook(c *gin.Context) {
 		database.RDB.Publish(context.Background(), channel, string(data))
 	}
 
+	// Opt-in Telegram notification: claude finished a turn or needs the user.
+	switch event.Event {
+	case "Stop", "SessionEnd", "Notification", "PermissionRequest":
+		h.maybeNotifyTelegram(claims.UserID, event.Event)
+	}
+
 	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+// Per-user debounce so rapid turns don't flood Telegram.
+var (
+	tgNotifyMu   sync.Mutex
+	tgNotifyLast = map[string]time.Time{}
+)
+
+// maybeNotifyTelegram pings the user in Telegram (if they opted in and linked an account)
+// when claude finishes or waits. Debounced per user. Fire-and-forget.
+func (h *HookHandler) maybeNotifyTelegram(userID uuid.UUID, event string) {
+	if h.cfg.TelegramBotToken == "" {
+		return
+	}
+	var user models.User
+	if err := database.DB.First(&user, "id = ?", userID).Error; err != nil {
+		return
+	}
+	if !user.NotifyTelegram || user.TelegramID == 0 {
+		return
+	}
+	tgNotifyMu.Lock()
+	if time.Since(tgNotifyLast[userID.String()]) < 15*time.Second {
+		tgNotifyMu.Unlock()
+		return
+	}
+	tgNotifyLast[userID.String()] = time.Now()
+	tgNotifyMu.Unlock()
+
+	text := "⏳ Claude ждёт тебя — нужен ответ"
+	if event == "Stop" || event == "SessionEnd" {
+		text = "✅ Claude закончил — твой ход"
+	}
+	go sendTelegramMessage(h.cfg.TelegramBotToken, user.TelegramID, text)
+}
+
+func sendTelegramMessage(token string, chatID int64, text string) {
+	form := url.Values{}
+	form.Set("chat_id", strconv.FormatInt(chatID, 10))
+	form.Set("text", text)
+	client := &http.Client{Timeout: 5 * time.Second}
+	if resp, err := client.PostForm("https://api.telegram.org/bot"+token+"/sendMessage", form); err == nil {
+		resp.Body.Close()
+	}
 }

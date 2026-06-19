@@ -4,7 +4,7 @@ import { useAuthStore } from '../../store/authStore';
 import { useLayoutStore } from '../../store/layoutStore';
 import { useWorkspaceStore } from '../../store/workspaceStore';
 import { useWorkspaceSessionStore } from '../../store/workspaceSessionStore';
-import { logout, totpSetup, totpConfirm, changePassword, updateTelegramId } from '../../api/auth';
+import { logout, totpSetup, totpConfirm, changePassword, updateTelegramId, updateNotifyTelegram } from '../../api/auth';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { QRCodeSVG } from 'qrcode.react';
@@ -291,6 +291,40 @@ function SettingsModal({ onClose }: { onClose: () => void }) {
                     {tgIdLoading ? 'Saving...' : 'Save'}
                   </button>
                 </div>
+              </div>
+
+              <div className="glass-divider" />
+
+              {/* Telegram notifications toggle — opt-in, off by default, persisted */}
+              <div>
+                <label className="block text-xs font-semibold mb-3 uppercase tracking-wider" style={{ color: 'var(--text-muted)', fontSize: '11px', letterSpacing: '0.1em' }}>
+                  Уведомления
+                </label>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    const next = !user?.notify_telegram;
+                    try {
+                      await updateNotifyTelegram(next);
+                      if (user) setUser({ ...user, notify_telegram: next });
+                    } catch {
+                      toast.error('Не удалось сохранить');
+                    }
+                  }}
+                  className="w-full flex items-center justify-between gap-3 rounded-xl"
+                  style={{ padding: '11px 12px', background: 'rgba(0,0,0,0.35)', border: '1px solid var(--glass-border)', cursor: 'pointer' }}
+                >
+                  <span style={{ textAlign: 'left', fontSize: '12.5px', color: 'var(--text-secondary)', lineHeight: 1.35 }}>
+                    Telegram, когда Claude закончил / ждёт ответа
+                  </span>
+                  <span style={{ flexShrink: 0, width: 38, height: 22, borderRadius: 11, position: 'relative', transition: 'background 0.2s',
+                    background: user?.notify_telegram ? 'var(--accent)' : 'rgba(255,255,255,0.12)' }}>
+                    <span style={{ position: 'absolute', top: 2, left: user?.notify_telegram ? 18 : 2, width: 18, height: 18, borderRadius: '50%', background: '#fff', transition: 'left 0.2s' }} />
+                  </span>
+                </button>
+                <p style={{ color: 'var(--text-muted)', fontSize: '11px', lineHeight: 1.4, marginTop: 8 }}>
+                  Нужен указанный выше Telegram ID. По умолчанию выключено.
+                </p>
               </div>
 
               <div className="glass-divider" />

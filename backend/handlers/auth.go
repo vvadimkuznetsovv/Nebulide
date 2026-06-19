@@ -309,6 +309,7 @@ func (h *AuthHandler) userResponse(u models.User) gin.H {
 		"is_admin":      u.IsAdmin,
 		"totp_enabled":  u.TOTPEnabled,
 		"telegram_id":   u.TelegramID,
+		"notify_telegram": u.NotifyTelegram,
 		"shared_dir":    h.cfg.SharedDir,
 		"workspace_dir": h.userWorkspaceDir(u),
 	}
@@ -322,6 +323,25 @@ func (h *AuthHandler) Me(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, h.userResponse(user))
+}
+
+type notifyTelegramRequest struct {
+	Enabled bool `json:"enabled"`
+}
+
+// UpdateNotifyTelegram toggles the opt-in "notify me in Telegram when claude finishes/waits".
+func (h *AuthHandler) UpdateNotifyTelegram(c *gin.Context) {
+	userID, _ := c.Get("user_id")
+	var req notifyTelegramRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON"})
+		return
+	}
+	if err := database.DB.Model(&models.User{}).Where("id = ?", userID).Update("notify_telegram", req.Enabled).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "update failed"})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"notify_telegram": req.Enabled})
 }
 
 func (h *AuthHandler) UpdateTelegramID(c *gin.Context) {

@@ -132,6 +132,7 @@ func main() {
 		protected.POST("/auth/totp-confirm", authHandler.TOTPConfirm)
 		protected.POST("/auth/change-password", authHandler.ChangePassword)
 		protected.PUT("/auth/telegram-id", authHandler.UpdateTelegramID)
+		protected.POST("/auth/notify-telegram", authHandler.UpdateNotifyTelegram)
 		protected.GET("/auth/theme", authHandler.GetTheme)
 		protected.PUT("/auth/theme", authHandler.UpdateTheme)
 		protected.GET("/auth/preferences", authHandler.GetPreferences)

@@ -15,6 +15,8 @@ type User struct {
 	TOTPEnabled  bool      `gorm:"default:false" json:"totp_enabled"`
 	IsAdmin      bool      `gorm:"default:false" json:"is_admin"`
 	TelegramID   int64     `gorm:"default:0" json:"telegram_id"`
+	// Opt-in: notify this user in Telegram when claude finishes / waits for input. Off by default.
+	NotifyTelegram bool    `gorm:"default:false" json:"notify_telegram"`
 	ThemeJSON       string    `gorm:"type:text;default:'{}'" json:"-"`
 	PreferencesJSON string    `gorm:"type:text;default:'{}'" json:"-"`
 	CreatedAt    time.Time `json:"created_at"`
