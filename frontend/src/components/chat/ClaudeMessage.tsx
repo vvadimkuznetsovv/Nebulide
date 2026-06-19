@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -286,7 +287,7 @@ interface Props {
   onRewind?: (msg: RichMessage) => void;
 }
 
-export default function ClaudeMessage({ msg, onRewind }: Props) {
+function ClaudeMessage({ msg, onRewind }: Props) {
   const isUser = msg.role === 'user';
   const hasText = msg.blocks.some(b => b.kind === 'text');
   const userPrompt = isUser && hasText;
@@ -330,3 +331,7 @@ export default function ClaudeMessage({ msg, onRewind }: Props) {
     </div>
   );
 }
+
+// Мемо: сообщения НЕ перерисовываются при печати в поле ввода (msg/onRewind стабильны)
+// — иначе каждое нажатие клавиши ре-рендерит весь markdown+подсветку → сильные лаги.
+export default memo(ClaudeMessage);

@@ -25,6 +25,8 @@ const tailCache = new Map<string, TailCache>();
 // instanceId, для которых claude уже хоть раз показал готовность (hook/экран). Module-level —
 // переживает перемонтирование вида; решает «отправка до готовности claude теряется».
 const readyInstances = new Set<string>();
+// Черновик ввода на instanceId — переживает переключение вида (Чат↔Терминал размонтирует компонент).
+const draftInputs = new Map<string, string>();
 const POLL_MS = 1200;
 const plainText = (m: RichMessage) => m.blocks.filter(b => b.kind === 'text').map(b => b.text || '').join('\n').trim();
 
@@ -80,7 +82,7 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
   const [status, setStatus] = useState<'connecting' | 'ready' | 'working' | 'error' | 'closed'>('connecting');
   const [workStatus, setWorkStatus] = useState(''); // живой статус из экрана: "Caramelizing… (5s · ↑ 87 tokens)"
   const [resumeMenu, setResumeMenu] = useState<{ info: string } | null>(null); // блокирующее меню "как восстановить"
-  const [input, setInput] = useState('');
+  const [input, setInput] = useState(() => draftInputs.get(instanceId) || '');
   const [pillCollapsed, setPillCollapsed] = useState(false);
   const [findOpen, setFindOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -281,6 +283,11 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
   }, [autoGrow]);
 
   useEffect(() => { measureContent(); autoGrow(); }, [input, measureContent, autoGrow]);
+
+  // Черновик ввода переживает размонтирование (переключение Чат↔Терминал).
+  useEffect(() => {
+    if (input) draftInputs.set(instanceId, input); else draftInputs.delete(instanceId);
+  }, [input, instanceId]);
 
   // Direction-based: scrolling DOWN opens the input (even mid-history), scrolling
   // UP closes it; pinned fully open at the very bottom. Self-induced scroll (the

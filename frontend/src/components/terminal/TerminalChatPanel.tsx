@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import TerminalComponent from './Terminal';
 import ClaudeChatView from './AgentChatView';
 import { resolveLiveSession } from '../../api/claudeSessions';
@@ -50,6 +50,8 @@ export default function TerminalChatPanel({ instanceId, persistent, active }: Pr
 
   // Любое ручное переключение режима снимает trust-gate — юзер берёт управление.
   const dropTrustGate = () => { consumeTrustPending(instanceId); setTrustGate(false); };
+  // Стабильная ссылка — чтобы memo(ClaudeMessage) не сбивалась через onRewind.
+  const requestTerminal = useCallback(() => setShowRawInChat(true), []);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
@@ -87,7 +89,7 @@ export default function TerminalChatPanel({ instanceId, persistent, active }: Pr
       <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
         {mode === 'terminal' || inChatTerminal
           ? <TerminalComponent instanceId={instanceId} persistent={persistent} active={active} />
-          : <ClaudeChatView instanceId={instanceId} cwd={cwd} onRequestTerminal={() => setShowRawInChat(true)} />}
+          : <ClaudeChatView instanceId={instanceId} cwd={cwd} onRequestTerminal={requestTerminal} />}
       </div>
     </div>
   );
