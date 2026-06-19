@@ -22,6 +22,9 @@ interface PermReq { tool: string; input: unknown }
 // Tail-кэш на instanceId (переживает перемонтирование вида).
 interface TailCache { project: string; sessionFile: string; sessionId: string; offset: number; messages: RichMessage[] }
 const tailCache = new Map<string, TailCache>();
+// instanceId, для которых claude уже хоть раз показал готовность (hook/экран). Module-level —
+// переживает перемонтирование вида; решает «отправка до готовности claude теряется».
+const readyInstances = new Set<string>();
 const POLL_MS = 1200;
 const plainText = (m: RichMessage) => m.blocks.filter(b => b.kind === 'text').map(b => b.text || '').join('\n').trim();
 
@@ -108,6 +111,10 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
   const pollingRef = useRef(false);
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
+  // claude может ещё грузиться (~2-3с после запуска) — не теряем первое сообщение:
+  // показываем оптимистично, но шлём в PTY, только когда claude реально готов
+  // (детектор экрана busy/idle или hook). pendingSend — отложенный текст.
+  const pendingSendRef = useRef<string | null>(null);
 
   // Send raw bytes (keystrokes) to the live PTY.
   const sendKey = useCallback((data: string) => { sendToTerminal(instanceId, data); }, [instanceId]);
@@ -189,6 +196,13 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
   useEffect(() => {
     return onActivity((e) => {
       if ('instanceId' in e && e.instanceId !== instanceId) return;
+      // Любой признак, что claude жив (hook или его статус с экрана) → помечаем готовым
+      // и шлём отложенное первое сообщение (если ждали загрузки claude).
+      if (e.type === 'claude_hook' || e.type === 'terminal_busy' || e.type === 'terminal_idle') {
+        readyInstances.add(instanceId);
+        const pend = pendingSendRef.current;
+        if (pend) { pendingSendRef.current = null; submitPromptToTerminal(instanceId, pend); setTimeout(() => poll(), 600); }
+      }
       if (e.type === 'claude_hook') {
         // Хук сообщил session_id для этого instanceId — если он отличается от текущей
         // резолвнутой, сразу реконсилимся (tier-1 подтянет правильную сессию).
@@ -312,9 +326,18 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
     // (terminal_busy), когда claude реально начнёт; при сорванном сабмите стоп не загорится.
     const optimistic: RichMessage = { uuid: `optimistic-${Date.now()}`, role: 'user', blocks: [{ kind: 'text', text }] };
     setMessages(prev => { const next = [...prev, optimistic]; messagesRef.current = next; return next; });
-    submitPromptToTerminal(instanceId, text); // bracketed paste + отдельный Enter (надёжный сабмит)
+    if (readyInstances.has(instanceId)) {
+      submitPromptToTerminal(instanceId, text); // claude готов → шлём сразу (bracketed paste + Enter)
+      setTimeout(() => poll(), 600);
+    } else {
+      // claude ещё грузится (~2-3с) — придержим, отправим по готовности (флаш в onActivity);
+      // фолбэк: если сигнала готовности не пришло за 9с, шлём всё равно (не теряем сообщение).
+      pendingSendRef.current = text;
+      setTimeout(() => {
+        if (pendingSendRef.current === text) { pendingSendRef.current = null; submitPromptToTerminal(instanceId, text); setTimeout(() => poll(), 600); }
+      }, 9000);
+    }
     scrollToBottom();
-    setTimeout(() => poll(), 600);
   }, [input, instanceId, poll, scrollToBottom]);
 
   // "Вернуться к сообщению" → открыть РОДНОЙ rewind в claude (Esc Esc на пустом вводе) и

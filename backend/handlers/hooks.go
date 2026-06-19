@@ -6,6 +6,7 @@ import (
 	"log"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -153,7 +154,7 @@ func (h *HookHandler) HandleClaudeHook(c *gin.Context) {
 	// Opt-in Telegram notification: claude finished a turn or needs the user.
 	switch event.Event {
 	case "Stop", "SessionEnd", "Notification", "PermissionRequest":
-		h.maybeNotifyTelegram(claims.UserID, event.Event)
+		h.maybeNotifyTelegram(claims.UserID, event.InstanceID, event.CWD, event.Event)
 	}
 
 	c.JSON(http.StatusOK, gin.H{"ok": true})
@@ -167,7 +168,7 @@ var (
 
 // maybeNotifyTelegram pings the user in Telegram (if they opted in and linked an account)
 // when claude finishes or waits. Debounced per user. Fire-and-forget.
-func (h *HookHandler) maybeNotifyTelegram(userID uuid.UUID, event string) {
+func (h *HookHandler) maybeNotifyTelegram(userID uuid.UUID, instanceID, cwd, event string) {
 	if h.cfg.TelegramBotToken == "" {
 		return
 	}
@@ -178,17 +179,28 @@ func (h *HookHandler) maybeNotifyTelegram(userID uuid.UUID, event string) {
 	if !user.NotifyTelegram || user.TelegramID == 0 {
 		return
 	}
+	// Debounce per session (instanceID), not per user → каждый claude уведомляет отдельно
+	// и не схлопывается в один безликий пинг.
+	key := instanceID
+	if key == "" {
+		key = userID.String()
+	}
 	tgNotifyMu.Lock()
-	if time.Since(tgNotifyLast[userID.String()]) < 15*time.Second {
+	if time.Since(tgNotifyLast[key]) < 15*time.Second {
 		tgNotifyMu.Unlock()
 		return
 	}
-	tgNotifyLast[userID.String()] = time.Now()
+	tgNotifyLast[key] = time.Now()
 	tgNotifyMu.Unlock()
 
-	text := "⏳ Claude ждёт тебя — нужен ответ"
+	// Указываем, КАКОЙ именно claude — по имени папки (basename cwd).
+	where := ""
+	if cwd != "" {
+		where = " — 📁 " + filepath.Base(cwd)
+	}
+	text := "⏳ Claude ждёт ответа" + where
 	if event == "Stop" || event == "SessionEnd" {
-		text = "✅ Claude закончил — твой ход"
+		text = "✅ Claude закончил" + where
 	}
 	go sendTelegramMessage(h.cfg.TelegramBotToken, user.TelegramID, text)
 }

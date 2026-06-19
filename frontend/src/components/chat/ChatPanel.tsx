@@ -3,7 +3,7 @@ import { listClaudeSessions, listClaudePlans, readClaudePlan, readClaudeSession,
 import type { ClaudeProject, ClaudeSession, ClaudePlan, ClaudeSessionMessage, ClaudeSearchResult, ClaudeBranch } from '../../api/claudeSessions';
 import { useLayoutStore } from '../../store/layoutStore';
 import { useAuthStore } from '../../store/authStore';
-import { typeCommandInTerminal } from '../terminal/Terminal';
+import { sendCommandWhenReady } from '../terminal/Terminal';
 import toast from 'react-hot-toast';
 import { log } from '../../utils/logger';
 import LLMPanel from '../llm/LLMPanel';
@@ -229,7 +229,7 @@ export default function ChatPanel(_props: ChatPanelProps) {
     // Чат покажет настоящий терминал, пока сессия не стартует (см. TerminalChatPanel).
     markTrustPending(instanceId);
     openTerminalWithId(instanceId);
-    const ok = await typeCommandInTerminal(instanceId, `mkdir -p "${absPath}" && cd "${absPath}" && claude`);
+    const ok = await sendCommandWhenReady(instanceId, `mkdir -p "${absPath}" && cd "${absPath}" && claude`);
     if (!ok) toast.error('Failed to connect to terminal');
   }, [openTerminalWithId]);
 
@@ -370,7 +370,7 @@ export default function ChatPanel(_props: ChatPanelProps) {
 
     const resumeCmd = `claude --resume ${session.session_id}`;
     const cmd = session.cwd ? `cd "${session.cwd}" && ${resumeCmd}` : resumeCmd;
-    const ok = await typeCommandInTerminal(instanceId, cmd);
+    const ok = await sendCommandWhenReady(instanceId, cmd);
     if (!ok) {
       toast.error('Failed to connect to terminal');
     }
