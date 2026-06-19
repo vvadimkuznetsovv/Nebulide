@@ -18,7 +18,7 @@ jobs:
           passphrase: ${{ secrets.SSH_PASSPHRASE }}
           script_stop: true
           script: |
-            TG_TOKEN=$(grep TELEGRAM_BOT_TOKEN /opt/nebulide/.env | cut -d= -f2)
+            TG_TOKEN=$(echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S grep TELEGRAM_BOT_TOKEN /opt/nebulide/.env 2>/dev/null | cut -d= -f2)
             TG_CHAT=289626498
             HOST=$(hostname)
             tg_send() { [ -n "$TG_TOKEN" ] && curl -s -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" -d chat_id="$TG_CHAT" -d text="$1" -d parse_mode=HTML >/dev/null 2>&1 || true; }
@@ -80,7 +80,7 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           passphrase: ${{ secrets.SSH_PASSPHRASE }}
           script: |
-            TG_TOKEN=$(grep TELEGRAM_BOT_TOKEN /opt/nebulide/.env | cut -d= -f2)
+            TG_TOKEN=$(echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S grep TELEGRAM_BOT_TOKEN /opt/nebulide/.env 2>/dev/null | cut -d= -f2)
             TG_CHAT=289626498
             HOST=$(hostname)
             COMMIT=$(sudo git -C /opt/nebulide log -1 --format='%h %s' 2>/dev/null || echo "unknown")
