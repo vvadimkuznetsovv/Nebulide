@@ -38,7 +38,12 @@
      --app-height is set by visualViewport resize listener in main.tsx. */
   html {
     position: fixed;
-    inset: 0;
+    top: 0;
+    left: 0;
+    right: 0;
+    /* Bound to the keyboard-adjusted height (not full layout viewport), else the
+       gap between #root and the full-height html is scrollable empty space. */
+    height: var(--app-height, 100%);
     overflow: hidden;
     overscroll-behavior: none;
   }

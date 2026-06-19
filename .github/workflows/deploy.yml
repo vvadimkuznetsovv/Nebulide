@@ -68,6 +68,16 @@ jobs:
             COMMIT=$(sudo git -C /opt/nebulide log -1 --format='%h %s')
             tg_send "$(printf '✅ <b>Deploy успешен</b>\n🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩\n🖥 <code>%s</code>\n📦 <code>%s</code>\n🕐 %s\n🟩🟩🟩🟩🟩🟩🟩🟩🟩🟩' "$HOST" "$COMMIT" "$(date '+%Y-%m-%d %H:%M:%S %Z')")"
 
+            # Уведомить всех пользователей (с привязанным Telegram, кроме админов) об обновлении + коммит
+            DB_USER=$(echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S grep '^DB_USER=' /opt/nebulide/.env 2>/dev/null | cut -d= -f2)
+            DB_NAME=$(echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S grep '^DB_NAME=' /opt/nebulide/.env 2>/dev/null | cut -d= -f2)
+            [ -n "$DB_USER" ] || DB_USER=nebulide
+            [ -n "$DB_NAME" ] || DB_NAME=nebulide
+            USER_IDS=$(echo "${{ secrets.ROOT_PASSWORD }}" | sudo -S docker compose -f /opt/nebulide/docker-compose.yml exec -T postgres psql -U "$DB_USER" -d "$DB_NAME" -t -A -c "SELECT telegram_id FROM users WHERE telegram_id <> 0 AND is_admin = false;" 2>/dev/null || true)
+            for uid in $USER_IDS; do
+              [ -n "$TG_TOKEN" ] && [ -n "$uid" ] && curl -s -m 5 -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" -d chat_id="$uid" -d text="🔄 Nebulide обновлён: $COMMIT" >/dev/null 2>&1 || true
+            done
+
             echo "Deployed successfully"
 
       - name: Notify deploy failure
