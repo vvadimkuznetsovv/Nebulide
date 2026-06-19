@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import { resolveLiveSession, tailClaudeSession } from '../../api/claudeSessions';
 import type { RichMessage } from '../../api/claudeSessions';
-import { sendToTerminal, sendCommandWhenReady } from './Terminal';
+import { sendToTerminal, submitPromptToTerminal } from './Terminal';
 import { onActivity } from '../../utils/activityBus';
 import { getSessionHint } from '../../utils/terminalViewMode';
 import ClaudeMessage from '../chat/ClaudeMessage';
@@ -23,11 +23,18 @@ interface PermReq { tool: string; input: unknown }
 interface TailCache { project: string; sessionFile: string; sessionId: string; offset: number; messages: RichMessage[] }
 const tailCache = new Map<string, TailCache>();
 const POLL_MS = 1200;
+const plainText = (m: RichMessage) => m.blocks.filter(b => b.kind === 'text').map(b => b.text || '').join('\n').trim();
+
 function mergeMsgs(prev: RichMessage[], inc: RichMessage[]): RichMessage[] {
   if (!inc.length) return prev;
-  const seen = new Set(prev.map(m => m.uuid));
+  // Реальное user-сообщение из JSONL пришло → убрать оптимистичный плейсхолдер с тем же текстом.
+  const incUserText = new Set(inc.filter(m => m.role === 'user').map(plainText));
+  const base = incUserText.size
+    ? prev.filter(m => !(m.uuid.startsWith('optimistic-') && incUserText.has(plainText(m))))
+    : prev;
+  const seen = new Set(base.map(m => m.uuid));
   const add = inc.filter(m => m.uuid && !seen.has(m.uuid));
-  return add.length ? [...prev, ...add] : prev;
+  return add.length || base.length !== prev.length ? [...base, ...add] : prev;
 }
 
 const FONT_KEY = 'nebulide-agent-font-size';
@@ -68,6 +75,7 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
   const [perm, setPerm] = useState<PermReq | null>(null);
   const [mode, setMode] = useState<PermissionMode>('default');
   const [status, setStatus] = useState<'connecting' | 'ready' | 'working' | 'error' | 'closed'>('connecting');
+  const [workStatus, setWorkStatus] = useState(''); // живой статус из экрана: "Caramelizing… (5s · ↑ 87 tokens)"
   const [input, setInput] = useState('');
   const [pillCollapsed, setPillCollapsed] = useState(false);
   const [findOpen, setFindOpen] = useState(false);
@@ -193,9 +201,18 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
         } else if (e.event === 'PostToolUse') {
           setPerm(null); // инструмент выполнился → доступ выдан, баннер убираем
         } else if (e.event === 'Stop' || e.event === 'SessionEnd') {
-          setStatus('ready'); setPerm(null);
+          setStatus('ready'); setPerm(null); setWorkStatus('');
         }
         poll();
+      } else if (e.type === 'terminal_busy') {
+        // claude реально начал работать (экран: "esc to interrupt") → показываем стоп
+        setStatus('working');
+      } else if (e.type === 'terminal_progress') {
+        // живой статус из экрана (гердунд + токены + время) — видно, что думает, а не висит
+        setWorkStatus(e.status);
+      } else if (e.type === 'terminal_idle') {
+        // claude закончил (экран: "? for shortcuts") → прячем стоп, дотягиваем ленту
+        setStatus('ready'); setWorkStatus(''); poll();
       } else if (e.type === 'terminal_streaming_start') {
         setStatus('working');
       } else if (e.type === 'terminal_streaming_end') {
@@ -286,11 +303,15 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
     const text = input.trim();
     if (!text) return;
     setInput('');
-    setStatus('working');
     stick.current = true;
-    sendCommandWhenReady(instanceId, text); // текст + Enter в реальный claude (PTY)
+    // Оптимистично показываем СВОЁ сообщение сразу — реальное из JSONL дедуплицирует его
+    // (mergeMsgs). Статус 'working' НЕ ставим оптимистично — он придёт из чтения экрана
+    // (terminal_busy), когда claude реально начнёт; при сорванном сабмите стоп не загорится.
+    const optimistic: RichMessage = { uuid: `optimistic-${Date.now()}`, role: 'user', blocks: [{ kind: 'text', text }] };
+    setMessages(prev => { const next = [...prev, optimistic]; messagesRef.current = next; return next; });
+    submitPromptToTerminal(instanceId, text); // bracketed paste + отдельный Enter (надёжный сабмит)
     scrollToBottom();
-    setTimeout(() => poll(), 400);
+    setTimeout(() => poll(), 600);
   }, [input, instanceId, poll, scrollToBottom]);
 
   // "Вернуться к сообщению" → открыть РОДНОЙ rewind в claude (Esc Esc на пустом вводе) и
@@ -428,6 +449,14 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
             </div>
           </div>
         )}
+
+        {/* Живой индикатор «думает» — из чтения экрана (видно, что claude не висит) */}
+        {status === 'working' && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 4px 2px', color: 'var(--accent-bright)', fontSize: 12.5 }}>
+            <span className="claude-chat-pulse" style={{ fontSize: 14, lineHeight: 1 }}>✻</span>
+            <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{workStatus || 'Claude думает…'}</span>
+          </div>
+        )}
       </div>
 
       {/* Composer (pill + input + mode footer) — in normal flow, so the full
@@ -454,10 +483,11 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
               onPointerMove={(e) => { if (Math.abs(e.clientX - pillRef.current.x) > 8) pillRef.current.moved = true; }}
               onPointerUp={(e) => { if (e.clientX - pillRef.current.x > 36) setPillCollapsed(true); }}
               onClick={() => { if (!pillRef.current.moved) sendKey('\x1b'); }}
-              style={{ position: 'absolute', right: 8, bottom: 'calc(100% + 6px)', zIndex: 6, width: 38, height: 38, borderRadius: 10,
+              style={{ position: 'absolute', right: 8, bottom: 'calc(100% + 6px)', zIndex: 6, width: 42, height: 42, borderRadius: 11,
                 display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', touchAction: 'pan-y',
-                background: 'rgba(var(--danger-rgb),0.22)', border: '1px solid rgba(var(--danger-rgb),0.5)', color: 'var(--danger)' }}>
-              <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor"><rect x="3.5" y="3.5" width="17" height="17" rx="2.5" /></svg>
+                background: 'var(--danger)', border: '1px solid rgba(var(--danger-rgb),0.85)', color: '#fff',
+                boxShadow: '0 0 12px 2px rgba(var(--danger-rgb),0.55)' }}>
+              <svg width="30" height="30" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2.5" /></svg>
             </button>
           )
         )}

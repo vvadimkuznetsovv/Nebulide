@@ -9,6 +9,11 @@ export type ActivityEvent =
   | { type: 'terminal_disconnect'; instanceId: string }
   | { type: 'terminal_streaming_start'; instanceId: string }
   | { type: 'terminal_streaming_end'; instanceId: string }
+  // Claude busy/idle detected from the PTY screen ("esc to interrupt" vs "? for shortcuts")
+  | { type: 'terminal_busy'; instanceId: string }
+  | { type: 'terminal_idle'; instanceId: string }
+  // Live working status scraped from the PTY (e.g. "Caramelizing… (5s · ↑ 87 tokens)")
+  | { type: 'terminal_progress'; instanceId: string; status: string }
   | { type: 'terminal_prompt_submit'; instanceId: string; text: string }
   | { type: 'claude_launched'; instanceId: string }
   | { type: 'claude_stream_start'; sessionId: string; sessionTitle?: string }

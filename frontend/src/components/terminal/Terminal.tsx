@@ -69,6 +69,11 @@ interface TermSession {
   inputBuffer: string;
   /** Escape sequence state: 0=normal, 1=saw ESC, 2=inside CSI/SS3 */
   inEscape: number;
+  /** Claude busy state detected from the PTY screen status line. */
+  claudeBusy: boolean;
+  /** Throttle + dedupe for scraped live work status (gerund + tokens + time). */
+  lastProgressAt: number;
+  lastProgressText: string;
 }
 
 const sessions = new Map<string, TermSession>();
@@ -100,6 +105,41 @@ export function focusTerminal(instanceId: string): void {
   sessions.get(instanceId)?.xterm.focus();
 }
 
+// Strip ANSI/CSI so we can substring-scrape the visible status text.
+const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '').replace(/\x1b[\]P][^\x07\x1b]*(?:\x07|\x1b\\)?/g, '');
+
+/** Scrape the live working line, e.g. "Caramelizing… (5s · ↑ 87 tokens · thought for 1s)".
+ *  Spinner glyph + gerund + optional parenthetical with elapsed/tokens. Best-effort —
+ *  format is claude's internal UI (may change between versions), so guarded + capped. */
+function extractWorkStatus(raw: string): string {
+  const clean = stripAnsi(raw);
+  const withStats = clean.match(/([A-Za-z]+(?:…|\.\.\.)\s*\([^)]*tokens[^)]*\))/);
+  if (withStats) return withStats[1].replace(/\s+/g, ' ').trim().slice(0, 70);
+  const gerund = clean.match(/([A-Za-z]+(?:…|\.\.\.))/);
+  return gerund ? gerund[1].trim().slice(0, 40) : '';
+}
+
+/** Detect whether claude is working from the PTY screen status line: it shows
+ *  "esc to interrupt" while busy and "? for shortcuts" when idle/ready. Emits
+ *  terminal_busy/terminal_idle on transitions, plus throttled terminal_progress with
+ *  the live status (markers verified on claude 2.1.175). Works without a mounted xterm. */
+function detectClaudeState(session: TermSession, instanceId: string, text: string) {
+  if (text.includes('esc to interrupt')) {
+    if (!session.claudeBusy) { session.claudeBusy = true; emitActivity({ type: 'terminal_busy', instanceId }); }
+    const now = Date.now();
+    if (now - session.lastProgressAt > 350) {
+      const status = extractWorkStatus(text);
+      if (status && status !== session.lastProgressText) {
+        session.lastProgressAt = now;
+        session.lastProgressText = status;
+        emitActivity({ type: 'terminal_progress', instanceId, status });
+      }
+    }
+  } else if (text.includes('? for shortcuts')) {
+    if (session.claudeBusy) { session.claudeBusy = false; session.lastProgressText = ''; emitActivity({ type: 'terminal_idle', instanceId }); }
+  }
+}
+
 /** Send text to a specific terminal by instanceId. */
 export function sendToTerminal(instanceId: string, text: string): boolean {
   const sess = sessions.get(instanceId);
@@ -121,6 +161,28 @@ export function sendToActiveTerminal(text: string): boolean {
       sess.ws.send(new TextEncoder().encode(text));
       return true;
     }
+  }
+  return false;
+}
+
+/** Submit a chat prompt to claude reliably. Sending `text + '\r'` in ONE write makes
+ *  claude treat it like a paste where the trailing CR becomes a literal NEWLINE, not a
+ *  submit (bracketed-paste behaviour). Fix (verified on claude 2.1.175): wrap the text in
+ *  bracketed-paste markers (so multiline stays literal) then send Enter as a SEPARATE write
+ *  after a short delay → reliable submit. */
+export async function submitPromptToTerminal(instanceId: string, text: string): Promise<boolean> {
+  for (let i = 0; i < 50; i++) {
+    const sess = sessions.get(instanceId);
+    if (sess?.ws?.readyState === WebSocket.OPEN) {
+      await new Promise(r => setTimeout(r, 120));
+      // bracketed paste: ESC[200~ <text> ESC[201~  — buffers text (incl. newlines) literally
+      sess.ws.send(new TextEncoder().encode('\x1b[200~' + text + '\x1b[201~'));
+      // separate Enter (after the paste settles) = submit, not newline
+      await new Promise(r => setTimeout(r, 60));
+      sess.ws.send(new TextEncoder().encode('\r'));
+      return true;
+    }
+    await new Promise(r => setTimeout(r, 100));
   }
   return false;
 }
@@ -208,6 +270,9 @@ function createXterm(instanceId: string): TermSession {
     streamEndTimer: 0,
     inputBuffer: '',
     inEscape: 0,
+    claudeBusy: false,
+    lastProgressAt: 0,
+    lastProgressText: '',
   };
 
   const xterm = new XTerm({
@@ -427,12 +492,14 @@ async function connectWs(instanceId: string): Promise<void> {
         }
       }
       session.xterm.write(new Uint8Array(event.data));
+      detectClaudeState(session, instanceId, new TextDecoder().decode(event.data));
       emitActivity({ type: 'terminal_data', instanceId, byteCount: event.data.byteLength });
     } else {
       if (event.data.length < 200 && (event.data.includes('\x1b[') || event.data.includes('1;2c'))) {
         log(`[Terminal] ws.onmessage id=${instanceId} bytes=${event.data.length} contains_escape_or_1;2c raw=${JSON.stringify(event.data).slice(0, 300)}`);
       }
       session.xterm.write(event.data);
+      detectClaudeState(session, instanceId, event.data);
       emitActivity({ type: 'terminal_data', instanceId, byteCount: event.data.length });
     }
     // Sustained output detection: only substantial chunks (≥50 bytes) count.
