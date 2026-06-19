@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import { resolveLiveSession, tailClaudeSession } from '../../api/claudeSessions';
 import type { RichMessage } from '../../api/claudeSessions';
-import { sendToTerminal, submitPromptToTerminal } from './Terminal';
+import { sendToTerminal, submitPromptToTerminal, getTerminalScreenState } from './Terminal';
 import { onActivity } from '../../utils/activityBus';
 import { getSessionHint } from '../../utils/terminalViewMode';
 import ClaudeMessage from '../chat/ClaudeMessage';
@@ -118,6 +118,9 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
   // показываем оптимистично, но шлём в PTY, только когда claude реально готов
   // (детектор экрана busy/idle или hook). pendingSend — отложенный текст.
   const pendingSendRef = useRef<string | null>(null);
+  // Детали последнего запроса доступа из хука (tool + input) — обогащают карточку,
+  // видимостью которой управляет ЭКРАН (надёжно, не теряется при ремоунте).
+  const permDetailsRef = useRef<{ tool?: string; input?: unknown } | null>(null);
 
   // Send raw bytes (keystrokes) to the live PTY.
   const sendKey = useCallback((data: string) => { sendToTerminal(instanceId, data); }, [instanceId]);
@@ -139,7 +142,16 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
       if (!data.messages.length) return;
       const sc = scrollRef.current;
       stick.current = !sc || sc.scrollHeight - sc.scrollTop - sc.clientHeight < 120;
-      if (full) { setMessages(data.messages); return; }
+      if (full) {
+        // Сохраняем оптимистичные плейсхолдеры, чьё реальное сообщение ещё НЕ в JSONL —
+        // иначе только что отправленный текст пропадает из чата (а в терминале есть).
+        const reUser = new Set(data.messages.filter(m => m.role === 'user').map(plainText));
+        const keptOpt = messagesRef.current.filter(m => m.uuid.startsWith('optimistic-') && !reUser.has(plainText(m)));
+        const next = keptOpt.length ? [...data.messages, ...keptOpt] : data.messages;
+        messagesRef.current = next;
+        setMessages(next);
+        return;
+      }
       const cur = messagesRef.current;
       const first = data.messages[0];
       // Игнорируем оптимистичные плейсхолдеры при rewind-детекции — иначе их uuid
@@ -172,11 +184,13 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
         setStatus('ready');
         poll(true);
       } else if (authoritative && data.session_id !== cur.sessionId) {
-        // tier-1 указал другую сессию (чужой фолбэк / перезапуск) → переключаемся
+        // tier-1 указал другую сессию (чужой фолбэк / перезапуск) → переключаемся.
+        // Оптимистичные плейсхолдеры СОХРАНЯЕМ — иначе отправленный текст пропадёт.
         tailCache.delete(instanceId);
         targetRef.current = { project: data.project, sessionFile: data.session_file, offset: 0, sessionId: data.session_id };
-        setMessages([]);
-        messagesRef.current = []; // синхронно, чтобы параллельный poll не подмешал старую сессию
+        const keptOpt = messagesRef.current.filter(m => m.uuid.startsWith('optimistic-'));
+        messagesRef.current = keptOpt; // синхронно, чтобы параллельный poll не подмешал старую сессию
+        setMessages(keptOpt);
         setStatus('ready');
         poll(true);
       }
@@ -195,54 +209,47 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
     return () => clearInterval(id);
   }, [status, poll]);
 
-  // ── Live signals from Claude Code hooks (permission / mode / working) ──
+  // ── Hooks: только session-reconcile, режим и ДЕТАЛИ permission. Состояние экрана
+  //    (busy/idle/think/меню/permission-видимость) берём из частого ОПРОСА ниже. ──
   useEffect(() => {
     return onActivity((e) => {
-      if ('instanceId' in e && e.instanceId !== instanceId) return;
-      // Любой признак, что claude жив (hook или его статус с экрана) → помечаем готовым
-      // и шлём отложенное первое сообщение (если ждали загрузки claude).
-      if (e.type === 'claude_hook' || e.type === 'terminal_busy' || e.type === 'terminal_idle') {
-        readyInstances.add(instanceId);
-        const pend = pendingSendRef.current;
-        if (pend) { pendingSendRef.current = null; submitPromptToTerminal(instanceId, pend); setTimeout(() => poll(), 600); }
+      if (e.type !== 'claude_hook' || e.instanceId !== instanceId) return;
+      if (e.sessionId && e.sessionId !== targetRef.current?.sessionId) reconcile();
+      if (e.permissionMode && e.permissionMode in MODE_INFO) setMode(e.permissionMode as PermissionMode);
+      if (e.event === 'PermissionRequest' || (e.event === 'Notification' && e.tool)) {
+        permDetailsRef.current = { tool: e.tool, input: e.toolInput };
+        setPillCollapsed(false);
       }
-      if (e.type === 'claude_hook') {
-        // Хук сообщил session_id для этого instanceId — если он отличается от текущей
-        // резолвнутой, сразу реконсилимся (tier-1 подтянет правильную сессию).
-        if (e.sessionId && e.sessionId !== targetRef.current?.sessionId) reconcile();
-        if (e.permissionMode && e.permissionMode in MODE_INFO) setMode(e.permissionMode as PermissionMode);
-        // PermissionRequest несёт tool+input; Notification (permission_prompt) — без tool отсеиваем
-        // (это idle-уведомление, не запрос доступа).
-        if (e.event === 'PermissionRequest' || (e.event === 'Notification' && e.tool)) {
-          setPillCollapsed(false);
-          setPerm({ tool: e.tool || 'инструмент', input: e.toolInput });
-        } else if (e.event === 'PreToolUse' || e.event === 'UserPromptSubmit') {
-          setStatus('working');
-        } else if (e.event === 'PostToolUse') {
-          setPerm(null); // инструмент выполнился → доступ выдан, баннер убираем
-        } else if (e.event === 'Stop' || e.event === 'SessionEnd') {
-          setStatus('ready'); setPerm(null); setWorkStatus('');
-        }
-        poll();
-      } else if (e.type === 'terminal_resume_menu') {
-        // claude --resume показал блокирующее меню «как восстановить» → оборачиваем картой
-        setResumeMenu({ info: e.info || '' });
-      } else if (e.type === 'terminal_busy') {
-        // claude реально начал работать (экран: "esc to interrupt") → показываем стоп
-        setStatus('working'); setResumeMenu(null);
-      } else if (e.type === 'terminal_progress') {
-        // живой статус из экрана (гердунд + токены + время) — видно, что думает, а не висит
-        setWorkStatus(e.status);
-      } else if (e.type === 'terminal_idle') {
-        // claude закончил (экран: "? for shortcuts") → прячем стоп, дотягиваем ленту
-        setStatus('ready'); setWorkStatus(''); setResumeMenu(null); poll();
-      } else if (e.type === 'terminal_streaming_start') {
-        setStatus('working');
-      } else if (e.type === 'terminal_streaming_end') {
-        setStatus('ready'); poll();
-      }
+      poll();
     });
   }, [instanceId, poll, reconcile]);
+
+  // ── Частый опрос ТЕКУЩЕГО состояния экрана claude (250мс). Надёжно — НЕ теряется при
+  //    ремоунте/смене вида. Источник правды для стоп-кнопки, индикатора, resume/perm-меню. ──
+  useEffect(() => {
+    const la = { busy: undefined as boolean | undefined, ws: '', resume: false, perm: false };
+    const tick = () => {
+      const st = getTerminalScreenState(instanceId);
+      if (!st) return;
+      if (st.alive) {
+        readyInstances.add(instanceId);
+        const pend = pendingSendRef.current;
+        if (pend && !st.resumeMenu && !st.permMenu) { pendingSendRef.current = null; submitPromptToTerminal(instanceId, pend); setTimeout(() => poll(), 600); }
+      }
+      if (st.busy !== la.busy) { la.busy = st.busy; setStatus(st.busy ? 'working' : 'ready'); }
+      const ws = st.busy ? st.workStatus : '';
+      if (ws !== la.ws) { la.ws = ws; setWorkStatus(ws); }
+      if (st.resumeMenu !== la.resume) { la.resume = st.resumeMenu; setResumeMenu(st.resumeMenu ? { info: st.resumeInfo } : null); }
+      if (st.permMenu !== la.perm) {
+        la.perm = st.permMenu;
+        if (st.permMenu) { const d = permDetailsRef.current; setPerm({ tool: d?.tool || st.permQuestion, input: d?.input }); }
+        else { setPerm(null); permDetailsRef.current = null; }
+      }
+    };
+    tick();
+    const iv = setInterval(tick, 250);
+    return () => clearInterval(iv);
+  }, [instanceId, poll]);
 
   useEffect(() => {
     const sc = scrollRef.current;
@@ -337,15 +344,22 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
     // (terminal_busy), когда claude реально начнёт; при сорванном сабмите стоп не загорится.
     const optimistic: RichMessage = { uuid: `optimistic-${Date.now()}`, role: 'user', blocks: [{ kind: 'text', text }] };
     setMessages(prev => { const next = [...prev, optimistic]; messagesRef.current = next; return next; });
-    if (readyInstances.has(instanceId)) {
-      submitPromptToTerminal(instanceId, text); // claude готов → шлём сразу (bracketed paste + Enter)
+    // Если открыто блокирующее меню (permission/resume) — НЕЛЬЗЯ слать текст: Enter в конце
+    // подтвердил бы меню (по умолчанию ❯ Yes). Придерживаем до закрытия меню.
+    const scr = getTerminalScreenState(instanceId);
+    const menuUp = !!(scr && (scr.resumeMenu || scr.permMenu));
+    if (readyInstances.has(instanceId) && !menuUp) {
+      submitPromptToTerminal(instanceId, text); // claude готов, меню нет → шлём (bracketed paste + Enter)
       setTimeout(() => poll(), 600);
     } else {
-      // claude ещё грузится (~2-3с) — придержим, отправим по готовности (флаш в onActivity);
-      // фолбэк: если сигнала готовности не пришло за 9с, шлём всё равно (не теряем сообщение).
+      // claude грузится ИЛИ открыто меню — придержим. Флаш в опросе экрана идёт только при
+      // !resumeMenu && !permMenu, поэтому текст не подтвердит меню. Фолбэк тоже это проверяет.
       pendingSendRef.current = text;
       setTimeout(() => {
-        if (pendingSendRef.current === text) { pendingSendRef.current = null; submitPromptToTerminal(instanceId, text); setTimeout(() => poll(), 600); }
+        if (pendingSendRef.current !== text) return;
+        const s = getTerminalScreenState(instanceId);
+        if (s && (s.resumeMenu || s.permMenu)) return; // меню ещё открыто — НЕ отправляем
+        pendingSendRef.current = null; submitPromptToTerminal(instanceId, text); setTimeout(() => poll(), 600);
       }, 9000);
     }
     scrollToBottom();
@@ -542,11 +556,10 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
               onPointerMove={(e) => { if (Math.abs(e.clientX - pillRef.current.x) > 8) pillRef.current.moved = true; }}
               onPointerUp={(e) => { if (e.clientX - pillRef.current.x > 36) setPillCollapsed(true); }}
               onClick={() => { if (!pillRef.current.moved) sendKey('\x1b'); }}
-              style={{ position: 'absolute', right: 8, bottom: 'calc(100% + 6px)', zIndex: 6, width: 42, height: 42, borderRadius: 11,
+              style={{ position: 'absolute', right: 8, bottom: 'calc(100% + 6px)', zIndex: 6, width: 38, height: 38, borderRadius: 10,
                 display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', touchAction: 'pan-y',
-                background: 'var(--danger)', border: '1px solid rgba(var(--danger-rgb),0.85)', color: '#fff',
-                boxShadow: '0 0 12px 2px rgba(var(--danger-rgb),0.55)' }}>
-              <svg width="30" height="30" viewBox="0 0 24 24" fill="currentColor"><rect x="5" y="5" width="14" height="14" rx="2.5" /></svg>
+                background: 'rgba(255,40,40,0.16)', border: '1px solid rgba(255,40,40,0.6)' }}>
+              <svg width="30" height="30" viewBox="0 0 24 24" fill="#ff2424"><rect x="3" y="3" width="18" height="18" rx="2.5" /></svg>
             </button>
           )
         )}

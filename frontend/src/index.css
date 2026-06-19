@@ -1931,6 +1931,28 @@
 .prose code { color: var(--accent-bright) !important; }
 .prose strong { color: var(--text-primary) !important; }
 
+/* GFM-таблицы в чате: проект без @tailwindcss/typography, поэтому стилизуем вручную.
+   Широкая таблица скроллится вбок (display:block+overflow), а не ломает вёрстку. */
+.prose table {
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 12px;
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.prose th,
+.prose td {
+  border: 1px solid var(--glass-border);
+  padding: 5px 9px;
+  text-align: left;
+  vertical-align: top;
+  white-space: nowrap;
+}
+.prose th { background: rgba(var(--accent-rgb), 0.12); color: var(--text-primary); font-weight: 600; }
+.prose td { color: var(--text-secondary); }
+.prose tbody tr:nth-child(even) td { background: rgba(255, 255, 255, 0.02); }
+
 /* ── Tamagotchi Pet Panel ── */
 
 .tamagotchi-panel {

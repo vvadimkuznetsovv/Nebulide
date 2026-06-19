@@ -74,8 +74,14 @@ interface TermSession {
   /** Throttle + dedupe for scraped live work status (gerund + tokens + time). */
   lastProgressAt: number;
   lastProgressText: string;
-  /** Whether the blocking "how to resume" menu is currently on screen. */
+  /** Current claude screen state (source of truth, polled by the chat view). */
   resumeMenuShown: boolean;
+  resumeInfo: string;
+  permMenuShown: boolean;
+  permQuestion: string;
+  workStatusCur: string;
+  /** claude TUI присутствует на экране (загрузился) — для гейта отложенной отправки. */
+  claudeAlive: boolean;
 }
 
 const sessions = new Map<string, TermSession>();
@@ -133,51 +139,69 @@ function readVisibleScreen(session: TermSession): string {
   return out;
 }
 
-/** Detect claude's screen state PRECISELY (by word combinations, only from the visible
- *  screen — never from scrolled-up chat). Emits terminal_busy/idle/progress/resume_menu.
+/** Detect claude's CURRENT screen state PRECISELY (by word combinations, only from the
+ *  visible screen — never from scrolled-up chat) and store it on the session. The chat view
+ *  POLLS this state (getTerminalScreenState), so it's never lost on a remount/view switch.
  *  Markers verified on claude 2.1.175. Works without a mounted xterm. */
 function detectClaudeScreen(session: TermSession, instanceId: string) {
   const screen = readVisibleScreen(session);
   if (!screen) return;
-  // Нижняя строка статуса (последние строки) — busy/idle берём ТОЛЬКО отсюда.
   const lines = screen.split('\n');
-  const tail = lines.slice(Math.max(0, lines.length - 7)).join('\n');
+  const tail = lines.slice(Math.max(0, lines.length - 8)).join('\n'); // нижняя строка статуса
 
-  // Блокирующее меню "как восстановить" — по СОЧЕТАНИЮ всех трёх пунктов (точно, не из чата).
-  if (screen.includes('Resume from summary') && screen.includes('Resume full session') && /Don.?t ask me again/.test(screen)) {
-    if (!session.resumeMenuShown) {
-      session.resumeMenuShown = true;
-      const m = screen.match(/This session is[^\n]*?tokens?\./);
-      emitActivity({ type: 'terminal_resume_menu', instanceId, info: m ? m[0].trim() : '' });
-    }
-    return; // claude заблокирован на меню — не busy и не idle
+  // Меню "как восстановить" — по СОЧЕТАНИЮ всех трёх пунктов (точно, не из контента чата).
+  session.resumeMenuShown = screen.includes('Resume from summary') && screen.includes('Resume full session') && /Don.?t ask me again/.test(screen);
+  if (session.resumeMenuShown) {
+    const m = screen.match(/This session is[^\n]*?tokens?\./);
+    session.resumeInfo = m ? m[0].trim() : '';
   }
-  session.resumeMenuShown = false;
 
-  if (tail.includes('esc to interrupt')) {
+  // Permission-меню "Do you want to …?" + нумерованные Yes/No (точно по сочетанию).
+  session.permMenuShown = /Do you want to /.test(screen) && /1\.\s*Yes/.test(screen) && /3\.\s*No/.test(screen);
+  if (session.permMenuShown) {
+    const q = screen.match(/Do you want to [^\n]*/);
+    session.permQuestion = q ? q[0].replace(/\s+/g, ' ').trim().slice(0, 90) : 'Разрешить действие?';
+  }
+
+  // busy/idle — ТОЛЬКО из нижней строки статуса. Эмитим переходы (для pet), состояние храним.
+  const busyNow = tail.includes('esc to interrupt');
+  const idleNow = tail.includes('? for shortcuts');
+  if (busyNow) {
     if (!session.claudeBusy) { session.claudeBusy = true; emitActivity({ type: 'terminal_busy', instanceId }); }
-    const now = Date.now();
-    if (now - session.lastProgressAt > 300) {
-      const status = extractWorkStatus(screen);
-      if (status && status !== session.lastProgressText) {
-        session.lastProgressAt = now;
-        session.lastProgressText = status;
-        emitActivity({ type: 'terminal_progress', instanceId, status });
-      }
-    }
-  } else if (tail.includes('? for shortcuts')) {
-    if (session.claudeBusy) { session.claudeBusy = false; session.lastProgressText = ''; emitActivity({ type: 'terminal_idle', instanceId }); }
+    const s = extractWorkStatus(screen);
+    if (s) session.workStatusCur = s;
+  } else if (idleNow) {
+    if (session.claudeBusy) { session.claudeBusy = false; emitActivity({ type: 'terminal_idle', instanceId }); }
+    session.workStatusCur = '';
   }
+  // claude TUI на экране = загрузился (есть статус-строка или меню).
+  session.claudeAlive = busyNow || idleNow || session.resumeMenuShown || session.permMenuShown;
 }
 
-// Частый скан экрана всех сессий (каждые 300мс) — ловит ТЕКУЩЕЕ состояние независимо от
-// тайминга чанков, и работает без смонтированного xterm. Стартует лениво при первой сессии.
+/** Current claude screen state for an instance — polled by the chat view (reliable, never
+ *  lost on remount). null if no session. */
+export function getTerminalScreenState(instanceId: string) {
+  const s = sessions.get(instanceId);
+  if (!s) return null;
+  return {
+    alive: s.claudeAlive,
+    busy: s.claudeBusy,
+    resumeMenu: s.resumeMenuShown,
+    resumeInfo: s.resumeInfo,
+    permMenu: s.permMenuShown,
+    permQuestion: s.permQuestion,
+    workStatus: s.workStatusCur,
+  };
+}
+
+// Частый скан экрана всех сессий (каждые 250мс) — обновляет ТЕКУЩЕЕ состояние сессий.
+// Работает без смонтированного xterm. Стартует лениво при первой сессии.
 let screenScanTimer = 0;
 function ensureScreenScan() {
   if (screenScanTimer) return;
   screenScanTimer = window.setInterval(() => {
     for (const [id, sess] of sessions.entries()) detectClaudeScreen(sess, id);
-  }, 300);
+  }, 250);
 }
 
 /** Send text to a specific terminal by instanceId. */
@@ -317,6 +341,11 @@ function createXterm(instanceId: string): TermSession {
     lastProgressAt: 0,
     lastProgressText: '',
     resumeMenuShown: false,
+    resumeInfo: '',
+    permMenuShown: false,
+    permQuestion: '',
+    workStatusCur: '',
+    claudeAlive: false,
   };
 
   const xterm = new XTerm({
