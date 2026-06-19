@@ -79,8 +79,10 @@ interface TermSession {
   resumeInfo: string;
   permMenuShown: boolean;
   permQuestion: string;
-  /** Скрейпнутые варианты permission-меню (2 или 3) + деталь (команда/файл). */
-  permOptions: { digit: string; label: string; raw: string }[];
+  /** Тип меню: permission (Yes/No) или question (AskUserQuestion, много пунктов). */
+  permKind: 'permission' | 'question' | '';
+  /** Скрейпнутые варианты меню + описания (для question) + деталь (команда/файл для permission). */
+  permOptions: MenuOption[];
   permDetail: string;
   workStatusCur: string;
   /** claude TUI присутствует на экране (загрузился) — для гейта отложенной отправки. */
@@ -151,35 +153,75 @@ function cleanPermLabel(raw: string): string {
   return r.slice(0, 40);
 }
 
-/** Скрейп permission-меню из rawTail: вопрос + варианты (2/3) + деталь (команда/файл).
- *  Точно по сочетанию: «Do you want to …?» + нумерованные пункты + футер Esc/Tab amend.
- *  null если меню не показано. Снято вживую с claude 2.1.175 (Write 3 / Bash 2-3). */
-function scrapePermMenu(buf: string): { question: string; options: { digit: string; label: string; raw: string }[]; detail: string } | null {
+export interface MenuOption { digit: string; label: string; raw: string; desc: string }
+export interface ScrapedMenu { kind: 'permission' | 'question'; question: string; options: MenuOption[]; detail: string }
+
+/** Скрейп ЛЮБОГО интерактивного select-меню claude из рендер-грида (выверено на 2.1.175):
+ *  - permission: «Do you want to …?» + Yes/No(+allow) + футер «Esc to cancel · Tab to amend …»
+ *  - question (AskUserQuestion): вопрос + МНОГО пунктов с описаниями (+ Type something / Chat
+ *    about this) + футер «Enter to select · ↑/↓ to navigate · Esc to cancel».
+ *  Определяем по ФУТЕРУ (а не по «Do you want to»), пункты берём ВСЕ (1..N, многоцифровые),
+ *  описания (отступ под пунктом) собираем. Выбор — по цифре (проверено: цифра выбирает сразу). */
+function scrapeMenu(buf: string): ScrapedMenu | null {
   const lines = buf.split('\n');
-  let qIdx = -1;
-  for (let i = lines.length - 1; i >= 0; i--) {
-    if (lines[i].includes('Do you want to ')) { qIdx = i; break; }
-  }
-  if (qIdx < 0) return null;
+  // Футер у самого низа → тип меню.
   let footerIdx = -1;
-  for (let i = qIdx + 1; i < lines.length && i < qIdx + 12; i++) {
-    if (/Esc to cancel|Tab to amend/.test(lines[i])) { footerIdx = i; break; }
+  let kind: 'permission' | 'question' = 'permission';
+  // СТРОГО: permission = «… Tab to amend …», question = «… Enter to select …».
+  // Прочие select-меню (/model, /clear и т.п.) НЕ перехватываем (иначе кривая карта).
+  for (let i = lines.length - 1; i >= 0 && lines.length - i <= 30; i--) {
+    const t = lines[i];
+    if (!t.includes('Esc to cancel')) continue;
+    if (/Tab to amend/.test(t)) { footerIdx = i; kind = 'permission'; break; }
+    if (/Enter to select/.test(t)) { footerIdx = i; kind = 'question'; break; }
   }
   if (footerIdx < 0) return null;
-  const options: { digit: string; label: string; raw: string }[] = [];
-  for (let i = qIdx + 1; i < footerIdx; i++) {
-    const m = lines[i].match(/^\s*[❯>]?\s*(\d)\.\s+(.+?)\s*$/);
-    if (m) options.push({ digit: m[1], label: cleanPermLabel(m[2]), raw: m[2].trim() });
+  // Пункт «1.» ближайший НАД футером — начало блока вариантов.
+  let firstOptIdx = -1;
+  for (let i = footerIdx - 1; i >= 0 && footerIdx - i <= 50; i--) {
+    if (/^\s*[❯>]?\s*1\.\s/.test(lines[i])) { firstOptIdx = i; break; }
   }
-  if (options.length < 2) return null; // минимум Yes/No
-  const question = lines[qIdx].replace(/\s+/g, ' ').trim().slice(0, 100);
-  const detail: string[] = [];
-  for (let i = qIdx - 1; i >= 0 && detail.length < 6; i--) {
+  if (firstOptIdx < 0) return null;
+  // Все пункты 1..N (многоцифровые) + их описания (отступ-строки под пунктом).
+  const options: MenuOption[] = [];
+  let cur: MenuOption | null = null;
+  for (let i = firstOptIdx; i < footerIdx; i++) {
+    const m = lines[i].match(/^\s*[❯>]?\s*(\d{1,2})\.\s+(.+?)\s*$/);
+    if (m) {
+      const raw = m[2].trim();
+      cur = { digit: m[1], label: kind === 'permission' ? cleanPermLabel(raw) : raw, raw, desc: '' };
+      options.push(cur);
+    } else if (cur && lines[i].trim() && !/^[❯>\s]*[╌╴─—═]+\s*$/.test(lines[i])) {
+      cur.desc = (cur.desc ? cur.desc + ' ' : '') + lines[i].trim();
+    }
+  }
+  if (options.length < 2) return null;
+  // Вопрос — ближайшая непустая строка НАД пунктом 1.
+  let question = '';
+  let qIdx = firstOptIdx;
+  for (let i = firstOptIdx - 1; i >= 0 && firstOptIdx - i <= 6; i--) {
     const t = lines[i].trim();
-    if (!t || /^[╌╴─]+$/.test(t)) { if (detail.length) break; else continue; }
-    detail.unshift(t);
+    if (!t || /^[╌╴─—═]+$/.test(t)) continue;
+    question = t.replace(/\s+/g, ' ').slice(0, 140); qIdx = i; break;
   }
-  return { question, options, detail: detail.join('\n').slice(0, 400) };
+  // Деталь (команда/файл) — только для permission: блок от верхней линии ───── до вопроса.
+  let detail = '';
+  if (kind === 'permission') {
+    let topIdx = -1;
+    for (let i = qIdx - 1; i >= 0 && qIdx - i <= 16; i--) {
+      if (/^[─—]{10,}$/.test(lines[i].trim())) { topIdx = i; break; }
+    }
+    const from = topIdx >= 0 ? topIdx + 1 : Math.max(0, qIdx - 6);
+    const raw: string[] = [];
+    for (let i = from; i < qIdx; i++) {
+      if (/^[╌╴─—═]+$/.test(lines[i].trim())) continue;
+      raw.push(lines[i].replace(/\s+$/, ''));
+    }
+    while (raw.length && !raw[0].trim()) raw.shift();
+    while (raw.length && !raw[raw.length - 1].trim()) raw.pop();
+    detail = raw.join('\n').slice(0, 800);
+  }
+  return { kind, question, options, detail };
 }
 
 /** Чистый рендер-грид xterm (ровные строки, как tmux capture-pane) — в отличие от сырого
@@ -221,14 +263,17 @@ function detectClaudeScreen(session: TermSession, instanceId: string) {
     const m = buf.match(/This session is[^\n]*?tokens?\./);
     session.resumeInfo = m ? m[0].trim() : '';
   }
-  // Permission-меню — динамический скрейп (2 ИЛИ 3 варианта, разный текст). buf уже грид.
-  const pm = scrapePermMenu(buf);
+  // Интерактивное меню claude (permission ИЛИ question) — скрейп по футеру. buf уже грид.
+  // resume-меню имеет свой обработчик — не дублируем.
+  const pm = session.resumeMenuShown ? null : scrapeMenu(buf);
   session.permMenuShown = !!pm;
   if (pm) {
+    session.permKind = pm.kind;
     session.permQuestion = pm.question;
     session.permOptions = pm.options;
     session.permDetail = pm.detail;
   } else {
+    session.permKind = '';
     session.permOptions = [];
     session.permDetail = '';
   }
@@ -265,6 +310,7 @@ export function getTerminalScreenState(instanceId: string) {
     resumeMenu: s.resumeMenuShown,
     resumeInfo: s.resumeInfo,
     permMenu: s.permMenuShown,
+    permKind: s.permKind,
     permQuestion: s.permQuestion,
     permOptions: s.permOptions,
     permDetail: s.permDetail,
@@ -456,6 +502,7 @@ function createXterm(instanceId: string): TermSession {
     resumeInfo: '',
     permMenuShown: false,
     permQuestion: '',
+    permKind: '',
     permOptions: [],
     permDetail: '',
     workStatusCur: '',

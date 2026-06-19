@@ -19,8 +19,8 @@ interface Props {
   onRequestTerminal?: () => void;
 }
 
-interface PermOption { digit: string; label: string; raw: string }
-interface PermReq { question?: string; detail?: string; options: PermOption[]; tool?: string; input?: unknown }
+interface PermOption { digit: string; label: string; raw: string; desc?: string }
+interface PermReq { kind?: 'permission' | 'question' | ''; question?: string; detail?: string; options: PermOption[]; tool?: string; input?: unknown }
 
 // Tail-кэш на instanceId (переживает перемонтирование вида).
 interface TailCache { project: string; sessionFile: string; sessionId: string; offset: number; messages: RichMessage[] }
@@ -327,12 +327,12 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
       if (ws !== la.ws) { la.ws = ws; setWorkStatus(ws); }
       if (st.resumeMenu !== la.resume) { la.resume = st.resumeMenu; setResumeMenu(st.resumeMenu ? { info: st.resumeInfo } : null); }
       // permission — варианты СКРЕЙПЛЕНЫ с экрана (2 или 3); сигнатура = вопрос+цифры.
-      const permSig = st.permMenu ? st.permQuestion + '|' + (st.permOptions || []).map(o => o.digit).join('') : '';
+      const permSig = st.permMenu ? st.permKind + '|' + st.permQuestion + '|' + (st.permOptions || []).map(o => o.digit).join('') : '';
       if (permSig !== la.permSig) {
         la.permSig = permSig;
         if (st.permMenu) {
           const d = permDetailsRef.current;
-          setPerm({ question: st.permQuestion, detail: st.permDetail, options: st.permOptions || [], tool: d?.tool, input: d?.input });
+          setPerm({ kind: st.permKind, question: st.permQuestion, detail: st.permDetail, options: st.permOptions || [], tool: d?.tool, input: d?.input });
         } else { setPerm(null); permDetailsRef.current = null; }
       }
     };
@@ -650,17 +650,28 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
                 </pre>
               )}
             </div>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', padding: '10px 12px', borderTop: '1px solid var(--glass-border)' }}>
-              {perm.options.map((o) => {
-                const isNo = /^нет/i.test(o.label) || /^no\b/i.test(o.raw);
-                const isPlainYes = o.label === 'Да';
-                const style = isNo
-                  ? pbtn('rgba(var(--danger-rgb),0.12)', 'rgba(var(--danger-rgb),0.35)', 'var(--danger)')
-                  : isPlainYes
-                    ? pbtn('rgba(var(--success-rgb),0.18)', 'rgba(var(--success-rgb),0.4)', 'var(--success)')
-                    : pbtn('rgba(var(--accent-rgb),0.18)', 'rgba(var(--accent-rgb),0.4)', 'var(--accent-bright)');
-                return <button key={o.digit} type="button" title={o.raw} onClick={() => decide(o.digit)} style={style}>{o.label}</button>;
-              })}
+            <div style={{ display: 'flex', flexDirection: perm.kind === 'question' ? 'column' : 'row', gap: 8, flexWrap: 'wrap', padding: '10px 12px', borderTop: '1px solid var(--glass-border)' }}>
+              {perm.kind === 'question'
+                ? perm.options.map((o) => (
+                    <button key={o.digit} type="button" title={o.raw} onClick={() => decide(o.digit)}
+                      style={{ display: 'flex', alignItems: 'flex-start', gap: 9, width: '100%', textAlign: 'left', padding: '8px 11px', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', background: 'rgba(var(--accent-rgb),0.1)', border: '1px solid rgba(var(--accent-rgb),0.3)', color: 'var(--text-primary)' }}>
+                      <span style={{ flexShrink: 0, minWidth: 18, height: 18, lineHeight: '18px', textAlign: 'center', borderRadius: 5, fontSize: 11, fontWeight: 700, background: 'rgba(var(--accent-rgb),0.25)', color: 'var(--accent-bright)' }}>{o.digit}</span>
+                      <span style={{ flex: 1, minWidth: 0 }}>
+                        <span style={{ display: 'block', fontSize: 12.5, fontWeight: 600 }}>{o.label}</span>
+                        {o.desc && <span style={{ display: 'block', fontSize: 11, lineHeight: 1.4, color: 'var(--text-muted)', marginTop: 2 }}>{o.desc}</span>}
+                      </span>
+                    </button>
+                  ))
+                : perm.options.map((o) => {
+                    const isNo = /^нет/i.test(o.label) || /^no\b/i.test(o.raw);
+                    const isPlainYes = o.label === 'Да';
+                    const style = isNo
+                      ? pbtn('rgba(var(--danger-rgb),0.12)', 'rgba(var(--danger-rgb),0.35)', 'var(--danger)')
+                      : isPlainYes
+                        ? pbtn('rgba(var(--success-rgb),0.18)', 'rgba(var(--success-rgb),0.4)', 'var(--success)')
+                        : pbtn('rgba(var(--accent-rgb),0.18)', 'rgba(var(--accent-rgb),0.4)', 'var(--accent-bright)');
+                    return <button key={o.digit} type="button" title={o.raw} onClick={() => decide(o.digit)} style={style}>{o.label}</button>;
+                  })}
               {onRequestTerminal && (
                 <button type="button" onClick={() => { setPerm(null); onRequestTerminal(); }} style={pbtn('rgba(255,255,255,0.05)', 'var(--glass-border)', 'var(--text-secondary)')}>⌨ Терминал</button>
               )}
