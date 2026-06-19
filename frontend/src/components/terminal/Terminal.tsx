@@ -182,12 +182,37 @@ function scrapePermMenu(buf: string): { question: string; options: { digit: stri
   return { question, options, detail: detail.join('\n').slice(0, 400) };
 }
 
+/** Чистый рендер-грид xterm (ровные строки, как tmux capture-pane) — в отличие от сырого
+ *  rawTail, где TUI-перерисовки курсором после strip-ANSI СЛИПАЮТСЯ в одну строку. Нужен для
+ *  ПОСТРОЧНОГО скрейпа меню. Буфер xterm наполняется и без смонтированного DOM (createXterm
+ *  всегда создаёт Terminal, write() парсит в buffer независимо от open()). Берём хвост экрана. */
+function xtermScreenText(session: TermSession): string {
+  try {
+    const xterm = session.xterm;
+    const b = xterm?.buffer?.active;
+    if (!b) return '';
+    // ТОЛЬКО видимый экран (последние rows строк, без скроллбэка) — иначе текст ответа
+    // claude, уехавший вверх, может ложно сматчить маркеры статуса/меню.
+    const rows = xterm.rows || 24;
+    const out: string[] = [];
+    for (let y = Math.max(0, b.length - rows); y < b.length; y++) {
+      const ln = b.getLine(y);
+      out.push(ln ? ln.translateToString(true) : '');
+    }
+    return out.join('\n');
+  } catch { return ''; }
+}
+
 /** Detect claude's CURRENT state from the raw rolling output buffer (session.rawTail) — это
  *  НЕ зависит от xterm DOM, поэтому переключение видов (Terminal↔Chat) не ломает детект.
  *  busy/idle по «последний маркер статус-строки побеждает» (claude перерисовывает её часто).
  *  Чат-вью ПОЛЛИТ getTerminalScreenState → состояние не теряется. Выверено на claude 2.1.175. */
 function detectClaudeScreen(session: TermSession, instanceId: string) {
-  const buf = session.rawTail;
+  // Читаем РЕНДЕР-ГРИД xterm (ровные строки текущего экрана), а НЕ сырой rawTail — в
+  // потоке строки слипаются от TUI-перерисовок курсором, из-за чего ломался построчный
+  // матч (раньше детект был на гриде и работал; rawTail-вариант был регрессией). Грид
+  // живёт и без DOM (buffer.active не зависит от рендерера) → переживает смену вида.
+  const buf = xtermScreenText(session) || session.rawTail;
   if (!buf) return;
 
   // Меню "как восстановить" — по СОЧЕТАНИЮ всех трёх пунктов.
@@ -196,7 +221,7 @@ function detectClaudeScreen(session: TermSession, instanceId: string) {
     const m = buf.match(/This session is[^\n]*?tokens?\./);
     session.resumeInfo = m ? m[0].trim() : '';
   }
-  // Permission-меню — динамический скрейп (2 ИЛИ 3 варианта, разный текст).
+  // Permission-меню — динамический скрейп (2 ИЛИ 3 варианта, разный текст). buf уже грид.
   const pm = scrapePermMenu(buf);
   session.permMenuShown = !!pm;
   if (pm) {
@@ -244,6 +269,17 @@ export function getTerminalScreenState(instanceId: string) {
     permOptions: s.permOptions,
     permDetail: s.permDetail,
     workStatus: s.workStatusCur,
+  };
+}
+
+// Отладка вживую: в консоли боевого app набрать __nebScreen() (или __nebScreen('default'))
+// в момент permission-меню → видно, что детектор реально видит (грид xterm, rawTail, скрейп).
+if (typeof window !== 'undefined') {
+  (window as unknown as { __nebScreen?: (id?: string) => unknown }).__nebScreen = (id = 'default') => {
+    const s = sessions.get(id);
+    const ids = Array.from(sessions.keys());
+    if (!s) return { error: 'no session for ' + id, sessions: ids };
+    return { sessions: ids, state: getTerminalScreenState(id), xtermScreen: xtermScreenText(s), rawTailTail: s.rawTail.slice(-1000) };
   };
 }
 
