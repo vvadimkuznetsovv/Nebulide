@@ -81,6 +81,8 @@ interface TermSession {
   permQuestion: string;
   /** Тип меню: permission (Yes/No) или question (AskUserQuestion, много пунктов). */
   permKind: 'permission' | 'question' | '';
+  /** Мульти-селект (чекбоксы): цифра тоглит, отправка через стрелку вправо → review. */
+  permMulti: boolean;
   /** Скрейпнутые варианты меню + описания (для question) + деталь (команда/файл для permission). */
   permOptions: MenuOption[];
   permDetail: string;
@@ -153,8 +155,8 @@ function cleanPermLabel(raw: string): string {
   return r.slice(0, 40);
 }
 
-export interface MenuOption { digit: string; label: string; raw: string; desc: string }
-export interface ScrapedMenu { kind: 'permission' | 'question'; question: string; options: MenuOption[]; detail: string }
+export interface MenuOption { digit: string; label: string; raw: string; desc: string; checked?: boolean }
+export interface ScrapedMenu { kind: 'permission' | 'question'; multi: boolean; question: string; options: MenuOption[]; detail: string }
 
 /** Скрейп ЛЮБОГО интерактивного select-меню claude из рендер-грида (выверено на 2.1.175):
  *  - permission: «Do you want to …?» + Yes/No(+allow) + футер «Esc to cancel · Tab to amend …»
@@ -189,13 +191,19 @@ function scrapeMenu(buf: string): ScrapedMenu | null {
     const m = lines[i].match(/^\s*[❯>]?\s*(\d{1,2})\.\s+(.+?)\s*$/);
     if (m) {
       const raw = m[2].trim();
-      cur = { digit: m[1], label: kind === 'permission' ? cleanPermLabel(raw) : raw, raw, desc: '' };
+      // Чекбокс мульти-селекта: «[ ] Логи» / «[✔] Кэш» → checked + чистый лейбл.
+      const cb = raw.match(/^\[([^\]]?)\]\s*(.*)$/);
+      let label = kind === 'permission' ? cleanPermLabel(raw) : raw;
+      let checked: boolean | undefined;
+      if (cb) { checked = /[xX✔✓]/.test(cb[1]); label = cb[2].trim() || raw; }
+      cur = { digit: m[1], label, raw, desc: '', checked };
       options.push(cur);
     } else if (cur && lines[i].trim() && !/^[❯>\s]*[╌╴─—═]+\s*$/.test(lines[i])) {
       cur.desc = (cur.desc ? cur.desc + ' ' : '') + lines[i].trim();
     }
   }
   if (options.length < 2) return null;
+  const multi = kind === 'question' && options.some((o) => o.checked !== undefined);
   // Вопрос — ближайшая непустая строка НАД пунктом 1.
   let question = '';
   let qIdx = firstOptIdx;
@@ -221,7 +229,7 @@ function scrapeMenu(buf: string): ScrapedMenu | null {
     while (raw.length && !raw[raw.length - 1].trim()) raw.pop();
     detail = raw.join('\n').slice(0, 800);
   }
-  return { kind, question, options, detail };
+  return { kind, multi, question, options, detail };
 }
 
 /** Чистый рендер-грид xterm (ровные строки, как tmux capture-pane) — в отличие от сырого
@@ -269,11 +277,13 @@ function detectClaudeScreen(session: TermSession, instanceId: string) {
   session.permMenuShown = !!pm;
   if (pm) {
     session.permKind = pm.kind;
+    session.permMulti = pm.multi;
     session.permQuestion = pm.question;
     session.permOptions = pm.options;
     session.permDetail = pm.detail;
   } else {
     session.permKind = '';
+    session.permMulti = false;
     session.permOptions = [];
     session.permDetail = '';
   }
@@ -311,6 +321,7 @@ export function getTerminalScreenState(instanceId: string) {
     resumeInfo: s.resumeInfo,
     permMenu: s.permMenuShown,
     permKind: s.permKind,
+    permMulti: s.permMulti,
     permQuestion: s.permQuestion,
     permOptions: s.permOptions,
     permDetail: s.permDetail,
@@ -503,6 +514,7 @@ function createXterm(instanceId: string): TermSession {
     permMenuShown: false,
     permQuestion: '',
     permKind: '',
+    permMulti: false,
     permOptions: [],
     permDetail: '',
     workStatusCur: '',

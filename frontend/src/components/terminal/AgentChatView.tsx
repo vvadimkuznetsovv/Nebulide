@@ -19,8 +19,8 @@ interface Props {
   onRequestTerminal?: () => void;
 }
 
-interface PermOption { digit: string; label: string; raw: string; desc?: string }
-interface PermReq { kind?: 'permission' | 'question' | ''; question?: string; detail?: string; options: PermOption[]; tool?: string; input?: unknown }
+interface PermOption { digit: string; label: string; raw: string; desc?: string; checked?: boolean }
+interface PermReq { kind?: 'permission' | 'question' | ''; multi?: boolean; question?: string; detail?: string; options: PermOption[]; tool?: string; input?: unknown }
 
 // Tail-кэш на instanceId (переживает перемонтирование вида).
 interface TailCache { project: string; sessionFile: string; sessionId: string; offset: number; messages: RichMessage[] }
@@ -327,12 +327,13 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
       if (ws !== la.ws) { la.ws = ws; setWorkStatus(ws); }
       if (st.resumeMenu !== la.resume) { la.resume = st.resumeMenu; setResumeMenu(st.resumeMenu ? { info: st.resumeInfo } : null); }
       // permission — варианты СКРЕЙПЛЕНЫ с экрана (2 или 3); сигнатура = вопрос+цифры.
-      const permSig = st.permMenu ? st.permKind + '|' + st.permQuestion + '|' + (st.permOptions || []).map(o => o.digit).join('') : '';
+      // Сигнатура включает состояние чекбоксов (✔/ ) — чтобы тогл в мульти-селекте перерисовывал карточку.
+      const permSig = st.permMenu ? st.permKind + '|' + st.permQuestion + '|' + (st.permOptions || []).map(o => o.digit + (o.checked ? '1' : o.checked === false ? '0' : '')).join('') : '';
       if (permSig !== la.permSig) {
         la.permSig = permSig;
         if (st.permMenu) {
           const d = permDetailsRef.current;
-          setPerm({ kind: st.permKind, question: st.permQuestion, detail: st.permDetail, options: st.permOptions || [], tool: d?.tool, input: d?.input });
+          setPerm({ kind: st.permKind, multi: st.permMulti, question: st.permQuestion, detail: st.permDetail, options: st.permOptions || [], tool: d?.tool, input: d?.input });
         } else { setPerm(null); permDetailsRef.current = null; }
       }
     };
@@ -524,6 +525,19 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
     setTimeout(() => poll(), 400);
   }, [sendKey, poll]);
 
+  // Мульти-селект: цифра ТОГЛИТ чекбокс — карточку НЕ закрываем, опрос перечитает новое
+  // состояние (✔). Калибровано на claude 2.1.175.
+  const toggleOption = useCallback((digit: string) => {
+    sendKey(digit);
+  }, [sendKey]);
+
+  // Мульти-селект submit: стрелка вправо → экран «Ready to submit?» (Submit answers/Cancel) —
+  // он распознаётся как обычное question-меню и показывается этой же карточкой.
+  const submitMulti = useCallback(() => {
+    sendKey('\x1b[C');
+    setTimeout(() => poll(), 250);
+  }, [sendKey, poll]);
+
   // Ответ на меню "как восстановить" (claude --resume): 1=из сводки, 2=полностью, 3=не спрашивать.
   const resumeChoose = useCallback((digit: '1' | '2' | '3') => {
     sendKey(digit);
@@ -651,7 +665,25 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
               )}
             </div>
             <div style={{ display: 'flex', flexDirection: perm.kind === 'question' ? 'column' : 'row', gap: 8, flexWrap: 'wrap', padding: '10px 12px', borderTop: '1px solid var(--glass-border)' }}>
-              {perm.kind === 'question'
+              {perm.multi ? (
+                <>
+                  {perm.options.map((o) => (
+                    <button key={o.digit} type="button" title={o.raw} onClick={() => o.checked === undefined ? decide(o.digit) : toggleOption(o.digit)}
+                      style={{ display: 'flex', alignItems: 'flex-start', gap: 9, width: '100%', textAlign: 'left', padding: '8px 11px', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit',
+                        background: o.checked ? 'rgba(var(--success-rgb),0.13)' : 'rgba(var(--accent-rgb),0.07)',
+                        border: `1px solid ${o.checked ? 'rgba(var(--success-rgb),0.45)' : 'rgba(var(--accent-rgb),0.28)'}`, color: 'var(--text-primary)' }}>
+                      {o.checked === undefined
+                        ? <span style={{ flexShrink: 0, minWidth: 18, height: 18, lineHeight: '18px', textAlign: 'center', borderRadius: 5, fontSize: 11, fontWeight: 700, background: 'rgba(var(--accent-rgb),0.25)', color: 'var(--accent-bright)' }}>{o.digit}</span>
+                        : <span style={{ flexShrink: 0, width: 18, height: 18, lineHeight: '15px', textAlign: 'center', borderRadius: 5, fontSize: 12, fontWeight: 800, border: `1.5px solid ${o.checked ? 'var(--success)' : 'var(--text-muted)'}`, color: o.checked ? 'var(--success)' : 'transparent' }}>✓</span>}
+                      <span style={{ flex: 1, minWidth: 0 }}>
+                        <span style={{ display: 'block', fontSize: 12.5, fontWeight: 600 }}>{o.label}</span>
+                        {o.desc && <span style={{ display: 'block', fontSize: 11, lineHeight: 1.4, color: 'var(--text-muted)', marginTop: 2 }}>{o.desc}</span>}
+                      </span>
+                    </button>
+                  ))}
+                  <button type="button" onClick={submitMulti} style={pbtn('rgba(var(--success-rgb),0.2)', 'rgba(var(--success-rgb),0.5)', 'var(--success)')}>Готово →</button>
+                </>
+              ) : perm.kind === 'question'
                 ? perm.options.map((o) => (
                     <button key={o.digit} type="button" title={o.raw} onClick={() => decide(o.digit)}
                       style={{ display: 'flex', alignItems: 'flex-start', gap: 9, width: '100%', textAlign: 'left', padding: '8px 11px', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', background: 'rgba(var(--accent-rgb),0.1)', border: '1px solid rgba(var(--accent-rgb),0.3)', color: 'var(--text-primary)' }}>
