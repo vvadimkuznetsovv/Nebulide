@@ -169,33 +169,45 @@ func extractCustomTitles(fullPath string, fileSize int64) map[string]string {
 
 var cmdNameRe = regexp.MustCompile(`(?s)<command-name>\s*(.*?)\s*</command-name>`)
 var cmdArgsRe = regexp.MustCompile(`(?s)<command-args>\s*(.*?)\s*</command-args>`)
+var cmdStdoutRe = regexp.MustCompile(`(?s)<local-command-stdout>\s*(.*?)\s*</local-command-stdout>`)
 
-// normalizeSlashCommand сворачивает обёртку слэш-команды из JSONL
-// (<command-name>/x</command-name> … <command-args>y</command-args>) в чистое «/x y»,
-// которое юзер реально ввёл. Иначе чат рендерит сырой XML, а оптимистичный пузырь
-// (текст «/x y») не сматчивается по тексту и ВИСИТ навсегда.
+// normalizeSlashCommand сворачивает обёртку слэш-команды из JSONL в человекочитаемый вид.
+// Claude пишет команду как <command-name>/x</command-name>…<command-args>y</command-args>,
+// её результат — <local-command-stdout>…</local-command-stdout>, плюс служебный
+// <local-command-caveat> (инструкция модели). Иначе чат рендерит сырой XML, а оптимистичный
+// пузырь («/x y») не сматчивается по тексту и ВИСИТ. Возвращаем «/x y» (+ результат отдельной
+// строкой), caveat выкидываем. Обрабатываем и сообщение-только-stdout (без command-name).
 func normalizeSlashCommand(s string) string {
-	if !strings.Contains(s, "<command-name>") {
+	if !strings.Contains(s, "<command-name>") && !strings.Contains(s, "<local-command-stdout>") {
 		return s
 	}
-	m := cmdNameRe.FindStringSubmatch(s)
-	if m == nil {
-		return s
-	}
-	name := strings.TrimSpace(m[1])
-	if name == "" {
-		return s
-	}
-	if !strings.HasPrefix(name, "/") {
-		name = "/" + name
-	}
-	out := name
-	if a := cmdArgsRe.FindStringSubmatch(s); a != nil {
-		if args := strings.TrimSpace(a[1]); args != "" {
-			out += " " + args
+	cmd := ""
+	if m := cmdNameRe.FindStringSubmatch(s); m != nil {
+		if name := strings.TrimSpace(m[1]); name != "" {
+			if !strings.HasPrefix(name, "/") {
+				name = "/" + name
+			}
+			cmd = name
+			if a := cmdArgsRe.FindStringSubmatch(s); a != nil {
+				if args := strings.TrimSpace(a[1]); args != "" {
+					cmd += " " + args
+				}
+			}
 		}
 	}
-	return out
+	out := ""
+	if m := cmdStdoutRe.FindStringSubmatch(s); m != nil {
+		out = strings.TrimSpace(m[1])
+	}
+	switch {
+	case cmd != "" && out != "":
+		return cmd + "\n" + out
+	case cmd != "":
+		return cmd
+	case out != "":
+		return out
+	}
+	return s
 }
 
 func extractTextContent(meta jsonlMeta) string {
