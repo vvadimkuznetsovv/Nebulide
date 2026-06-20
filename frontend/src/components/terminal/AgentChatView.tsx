@@ -30,6 +30,12 @@ const tailCache = new Map<string, TailCache>();
 const readyInstances = new Set<string>();
 // Черновик ввода на instanceId — переживает переключение вида (Чат↔Терминал размонтирует компонент).
 const draftInputs = new Map<string, string>();
+// Живой контекст/токены из statusLine на instanceId — переживает смену вида.
+interface ContextInfo { used?: number; tin?: number; size?: number; model?: string; cost?: number }
+const contextCache = new Map<string, ContextInfo>();
+// Цвет индикатора контекста: нейтральный → жёлтый (65%+) → красный (85%+, близко к авто-сжатию).
+function ctxColor(p: number): string { return p >= 85 ? 'var(--danger)' : p >= 65 ? '#e0b341' : 'var(--text-muted)'; }
+function fmtTokens(n: number): string { return n >= 1000 ? (n / 1000).toFixed(n >= 100000 ? 0 : 1) + 'k' : String(n); }
 const POLL_MS = 1200;
 const plainText = (m: RichMessage) => m.blocks.filter(b => b.kind === 'text').map(b => b.text || '').join('\n').trim();
 
@@ -157,6 +163,7 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
   const [status, setStatus] = useState<'connecting' | 'ready' | 'working' | 'error' | 'closed'>('connecting');
   const [workStatus, setWorkStatus] = useState(''); // живой статус из экрана: "Caramelizing… (5s · ↑ 87 tokens)"
   const [resumeMenu, setResumeMenu] = useState<{ info: string } | null>(null); // блокирующее меню "как восстановить"
+  const [ctx, setCtx] = useState<ContextInfo | undefined>(() => contextCache.get(instanceId)); // живой контекст/токены
   const [input, setInput] = useState(() => draftInputs.get(instanceId) || '');
   const [pillCollapsed, setPillCollapsed] = useState(false);
   // @-упоминания файлов: автокомплит по дереву cwd
@@ -314,6 +321,14 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
   //    (busy/idle/think/меню/permission-видимость) берём из частого ОПРОСА ниже. ──
   useEffect(() => {
     return onActivity((e) => {
+      // Живой контекст/токены из statusLine.
+      if (e.type === 'claude_status') {
+        if (e.instanceId !== instanceId) return;
+        const c = { used: e.usedPercentage, tin: e.totalInputTokens, size: e.contextWindowSize, model: e.model, cost: e.costUsd };
+        contextCache.set(instanceId, c);
+        setCtx(c);
+        return;
+      }
       if (e.type !== 'claude_hook' || e.instanceId !== instanceId) return;
       if (e.sessionId && e.sessionId !== targetRef.current?.sessionId) reconcile();
       if (e.permissionMode && e.permissionMode in MODE_INFO) setMode(e.permissionMode as PermissionMode);
@@ -630,6 +645,15 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
           </>
         ) : (
           <>
+            {ctx && typeof ctx.used === 'number' && (
+              <div title={`Контекст: ${ctx.tin?.toLocaleString() ?? '?'} / ${(ctx.size ?? 200000).toLocaleString()} токенов${ctx.model ? ' · ' + ctx.model : ''}${ctx.cost ? ' · $' + ctx.cost.toFixed(3) : ''}`}
+                style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 600, color: ctxColor(ctx.used), userSelect: 'none' }}>
+                <span style={{ width: 32, height: 5, borderRadius: 3, background: 'rgba(255,255,255,0.1)', overflow: 'hidden', flexShrink: 0 }}>
+                  <span style={{ display: 'block', height: '100%', width: `${Math.min(100, ctx.used)}%`, background: ctxColor(ctx.used) }} />
+                </span>
+                <span>{ctx.used}%{ctx.tin != null ? ' · ' + fmtTokens(ctx.tin) : ''}</span>
+              </div>
+            )}
             <span style={{ flex: 1 }} />
             <button type="button" onClick={scrollToBottom} title="Вниз" style={iconBtn}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="12" y1="5" x2="12" y2="19" /><polyline points="19 12 12 19 5 12" /></svg>

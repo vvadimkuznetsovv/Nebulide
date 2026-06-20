@@ -28,7 +28,8 @@ COPY frontend/dist ./static
 # Claude Code hooks — signal permission/mode/working status to the backend
 # (registered into ~/.claude/settings.json by entrypoint.sh on startup)
 COPY hooks/nebulide-hook.sh /app/hooks/nebulide-hook.sh
-RUN chmod +x /app/hooks/nebulide-hook.sh
+COPY hooks/nebulide-statusline.sh /app/hooks/nebulide-statusline.sh
+RUN chmod +x /app/hooks/nebulide-hook.sh /app/hooks/nebulide-statusline.sh
 
 # Entrypoint: auto-installs persisted packages on startup
 COPY entrypoint.sh /entrypoint.sh

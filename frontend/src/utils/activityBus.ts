@@ -24,7 +24,9 @@ export type ActivityEvent =
   | { type: 'claude_error'; sessionId: string }
   | { type: 'file_save'; filePath: string }
   // Claude Code hooks (via backend → Redis pub/sub → sync WebSocket)
-  | { type: 'claude_hook'; event: string; instanceId: string; tool?: string; userPrompt?: string; status?: string; sessionId?: string; cwd?: string; permissionMode?: string; toolInput?: unknown };
+  | { type: 'claude_hook'; event: string; instanceId: string; tool?: string; userPrompt?: string; status?: string; sessionId?: string; cwd?: string; permissionMode?: string; toolInput?: unknown }
+  // Живой контекст/токены из statusLine (backend → Redis → sync WS)
+  | { type: 'claude_status'; instanceId: string; usedPercentage?: number; totalInputTokens?: number; contextWindowSize?: number; model?: string; costUsd?: number };
 
 type Listener = (event: ActivityEvent) => void;
 const listeners = new Set<Listener>();

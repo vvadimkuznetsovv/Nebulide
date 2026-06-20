@@ -194,6 +194,23 @@ export function useSyncWS() {
               }
               break;
 
+            case 'claude_status': {
+              // Живой контекст/токены из statusLine → чат.
+              if (!msg.instance_id) break;
+              const cw = msg.context_window || {};
+              const cost = msg.cost || {};
+              emitActivity({
+                type: 'claude_status',
+                instanceId: msg.instance_id,
+                usedPercentage: typeof cw.used_percentage === 'number' ? cw.used_percentage : undefined,
+                totalInputTokens: typeof cw.total_input_tokens === 'number' ? cw.total_input_tokens : undefined,
+                contextWindowSize: typeof cw.context_window_size === 'number' ? cw.context_window_size : undefined,
+                model: typeof msg.model === 'string' ? msg.model : undefined,
+                costUsd: typeof cost.total_cost_usd === 'number' ? cost.total_cost_usd : undefined,
+              });
+              break;
+            }
+
             case 'pet_event':
               log('[SyncWS] pet_event', { pet_action: msg.pet_action, instance_id: msg.instance_id, session_id: msg.session_id });
               // Server is the single source of pet existence (childWatchLoop).

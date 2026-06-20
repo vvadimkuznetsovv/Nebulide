@@ -89,15 +89,17 @@ if command -v jq >/dev/null 2>&1 && [ -f "$HOOK_SCRIPT" ]; then
   mkdir -p /root/.claude
   [ -f "$CLAUDE_SETTINGS" ] || echo '{}' > "$CLAUDE_SETTINGS"
   HOOK_DEF=$(jq -n --arg cmd "$HOOK_SCRIPT" '[{matcher:"",hooks:[{type:"command",command:$cmd}]}]')
+  STATUSLINE_SCRIPT="/app/hooks/nebulide-statusline.sh"
   TMP_SETTINGS=$(mktemp)
-  if jq --argjson h "$HOOK_DEF" '
+  if jq --argjson h "$HOOK_DEF" --arg sl "$STATUSLINE_SCRIPT" '
         .hooks = ((.hooks // {}) + {
           UserPromptSubmit: $h, PreToolUse: $h, PostToolUse: $h,
           Stop: $h, SessionStart: $h, SessionEnd: $h,
           Notification: $h, PermissionRequest: $h
-        })' "$CLAUDE_SETTINGS" > "$TMP_SETTINGS" 2>/dev/null; then
+        })
+        | .statusLine = {type:"command", command:$sl}' "$CLAUDE_SETTINGS" > "$TMP_SETTINGS" 2>/dev/null; then
     mv "$TMP_SETTINGS" "$CLAUDE_SETTINGS"
-    echo "[entrypoint] Claude Code hooks registered in $CLAUDE_SETTINGS"
+    echo "[entrypoint] Claude Code hooks + statusLine registered in $CLAUDE_SETTINGS"
   else
     rm -f "$TMP_SETTINGS"
     echo "[entrypoint] WARN: failed to register Claude hooks"

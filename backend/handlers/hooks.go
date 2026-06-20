@@ -97,7 +97,17 @@ type ClaudeHookEvent struct {
 	UserPrompt     string                 `json:"user_prompt,omitempty"`
 	PermissionMode string                 `json:"permission_mode,omitempty"`
 	InstanceID     string                 `json:"instance_id,omitempty"`
+	// statusLine (event="StatusLine"): живой контекст/токены/стоимость сессии.
+	Model         string          `json:"model,omitempty"`
+	ContextWindow json.RawMessage `json:"context_window,omitempty"`
+	Cost          json.RawMessage `json:"cost,omitempty"`
 }
+
+// statusLine шлётся часто — дебаунсим форвард контекста на инстанс.
+var (
+	statusDebMu   sync.Mutex
+	statusDebLast = map[string]time.Time{}
+)
 
 func (h *HookHandler) HandleClaudeHook(c *gin.Context) {
 	tokenStr := ""
@@ -125,6 +135,14 @@ func (h *HookHandler) HandleClaudeHook(c *gin.Context) {
 	var event ClaudeHookEvent
 	if err := c.ShouldBindJSON(&event); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid JSON"})
+		return
+	}
+
+	// statusLine — отдельный лёгкий путь: форвардим живой контекст/токены в чат
+	// (дебаунс), без записи сессии / Telegram / общего claude_hook-форварда.
+	if event.Event == "StatusLine" {
+		h.forwardStatus(claims.UserID, event)
+		c.JSON(http.StatusOK, gin.H{"ok": true})
 		return
 	}
 
@@ -178,6 +196,38 @@ func (h *HookHandler) HandleClaudeHook(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, gin.H{"ok": true})
+}
+
+// forwardStatus публикует живой контекст/токены/стоимость (из statusLine) в чат через
+// Redis (тип claude_status). Дебаунс на инстанс — statusLine срабатывает часто.
+func (h *HookHandler) forwardStatus(userID uuid.UUID, event ClaudeHookEvent) {
+	if database.RDB == nil || event.InstanceID == "" {
+		return
+	}
+	statusDebMu.Lock()
+	if time.Since(statusDebLast[event.InstanceID]) < 1500*time.Millisecond {
+		statusDebMu.Unlock()
+		return
+	}
+	statusDebLast[event.InstanceID] = time.Now()
+	statusDebMu.Unlock()
+
+	payload := map[string]interface{}{
+		"type":        "claude_status",
+		"instance_id": event.InstanceID,
+		"session_id":  event.SessionID,
+	}
+	if event.Model != "" {
+		payload["model"] = event.Model
+	}
+	if len(event.ContextWindow) > 0 {
+		payload["context_window"] = event.ContextWindow
+	}
+	if len(event.Cost) > 0 {
+		payload["cost"] = event.Cost
+	}
+	data, _ := json.Marshal(payload)
+	database.RDB.Publish(context.Background(), "ws:user:"+userID.String(), string(data))
 }
 
 // Per-user debounce so rapid turns don't flood Telegram.
