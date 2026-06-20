@@ -1241,13 +1241,24 @@ func (h *ClaudeSessionsHandler) ResolveLive(c *gin.Context) {
 
 	// 1) Hook-tracked exact session (authoritative — instance match is proof, so
 	// NOT gated by matchesWorkspace: the hook reported this instance's real session).
-	if hookOk && hookSid != "" && hookCwd != "" {
+	//
+	// НО: если пользователь ЯВНО открыл ДРУГУЮ сессию в ДРУГОЙ папке (sessionHint задан,
+	// отличается от хука, и cwdHint ≠ hookCwd) — хук УСТАРЕЛ для этого открытия
+	// (переиспользованный терминал: старый claude не закрылся чисто → SessionEnd не очистил
+	// карту, а новый --resume ещё не выстрелил хуком). Тогда пропускаем tier1 и отдаём явный
+	// hint (tier 1.5). Форк в ТОЙ ЖЕ папке (hook новее) — по-прежнему выигрывает (cwd совпадает).
+	staleHook := sessionHint != "" && sessionHint != hookSid &&
+		cwdHint != "" && workspaceSlug(cwdHint) != workspaceSlug(hookCwd)
+	if hookOk && hookSid != "" && hookCwd != "" && !staleHook {
 		slug := workspaceSlug(hookCwd)
 		if file := sessionFileBySessionID(filepath.Join(projectsDir, slug), hookSid); file != "" {
 			respond("tier1-hook", slug, file, hookSid, hookCwd)
 			return
 		}
 		log.Printf("[ResolveLive] tier1 miss: dir=%s sid=%s not found on disk", slug, hookSid)
+	} else if staleHook {
+		log.Printf("[ResolveLive] tier1 SKIP (stale hook for другой папки): hookSid=%s hookCwd=%q hint=%s cwd=%q",
+			hookSid, hookCwd, sessionHint, cwdHint)
 	}
 
 	// 1.5) Explicit sessionId hint (opened via --resume) — exact session, before
