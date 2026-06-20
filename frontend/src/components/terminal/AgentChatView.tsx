@@ -133,6 +133,19 @@ const MODE_INFO: Record<PermissionMode, { label: string; color: string }> = {
   bypassPermissions: { label: 'Без ограничений', color: 'var(--danger)' },
 };
 
+// Полная деталь permission из ХУКА (tool_input) — точная неусечённая команда/путь,
+// в отличие от скрейпа экрана (может обрезаться). Для Bash → весь command целиком.
+function permInputText(input: unknown): string {
+  if (input && typeof input === 'object') {
+    const o = input as Record<string, unknown>;
+    for (const k of ['command', 'file_path', 'path', 'url', 'pattern', 'prompt']) {
+      const v = o[k];
+      if (typeof v === 'string' && v.trim()) return v;
+    }
+  }
+  return '';
+}
+
 function messageText(m: RichMessage): string {
   return m.blocks.map(b => b.text || b.content || b.name || '').join(' ').toLowerCase();
 }
@@ -655,14 +668,23 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
         {!query && perm && (
           <div style={{ margin: '10px 0', borderRadius: 12, overflow: 'hidden', border: '1px solid rgba(var(--accent-rgb),0.45)', background: 'rgba(var(--accent-rgb),0.1)' }}>
             <div style={{ padding: '10px 12px' }}>
-              <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)', marginBottom: perm.detail ? 6 : 0 }}>
-                {perm.question || 'Claude запрашивает доступ'}
-              </div>
-              {perm.detail && (
-                <pre style={{ margin: 0, padding: '8px 10px', fontSize: 11, lineHeight: 1.45, fontFamily: 'monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--text-secondary)', background: 'rgba(0,0,0,0.25)', border: '1px solid var(--glass-border)', borderRadius: 8, maxHeight: 320, overflow: 'auto' }}>
-                  {perm.detail}
-                </pre>
-              )}
+              {(() => {
+                // Полную команду берём из хука (точная), иначе — скрейп экрана.
+                const hookCmd = permInputText(perm.input);
+                const detailText = hookCmd || perm.detail || '';
+                return (
+                  <>
+                    <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)', marginBottom: detailText ? 6 : 0 }}>
+                      {perm.question || 'Claude запрашивает доступ'}
+                    </div>
+                    {detailText && (
+                      <pre style={{ margin: 0, padding: '8px 10px', fontSize: 11, lineHeight: 1.45, fontFamily: 'monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--text-secondary)', background: 'rgba(0,0,0,0.25)', border: '1px solid var(--glass-border)', borderRadius: 8, maxHeight: 320, overflow: 'auto' }}>
+                        {detailText}
+                      </pre>
+                    )}
+                  </>
+                );
+              })()}
             </div>
             <div style={{ display: 'flex', flexDirection: perm.kind === 'question' ? 'column' : 'row', gap: 8, flexWrap: 'wrap', padding: '10px 12px', borderTop: '1px solid var(--glass-border)' }}>
               {perm.multi ? (

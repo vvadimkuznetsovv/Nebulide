@@ -223,11 +223,13 @@ function scrapeMenu(buf: string): ScrapedMenu | null {
   // Деталь (команда/файл) — только для permission: блок от верхней линии ───── до вопроса.
   let detail = '';
   if (kind === 'permission') {
+    // Команда может быть МНОГОСТРОЧНОЙ (heredoc/SQL на 20+ строк) — ищем верхнюю линию
+    // ───── далеко вверх (до 80 строк), иначе фолбэк терял всё кроме хвоста.
     let topIdx = -1;
-    for (let i = qIdx - 1; i >= 0 && qIdx - i <= 16; i--) {
+    for (let i = qIdx - 1; i >= 0 && qIdx - i <= 80; i--) {
       if (/^[─—]{10,}$/.test(lines[i].trim())) { topIdx = i; break; }
     }
-    const from = topIdx >= 0 ? topIdx + 1 : Math.max(0, qIdx - 6);
+    const from = topIdx >= 0 ? topIdx + 1 : Math.max(0, qIdx - 50);
     const raw: string[] = [];
     for (let i = from; i < qIdx; i++) {
       if (/^[╌╴─—═]+$/.test(lines[i].trim())) continue;
@@ -235,7 +237,7 @@ function scrapeMenu(buf: string): ScrapedMenu | null {
     }
     while (raw.length && !raw[0].trim()) raw.shift();
     while (raw.length && !raw[raw.length - 1].trim()) raw.pop();
-    detail = raw.join('\n').slice(0, 800);
+    detail = raw.join('\n').slice(0, 2000);
   } else if (isPlan) {
     // Текст плана = блок между «Here is Claude's plan:» и вопросом (без линий-разделителей).
     let hdr = -1;
@@ -264,11 +266,14 @@ function xtermScreenText(session: TermSession): string {
     const xterm = session.xterm;
     const b = xterm?.buffer?.active;
     if (!b) return '';
-    // ТОЛЬКО видимый экран (последние rows строк, без скроллбэка) — иначе текст ответа
-    // claude, уехавший вверх, может ложно сматчить маркеры статуса/меню.
+    // Видимый экран + немного скроллбэка: при mismatch размеров (PTY выше headless-xterm
+    // в чат-режиме) длинная МНОГОСТРОЧНАЯ команда не влезает в rows и верх уходит в
+    // скроллбэк — без него деталь обрезалась до хвоста. Детект меню якорится на НИЖНИЙ
+    // футер, поэтому лишние строки сверху не дают ложных срабатываний.
     const rows = xterm.rows || 24;
+    const want = Math.max(rows, 100);
     const out: string[] = [];
-    for (let y = Math.max(0, b.length - rows); y < b.length; y++) {
+    for (let y = Math.max(0, b.length - want); y < b.length; y++) {
       const ln = b.getLine(y);
       out.push(ln ? ln.translateToString(true) : '');
     }
