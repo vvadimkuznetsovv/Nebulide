@@ -205,6 +205,10 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
   // показываем оптимистично, но шлём в PTY, только когда claude реально готов
   // (детектор экрана busy/idle или hook). pendingSend — отложенный текст.
   const pendingSendRef = useRef<string | null>(null);
+  // Анти-дубль: setInput('') асинхронен, поэтому быстрый повтор Enter (автоповтор/двойное
+  // нажатие) брал бы один и тот же input из замыкания → два сабмита. Гасим повтор того же
+  // текста в окне 1.5с.
+  const lastSubmitRef = useRef<{ text: string; t: number }>({ text: '', t: 0 });
   // Детали последнего запроса доступа из хука (tool + input) — обогащают карточку,
   // видимостью которой управляет ЭКРАН (надёжно, не теряется при ремоунте).
   const permDetailsRef = useRef<{ tool?: string; input?: unknown } | null>(null);
@@ -492,6 +496,10 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
   const sendUser = useCallback(() => {
     const text = input.trim();
     if (!text) return;
+    // Анти-дубль: тот же текст за <1.5с — повторный сабмит (гонка stale-замыкания), игнор.
+    const now = Date.now();
+    if (lastSubmitRef.current.text === text && now - lastSubmitRef.current.t < 1500) return;
+    lastSubmitRef.current = { text, t: now };
     setInput('');
     setMention(null);
     setCmd(null); setCmdOpen(false);
@@ -836,7 +844,7 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
               if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); pickMention(mentionFiles[mentionIdx]); return; }
               if (e.key === 'Escape') { e.preventDefault(); setMention(null); return; }
             }
-            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendUser(); }
+            if (e.key === 'Enter' && !e.shiftKey && !e.repeat && !e.nativeEvent.isComposing) { e.preventDefault(); sendUser(); }
             else if (e.key === 'Tab' && e.shiftKey) { e.preventDefault(); cycleMode(); }
           }}
           placeholder="Сообщение для Claude… (/ — команды, @ — файл)"
