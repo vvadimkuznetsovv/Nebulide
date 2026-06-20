@@ -185,6 +185,17 @@ function scrapeMenu(buf: string): ScrapedMenu | null {
       if (/Enter to select/.test(t)) { footerIdx = i; kind = 'question'; break; }
     }
   }
+  // Фолбэк: подтверждающее меню БЕЗ явного nav-футера (напр. «Change effort level?»
+  // при большом контексте) — якоримся на КУРСОР ❯ на нумерованном пункте у низа.
+  if (footerIdx < 0) {
+    for (let i = lines.length - 1; i >= 0 && lines.length - i <= 22; i--) {
+      if (/^\s*❯\s*\d{1,2}\.\s+\S/.test(lines[i])) {
+        let end = i + 1;
+        while (end < lines.length && /^\s*[❯>]?\s*\d{1,2}\.\s/.test(lines[end])) end++;
+        footerIdx = end; kind = 'question'; break;
+      }
+    }
+  }
   if (footerIdx < 0) return null;
   // Пункт «1.» ближайший НАД футером — начало блока вариантов.
   let firstOptIdx = -1;
@@ -212,14 +223,20 @@ function scrapeMenu(buf: string): ScrapedMenu | null {
   }
   if (options.length < 2) return null;
   const multi = kind === 'question' && options.some((o) => o.checked !== undefined);
-  // Вопрос — ближайшая непустая строка НАД пунктом 1.
+  // Вопрос НАД пунктом 1: предпочитаем ближайшую строку, ОКАНЧИВАЮЩУЮСЯ на «?» (это и есть
+  // заголовок-вопрос, напр. «Change effort level?» / «Do you want to proceed?»), иначе —
+  // ближайшую непустую (описание уйдёт в detail).
   let question = '';
   let qIdx = firstOptIdx;
-  for (let i = firstOptIdx - 1; i >= 0 && firstOptIdx - i <= 6; i--) {
+  let firstText = '';
+  let firstTextIdx = firstOptIdx;
+  for (let i = firstOptIdx - 1; i >= 0 && firstOptIdx - i <= 10; i--) {
     const t = lines[i].trim();
     if (!t || /^[╌╴─—═]+$/.test(t)) continue;
-    question = t.replace(/\s+/g, ' ').slice(0, 140); qIdx = i; break;
+    if (!firstText) { firstText = t; firstTextIdx = i; }
+    if (/\?$/.test(t)) { question = t.replace(/\s+/g, ' ').slice(0, 140); qIdx = i; break; }
   }
+  if (!question && firstText) { question = firstText.replace(/\s+/g, ' ').slice(0, 140); qIdx = firstTextIdx; }
   // Деталь (команда/файл) — только для permission: блок от верхней линии ───── до вопроса.
   let detail = '';
   if (kind === 'permission') {
@@ -253,6 +270,16 @@ function scrapeMenu(buf: string): ScrapedMenu | null {
     while (raw.length && !raw[0].trim()) raw.shift();
     while (raw.length && !raw[raw.length - 1].trim()) raw.pop();
     detail = raw.join('\n').slice(0, 2500);
+  } else if (kind === 'question' && qIdx < firstOptIdx - 1) {
+    // Описание МЕЖДУ вопросом и пунктами (напр. у «Change effort level?» — про кэш/скорость).
+    const raw: string[] = [];
+    for (let i = qIdx + 1; i < firstOptIdx; i++) {
+      if (/^[╌╴─—═]+$/.test(lines[i].trim())) continue;
+      raw.push(lines[i].replace(/\s+$/, ''));
+    }
+    while (raw.length && !raw[0].trim()) raw.shift();
+    while (raw.length && !raw[raw.length - 1].trim()) raw.pop();
+    detail = raw.join('\n').slice(0, 600);
   }
   return { kind, multi, question, options, detail };
 }
