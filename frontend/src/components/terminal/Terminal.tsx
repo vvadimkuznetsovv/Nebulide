@@ -128,11 +128,12 @@ export function focusTerminal(instanceId: string): void {
 // Strip ANSI/CSI so we can substring-scrape the raw output stream.
 const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '').replace(/\x1b[\]P][^\x07\x1b]*(?:\x07|\x1b\\)?/g, '');
 
-/** Scrape the live working line, e.g. "Caramelizing… (5s · ↑ 87 tokens)". Last match wins. */
+/** Scrape the live working line, e.g. "Caramelizing… (5s · ↑ 87 tokens)" или многословное
+ *  "Compacting conversation… (3m 41s · ↑ 16.3k tokens)". Last match wins. */
 function extractWorkStatus(text: string): string {
-  const withStats = text.match(/([A-Za-z]+(?:…|\.\.\.)\s*\([^)]*tokens[^)]*\))/g);
+  const withStats = text.match(/([A-Za-z]+(?: [a-z]+)*(?:…|\.\.\.)\s*\([^)]*tokens[^)]*\))/g);
   if (withStats && withStats.length) return withStats[withStats.length - 1].replace(/\s+/g, ' ').trim().slice(0, 70);
-  const glyph = text.match(/[✻✶✳✽✺✷✦✧·*]\s*([A-Za-z]+(?:…|\.\.\.)[^\n]*)/);
+  const glyph = text.match(/[✻✶✳✽✺✷✦✧·*]\s*([A-Za-z]+(?: [a-z]+)*(?:…|\.\.\.)[^\n]*)/);
   return glyph ? glyph[1].replace(/\s+/g, ' ').trim().slice(0, 50) : '';
 }
 
@@ -343,8 +344,9 @@ function detectClaudeScreen(session: TermSession, instanceId: string) {
     session.permDetail = '';
   }
 
-  // busy vs idle — позиция последнего маркера в потоке.
-  const bi = buf.lastIndexOf('esc to interrupt');
+  // busy vs idle — позиция последнего маркера в потоке. Сжатие контекста ("Compacting
+  // conversation…") — тоже busy, даже если "esc to interrupt" не показан.
+  const bi = Math.max(buf.lastIndexOf('esc to interrupt'), buf.lastIndexOf('Compacting conversation'));
   let idleIdx = -1;
   let idleMode = session.claudeMode;
   for (const m of IDLE_MARKS) {
