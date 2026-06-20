@@ -167,6 +167,37 @@ func extractCustomTitles(fullPath string, fileSize int64) map[string]string {
 	return titles
 }
 
+var cmdNameRe = regexp.MustCompile(`(?s)<command-name>\s*(.*?)\s*</command-name>`)
+var cmdArgsRe = regexp.MustCompile(`(?s)<command-args>\s*(.*?)\s*</command-args>`)
+
+// normalizeSlashCommand сворачивает обёртку слэш-команды из JSONL
+// (<command-name>/x</command-name> … <command-args>y</command-args>) в чистое «/x y»,
+// которое юзер реально ввёл. Иначе чат рендерит сырой XML, а оптимистичный пузырь
+// (текст «/x y») не сматчивается по тексту и ВИСИТ навсегда.
+func normalizeSlashCommand(s string) string {
+	if !strings.Contains(s, "<command-name>") {
+		return s
+	}
+	m := cmdNameRe.FindStringSubmatch(s)
+	if m == nil {
+		return s
+	}
+	name := strings.TrimSpace(m[1])
+	if name == "" {
+		return s
+	}
+	if !strings.HasPrefix(name, "/") {
+		name = "/" + name
+	}
+	out := name
+	if a := cmdArgsRe.FindStringSubmatch(s); a != nil {
+		if args := strings.TrimSpace(a[1]); args != "" {
+			out += " " + args
+		}
+	}
+	return out
+}
+
 func extractTextContent(meta jsonlMeta) string {
 	if meta.Message == nil {
 		return ""
@@ -174,7 +205,7 @@ func extractTextContent(meta jsonlMeta) string {
 	// Content can be a string or array of content blocks
 	var s string
 	if err := json.Unmarshal(meta.Message.Content, &s); err == nil {
-		return s
+		return normalizeSlashCommand(s)
 	}
 	// Try array of blocks: [{"type":"text","text":"..."}]
 	var blocks []struct {
@@ -247,7 +278,7 @@ func extractBlocks(meta jsonlMeta) []chatBlock {
 	}
 	var s string
 	if err := json.Unmarshal(meta.Message.Content, &s); err == nil {
-		s = strings.TrimSpace(s)
+		s = normalizeSlashCommand(strings.TrimSpace(s))
 		if s == "" {
 			return nil
 		}
