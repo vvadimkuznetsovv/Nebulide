@@ -1,0 +1,3 @@
+{ "name": "ui-shot", "private": true, "type": "module",
+  "description": "Playwright headless — логинится в локальный Nebulide и снимает скриншоты UI.",
+  "dependencies": { "playwright": "^1.49.0" } }

@@ -60,7 +60,15 @@ func (h *ClaudeSessionsHandler) claudeBaseDir() string {
 var slugNonAlnumRe = regexp.MustCompile(`[^a-zA-Z0-9]`)
 
 func workspaceSlug(wsPath string) string {
-	return slugNonAlnumRe.ReplaceAllString(filepath.ToSlash(wsPath), "-")
+	p := filepath.ToSlash(wsPath)
+	// Windows: claude приводит БУКВУ ДИСКА к нижнему регистру в слаге проекта
+	// ("C:/Users/..." → "c--Users-..."). Без этого слаг бэкенда ("C--...") не совпадает
+	// с реальной папкой claude ("c--...") → JSONL сессии не находится → чат пустой.
+	// На Linux пути без буквы диска — ветка не срабатывает, поведение прежнее.
+	if len(p) >= 2 && p[1] == ':' {
+		p = strings.ToLower(p[:1]) + p[1:]
+	}
+	return slugNonAlnumRe.ReplaceAllString(p, "-")
 }
 
 // slugToPath tries to convert a Claude project slug back to a filesystem path.

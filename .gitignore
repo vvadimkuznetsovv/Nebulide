@@ -45,4 +45,5 @@ _ssh_check.js
 CLAUDE.md
 
 # Backups
-backups/
+backups/tools/ui-shot/node_modules/
+tools/ui-shot/shots/

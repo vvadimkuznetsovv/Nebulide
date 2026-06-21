@@ -112,9 +112,13 @@ func hookArrayHasCommand(arr []any, cmd string) bool {
 	return false
 }
 
-// claudeSettingsPath — ~/.claude/settings.json текущего пользователя (там же читает локальный
-// claude: на Linux в Docker — /root/.claude, на Windows — C:\Users\<user>\.claude).
+// claudeSettingsPath — settings.json конфиг-каталога claude (туда же он смотрит). Уважает
+// CLAUDE_CONFIG_DIR (если claude запущен с кастомным конфигом), иначе ~/.claude: на Linux в
+// Docker — /root/.claude, на Windows — C:\Users\<user>\.claude.
 func claudeSettingsPath() string {
+	if dir := os.Getenv("CLAUDE_CONFIG_DIR"); dir != "" {
+		return filepath.Join(dir, "settings.json")
+	}
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
 		return ""
