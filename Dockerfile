@@ -25,11 +25,11 @@ COPY backend/nebulide .
 # Copy pre-built frontend
 COPY frontend/dist ./static
 
-# Claude Code hooks — signal permission/mode/working status to the backend
-# (registered into ~/.claude/settings.json by entrypoint.sh on startup)
-COPY hooks/nebulide-hook.sh /app/hooks/nebulide-hook.sh
-COPY hooks/nebulide-statusline.sh /app/hooks/nebulide-statusline.sh
-RUN chmod +x /app/hooks/nebulide-hook.sh /app/hooks/nebulide-statusline.sh
+# Claude Code hooks + statusLine — КРОСС-ПЛАТФОРМЕННЫЕ Node-скрипты (один код Linux+Windows).
+# Регистрирует их сам бэкенд (Go) на старте в ~/.claude/settings.json (backend/services/claudehooks.go).
+# Запускаются через `node`, поэтому +x не нужен.
+COPY hooks/nebulide-hook.mjs /app/hooks/nebulide-hook.mjs
+COPY hooks/nebulide-statusline.mjs /app/hooks/nebulide-statusline.mjs
 
 # Entrypoint: auto-installs persisted packages on startup
 COPY entrypoint.sh /entrypoint.sh

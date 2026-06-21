@@ -37,6 +37,10 @@ func main() {
 	log.Printf("Shared dir: %s", cfg.SharedDir)
 	os.MkdirAll(cfg.SharedDir, 0775)
 
+	// Регистрируем Claude Code hooks + statusLine в ~/.claude/settings.json (кросс-платформенно:
+	// Docker/Linux и локально на Windows) — чтобы claude в терминале дёргал хуки одинаково.
+	services.RegisterClaudeHooks()
+
 	// Seed admin user
 	seedAdminUser(cfg)
 
