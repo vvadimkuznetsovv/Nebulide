@@ -9,7 +9,7 @@ import { useLongPress } from '../../hooks/useLongPress';
 import { ensureFreshToken, refreshTokenOnce } from '../../api/tokenRefresh';
 import { useWorkspaceSessionStore } from '../../store/workspaceSessionStore';
 import { emitActivity } from '../../utils/activityBus';
-import { analyzeScreen, type MenuOption } from './claudeScreen';
+import { analyzeScreen, type MenuOption, type QuestionTab } from './claudeScreen';
 import { registerTerminal, unregisterTerminal, getTerminalNumber, useTerminalRegistryVersion, markTerminalClosed } from '../../utils/terminalRegistry';
 import { usePetStore } from '../../store/petStore';
 import api from '../../api/client';
@@ -87,6 +87,8 @@ interface TermSession {
   /** Скрейпнутые варианты меню + описания (для question) + деталь (команда/файл для permission). */
   permOptions: MenuOption[];
   permDetail: string;
+  /** Заголовки/прогресс мульти-вопроса AskUserQuestion (табы «← ☐ H1 ✔️ H2 →»). */
+  permTabs: QuestionTab[];
   workStatusCur: string;
   /** claude TUI присутствует на экране (загрузился) — для гейта отложенной отправки. */
   claudeAlive: boolean;
@@ -177,11 +179,13 @@ function detectClaudeScreen(session: TermSession, instanceId: string) {
     session.permQuestion = a.menu.question;
     session.permOptions = a.menu.options;
     session.permDetail = a.menu.detail;
+    session.permTabs = a.menu.tabs;
   } else {
     session.permKind = '';
     session.permMulti = false;
     session.permOptions = [];
     session.permDetail = '';
+    session.permTabs = [];
   }
 
   if (a.hasMarkers) {
@@ -212,6 +216,7 @@ export function getTerminalScreenState(instanceId: string) {
     permQuestion: s.permQuestion,
     permOptions: s.permOptions,
     permDetail: s.permDetail,
+    permTabs: s.permTabs,
     workStatus: s.workStatusCur,
   };
 }
@@ -273,6 +278,11 @@ export async function submitPromptToTerminal(instanceId: string, text: string): 
     const sess = sessions.get(instanceId);
     if (sess?.ws?.readyState === WebSocket.OPEN) {
       await new Promise(r => setTimeout(r, 40));
+      // СНАЧАЛА очищаем строку ввода claude (Ctrl+U = kill-line). Иначе остаток прошлого/
+      // прерванного (Ctrl+C) сообщения, ещё стоящий во вводе, СКЛЕИВАЕТСЯ с новым текстом →
+      // баг «два сообщения в одном пузыре». Очистка пустой строки безвредна.
+      sess.ws.send(new TextEncoder().encode('\x15'));
+      await new Promise(r => setTimeout(r, 30));
       // bracketed paste: ESC[200~ <text> ESC[201~  — buffers text (incl. newlines) literally
       sess.ws.send(new TextEncoder().encode('\x1b[200~' + text + '\x1b[201~'));
       // separate Enter (after the paste settles) = submit, not newline
@@ -404,6 +414,7 @@ function createXterm(instanceId: string): TermSession {
     permMulti: false,
     permOptions: [],
     permDetail: '',
+    permTabs: [],
     workStatusCur: '',
     claudeAlive: false,
     claudeMode: 'default',

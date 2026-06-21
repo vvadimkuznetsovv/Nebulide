@@ -36,7 +36,26 @@ export function cleanPermLabel(raw: string): string {
 }
 
 export interface MenuOption { digit: string; label: string; raw: string; desc: string; checked?: boolean }
-export interface ScrapedMenu { kind: 'permission' | 'question'; multi: boolean; question: string; options: MenuOption[]; detail: string }
+export interface QuestionTab { label: string; done: boolean }
+export interface ScrapedMenu { kind: 'permission' | 'question'; multi: boolean; question: string; options: MenuOption[]; detail: string; tabs: QuestionTab[] }
+
+/** Табы мульти-вопроса AskUserQuestion: верхняя строка «←  ☐ Заголовок1  ✔️ Заголовок2  →».
+ *  Даёт ЗАГОЛОВКИ вопросов и какие уже отвечены (✔️) → прогресс «вопрос N из M». */
+export function scrapeQuestionTabs(lines: string[]): QuestionTab[] {
+  for (const line of lines) {
+    if (line.indexOf('←') < 0 || line.indexOf('→') < 0) continue;
+    if (!/[☐✔✓]/.test(line)) continue;
+    const inner = line.replace(/^[^←]*←/, '').replace(/→[^→]*$/, '');
+    const tabs: QuestionTab[] = [];
+    const re = /([☐✔✓])️?\s*([^☐✔✓]+?)(?=\s{2,}[☐✔✓]|\s*$)/g;
+    for (let m = re.exec(inner); m; m = re.exec(inner)) {
+      const label = m[2].trim();
+      if (label) tabs.push({ label, done: /[✔✓]/.test(m[1]) });
+    }
+    if (tabs.length) return tabs;
+  }
+  return [];
+}
 
 /** Скрейп ЛЮБОГО интерактивного select-меню claude из рендер-грида (выверено на 2.1.175):
  *  - permission: «Do you want to …?» + Yes/No(+allow) + футер «Esc to cancel · Tab to amend …»
@@ -145,7 +164,9 @@ export function scrapeMenu(buf: string): ScrapedMenu | null {
     // Описание МЕЖДУ вопросом и пунктами (напр. у «Change effort level?» — про кэш/скорость).
     detail = collectDetail(lines, qIdx + 1, firstOptIdx, 600);
   }
-  return { kind, multi, question, options, detail };
+  // Заголовки/прогресс мульти-вопроса — только для AskUserQuestion (не план/permission).
+  const tabs = kind === 'question' && !isPlan ? scrapeQuestionTabs(lines) : [];
+  return { kind, multi, question, options, detail, tabs };
 }
 
 /** Собрать строки [from, to) в текст: пропустить чисто-разделительные, обрезать пустые края. */

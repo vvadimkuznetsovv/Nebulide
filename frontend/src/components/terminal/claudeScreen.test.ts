@@ -49,6 +49,13 @@ describe('scrapeMenu — question / plan / multiselect', () => {
     expect(m.options[0].desc).toContain('Спрятать');
   });
 
+  it('табы мульти-вопроса — заголовки + прогресс (← ☐ Пул ✔️ Submit →)', () => {
+    const m = scrapeMenu(fx('question-gitpull.txt'))!;
+    expect(m.tabs.map((t) => t.label)).toContain('Пул');
+    expect(m.tabs.find((t) => t.label === 'Пул')?.done).toBe(false);
+    expect(m.tabs.find((t) => t.label === 'Submit')?.done).toBe(true);
+  });
+
   it('мульти-селект (чекбоксы [ ]/[✔])', () => {
     const m = scrapeMenu(fx('multiselect-spores.txt'))!;
     expect(m.kind).toBe('question');

@@ -20,7 +20,7 @@ interface Props {
 }
 
 interface PermOption { digit: string; label: string; raw: string; desc?: string; checked?: boolean }
-interface PermReq { kind?: 'permission' | 'question' | ''; multi?: boolean; question?: string; detail?: string; options: PermOption[]; tool?: string; input?: unknown }
+interface PermReq { kind?: 'permission' | 'question' | ''; multi?: boolean; question?: string; detail?: string; options: PermOption[]; tool?: string; input?: unknown; tabs?: { label: string; done: boolean }[] }
 
 // Tail-кэш на instanceId (переживает перемонтирование вида).
 interface TailCache { project: string; sessionFile: string; sessionId: string; offset: number; messages: RichMessage[] }
@@ -396,7 +396,7 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
         la.permSig = permSig;
         if (st.permMenu) {
           const d = permDetailsRef.current;
-          setPerm({ kind: st.permKind, multi: st.permMulti, question: st.permQuestion, detail: st.permDetail, options: st.permOptions || [], tool: d?.tool, input: d?.input });
+          setPerm({ kind: st.permKind, multi: st.permMulti, question: st.permQuestion, detail: st.permDetail, options: st.permOptions || [], tool: d?.tool, input: d?.input, tabs: st.permTabs || [] });
         } else { setPerm(null); permDetailsRef.current = null; }
       }
     };
@@ -740,6 +740,23 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
                 const detailText = hookCmd || perm.detail || '';
                 return (
                   <>
+                    {/* Заголовки/прогресс мульти-вопроса AskUserQuestion (← ☐ H1 ✔️ H2 →) */}
+                    {perm.kind === 'question' && perm.tabs && perm.tabs.length > 1 && (() => {
+                      const qTabs = perm.tabs.filter((t) => !/^(submit|cancel|готово|отмена)/i.test(t.label));
+                      if (qTabs.length < 1) return null;
+                      const doneN = qTabs.filter((t) => t.done).length;
+                      return (
+                        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent-bright)', whiteSpace: 'nowrap' }}>Вопрос {Math.min(doneN + 1, qTabs.length)} из {qTabs.length}</span>
+                          {qTabs.map((t, i) => (
+                            <span key={i} style={{ fontSize: 10.5, padding: '2px 7px', borderRadius: 10, whiteSpace: 'nowrap',
+                              background: t.done ? 'rgba(var(--success-rgb),0.18)' : 'rgba(var(--accent-rgb),0.14)',
+                              border: `1px solid ${t.done ? 'rgba(var(--success-rgb),0.4)' : 'rgba(var(--accent-rgb),0.3)'}`,
+                              color: t.done ? 'var(--success)' : 'var(--text-secondary)' }}>{t.done ? '✓ ' : ''}{t.label}</span>
+                          ))}
+                        </div>
+                      );
+                    })()}
                     <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)', marginBottom: detailText ? 6 : 0 }}>
                       {perm.question || 'Claude запрашивает доступ'}
                     </div>
@@ -798,19 +815,19 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
             </div>
           </div>
         )}
-
-        {/* Живой индикатор «думает» — из чтения экрана (видно, что claude не висит) */}
-        {status === 'working' && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 4px 2px', color: 'var(--accent-bright)', fontSize: 12.5 }}>
-            <span className="claude-chat-pulse" style={{ fontSize: 14, lineHeight: 1 }}>✻</span>
-            <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{workStatus || 'Claude думает…'}</span>
-          </div>
-        )}
       </div>
 
       {/* Composer (pill + input + mode footer) — in normal flow, so the full
           message history always sits ABOVE the input (never behind it). */}
       <div ref={composerRef} style={{ flexShrink: 0 }}>
+
+      {/* Живой индикатор «думает» — ПРЯМО НАД полем ввода (прижат к низу, не висит в ленте) */}
+      {status === 'working' && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px 2px', color: 'var(--accent-bright)', fontSize: 12.5 }}>
+          <span className="claude-chat-pulse" style={{ fontSize: 14, lineHeight: 1 }}>✻</span>
+          <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{workStatus || 'Claude думает…'}</span>
+        </div>
+      )}
 
       {/* Input + voice */}
       <div style={{ position: 'relative', flexShrink: 0, borderTop: '1px solid var(--glass-border)', padding: 8, background: 'rgba(0,0,0,0.15)', display: 'flex', gap: 8, alignItems: 'flex-end' }}>
