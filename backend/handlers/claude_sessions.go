@@ -181,7 +181,10 @@ var cmdStdoutRe = regexp.MustCompile(`(?s)<local-command-stdout>\s*(.*?)\s*</loc
 // пузырь («/x y») не сматчивается по тексту и ВИСИТ. Возвращаем «/x y» (+ результат отдельной
 // строкой), caveat выкидываем. Обрабатываем и сообщение-только-stdout (без command-name).
 func normalizeSlashCommand(s string) string {
-	if !strings.Contains(s, "<command-name>") && !strings.Contains(s, "<local-command-stdout>") {
+	// Триггеримся и на ОДИНОЧНЫЙ <local-command-caveat> (служебная инструкция модели) — его
+	// тоже надо скрыть, иначе в чате висит сырой "<local-command-caveat>Caveat: …</…>".
+	if !strings.Contains(s, "<command-name>") && !strings.Contains(s, "<local-command-stdout>") &&
+		!strings.Contains(s, "<local-command-caveat>") {
 		return s
 	}
 	cmd := ""
@@ -210,7 +213,7 @@ func normalizeSlashCommand(s string) string {
 	case out != "":
 		return out
 	}
-	return s
+	return "" // остался только служебный caveat (инструкция модели) → скрыть сообщение
 }
 
 func extractTextContent(meta jsonlMeta) string {
@@ -1293,8 +1296,12 @@ func (h *ClaudeSessionsHandler) ResolveLive(c *gin.Context) {
 	// (переиспользованный терминал: старый claude не закрылся чисто → SessionEnd не очистил
 	// карту, а новый --resume ещё не выстрелил хуком). Тогда пропускаем tier1 и отдаём явный
 	// hint (tier 1.5). Форк в ТОЙ ЖЕ папке (hook новее) — по-прежнему выигрывает (cwd совпадает).
-	staleHook := sessionHint != "" && sessionHint != hookSid &&
-		cwdHint != "" && workspaceSlug(cwdHint) != workspaceSlug(hookCwd)
+	// Хук УСТАРЕЛ для этого запроса, если интерфейс просит ДРУГУЮ папку, чем та, где реально
+	// бежит claude по хуку (переиспользованный терминал / открыта другая папка). Тогда пропускаем
+	// hook-тиры (0/1) и резолвим по запрошенной папке → чат перепривязывается к выбранной папке
+	// (это и был баг «открыл новую папку — показалась старая сессия другой папки»). Форк в ТОЙ
+	// ЖЕ папке (cwd совпадает) — хук по-прежнему выигрывает.
+	staleHook := cwdHint != "" && hookCwd != "" && workspaceSlug(cwdHint) != workspaceSlug(hookCwd)
 
 	// 0) ТОЧНЫЙ путь к JSONL из хука (transcript_path) — самый надёжный источник: claude сам
 	// сообщил, ГДЕ файл сессии. Не угадываем слаг из cwd (ломалось на git-руте, регистре буквы
@@ -1357,9 +1364,12 @@ func (h *ClaudeSessionsHandler) ResolveLive(c *gin.Context) {
 		}
 	}
 
-	// 3) Newest .jsonl across all of the user's workspace projects.
+	// 3) Newest .jsonl across all of the user's workspace projects — ТОЛЬКО когда папка НЕ
+	// задана (cd в терминале без hint). Если папка УКАЗАНА, но сессии в ней ещё нет — НЕ
+	// подставляем чужую (глобально-новейшую) сессию: это и был баг «открыл новую папку, а
+	// показалась старая сессия другой папки». Без cwd → пусто = новый чат для этой папки.
 	entries, err := os.ReadDir(projectsDir)
-	if err == nil {
+	if err == nil && cwdHint == "" {
 		var bestProj, bestFile string
 		var bestMT time.Time
 		for _, e := range entries {

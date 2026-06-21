@@ -45,6 +45,9 @@ func lockoutDuration(failCount int) time.Duration {
 // IsLocked checks if a username is currently locked out.
 // Returns (locked, remaining seconds until unlock).
 func (lo *LoginLockout) IsLocked(ctx context.Context, username string) (bool, int) {
+	if lo == nil || lo.rdb == nil { // redis недоступен → лок выключен (не роняем логин)
+		return false, 0
+	}
 	key := lockoutKeyPrefix + username
 	lockedUntil, err := lo.rdb.HGet(ctx, key, "locked_until").Result()
 	if err != nil {
@@ -67,6 +70,9 @@ func (lo *LoginLockout) IsLocked(ctx context.Context, username string) (bool, in
 
 // RecordFailure increments the fail count and applies lockout if threshold reached.
 func (lo *LoginLockout) RecordFailure(ctx context.Context, username string) {
+	if lo == nil || lo.rdb == nil {
+		return
+	}
 	key := lockoutKeyPrefix + username
 
 	newCount, err := lo.rdb.HIncrBy(ctx, key, "fail_count", 1).Result()
@@ -89,6 +95,9 @@ func (lo *LoginLockout) RecordFailure(ctx context.Context, username string) {
 
 // RecordSuccess resets the fail count for a username.
 func (lo *LoginLockout) RecordSuccess(ctx context.Context, username string) {
+	if lo == nil || lo.rdb == nil {
+		return
+	}
 	if err := lo.rdb.Del(ctx, lockoutKeyPrefix+username).Err(); err != nil {
 		log.Printf("[Lockout] Redis Del failed for %s: %v", username, err)
 	}

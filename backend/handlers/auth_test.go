@@ -24,7 +24,7 @@ import (
 func setupAuthTestRouter() (*gin.Engine, *testutil.TestContext) {
 	db := testutil.SetupTestDB()
 	cfg := testutil.TestConfig()
-	handler := NewAuthHandler(cfg)
+	handler := NewAuthHandler(cfg, services.NewLoginLockout(nil))
 
 	gin.SetMode(gin.TestMode)
 	r := gin.New()

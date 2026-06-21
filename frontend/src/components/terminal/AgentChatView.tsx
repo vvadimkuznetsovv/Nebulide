@@ -25,6 +25,10 @@ interface PermReq { kind?: 'permission' | 'question' | ''; multi?: boolean; ques
 // Tail-кэш на instanceId (переживает перемонтирование вида).
 interface TailCache { project: string; sessionFile: string; sessionId: string; offset: number; messages: RichMessage[] }
 const tailCache = new Map<string, TailCache>();
+
+// Сравнение папок (терминала и привязанной сессии) кросс-ОС: слеши к "/", хвостовой срезаем.
+const sameFolder = (a?: string, b?: string) =>
+  !!a && !!b && a.replace(/\\/g, '/').replace(/\/+$/, '') === b.replace(/\\/g, '/').replace(/\/+$/, '');
 // instanceId, для которых claude уже хоть раз показал готовность (hook/экран). Module-level —
 // переживает перемонтирование вида; решает «отправка до готовности claude теряется».
 const readyInstances = new Set<string>();
@@ -199,7 +203,7 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
   const inputBaseRef = useRef('');
 
   const cInit = tailCache.get(instanceId);
-  const targetRef = useRef<{ project: string; sessionFile: string; offset: number; sessionId: string } | null>(
+  const targetRef = useRef<{ project: string; sessionFile: string; offset: number; sessionId: string; cwd?: string } | null>(
     // offset из кэша берём ТОЛЬКО если есть кэш-сообщения, иначе 0 — иначе восстановимся
     // «в конце файла» без сообщений и чат будет пустым (хотя сессия полная).
     cInit ? { project: cInit.project, sessionFile: cInit.sessionFile, offset: cInit.messages?.length ? cInit.offset : 0, sessionId: cInit.sessionId } : null
@@ -279,31 +283,58 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
   // session_id) и переопределяет слабый cwd/новейший фолбэк. Резолвим периодически,
   // НЕ завязываясь на разовое событие хука: чинит «два терминала тянут одну историю»
   // и следует за перезапуском claude / сменой сессии (--resume) в том же терминале.
+  // Перепривязка к новой сессии (или в пустой чат при target=null). Оптимистичные плейсхолдеры
+  // СОХРАНЯЕМ — иначе только что отправленный текст пропадёт.
+  const rebind = useCallback((target: { project: string; sessionFile: string; sessionId: string; cwd?: string } | null) => {
+    tailCache.delete(instanceId);
+    targetRef.current = target ? { ...target, offset: 0 } : null;
+    const keptOpt = messagesRef.current.filter(m => m.uuid.startsWith('optimistic-'));
+    messagesRef.current = keptOpt; // синхронно, чтобы параллельный poll не подмешал старую сессию
+    setMessages(keptOpt);
+    emptyReloadRef.current = false;
+    setStatus('ready');
+    if (target) poll(true);
+  }, [instanceId, poll]);
+
   const reconcile = useCallback(async () => {
     try {
       const { data } = await resolveLiveSession(instanceId, cwd, getSessionHint(instanceId));
-      if (!data.session_file) return;
       const cur = targetRef.current;
-      const authoritative = !!data.session_id; // непустой = точная сессия из хука
+      // Папка терминала ≠ папка привязанной сессии → привязка от ДРУГОЙ папки (переоткрыли папку
+      // в том же терминале / новый чат). Перепривязываемся к выбранной папке — это и был баг
+      // «открыл новую папку, а показалась старая сессия другой папки».
+      const folderChanged = !!cur && !!cwd && !!cur.cwd && !sameFolder(cur.cwd, cwd);
+      if (!data.session_file) {
+        // Для запрошенной папки сессии ещё нет. Если текущая — от ДРУГОЙ папки, сбрасываем в
+        // пустой чат (готов к новой сессии этой папки), а не держим чужую историю.
+        if (folderChanged) rebind(null);
+        return;
+      }
+      const authoritative = !!data.session_id; // непустой session_id = точная сессия (хук/transcript)
       if (!cur) {
-        targetRef.current = { project: data.project, sessionFile: data.session_file, offset: 0, sessionId: data.session_id || '' };
+        targetRef.current = { project: data.project, sessionFile: data.session_file, offset: 0, sessionId: data.session_id || '', cwd: data.cwd };
         emptyReloadRef.current = false;
         setStatus('ready');
         poll(true);
-      } else if (authoritative && data.session_id !== cur.sessionId) {
-        // tier-1 указал другую сессию (чужой фолбэк / перезапуск) → переключаемся.
-        // Оптимистичные плейсхолдеры СОХРАНЯЕМ — иначе отправленный текст пропадёт.
-        tailCache.delete(instanceId);
-        targetRef.current = { project: data.project, sessionFile: data.session_file, offset: 0, sessionId: data.session_id };
-        const keptOpt = messagesRef.current.filter(m => m.uuid.startsWith('optimistic-'));
-        messagesRef.current = keptOpt; // синхронно, чтобы параллельный poll не подмешал старую сессию
-        setMessages(keptOpt);
-        emptyReloadRef.current = false;
-        setStatus('ready');
-        poll(true);
+      } else if ((authoritative && data.session_id !== cur.sessionId) || folderChanged) {
+        // Другая сессия (перезапуск/чужой фолбэк) ИЛИ сменилась папка → переключаемся.
+        rebind({ project: data.project, sessionFile: data.session_file, sessionId: data.session_id, cwd: data.cwd });
+      } else if (!cur.cwd && data.cwd) {
+        cur.cwd = data.cwd; // дозаполняем папку привязки (для будущих сравнений)
       }
     } catch { /* claude ещё не стартовал — ретраим */ }
-  }, [instanceId, cwd, poll]);
+  }, [instanceId, cwd, poll, rebind]);
+
+  // Кнопка «сбросить чат» — принудительно отвязать от текущей сессии и перепривязать к папке
+  // терминала (на случай, когда авто-сравнение не сработало или юзер хочет начать заново).
+  const resetChat = useCallback(() => {
+    tailCache.delete(instanceId);
+    targetRef.current = null;
+    messagesRef.current = [];
+    setMessages([]);
+    emptyReloadRef.current = false;
+    reconcile();
+  }, [instanceId, reconcile]);
 
   useEffect(() => {
     reconcile();
@@ -660,6 +691,9 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
             </button>
             <button type="button" onClick={() => setFindOpen(true)} title="Поиск" style={iconBtn}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
+            </button>
+            <button type="button" onClick={resetChat} title="Сбросить чат — перепривязать к папке этого терминала" style={iconBtn}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" /></svg>
             </button>
             <button type="button" onClick={() => changeFont(-1)} title="Меньше шрифт" style={iconBtn}>A−</button>
             <button type="button" onClick={() => changeFont(1)} title="Больше шрифт" style={iconBtn}>A+</button>
