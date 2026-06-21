@@ -42,15 +42,16 @@ export interface ScrapedMenu { kind: 'permission' | 'question'; multi: boolean; 
 /** Табы мульти-вопроса AskUserQuestion: верхняя строка «←  ☐ Заголовок1  ✔️ Заголовок2  →».
  *  Даёт ЗАГОЛОВКИ вопросов и какие уже отвечены (✔️) → прогресс «вопрос N из M». */
 export function scrapeQuestionTabs(lines: string[]): QuestionTab[] {
+  // Маркеры табов claude: ☐ = вопрос НЕ отвечен, ☒ = отвечен (ballot-with-X), ✔/✓ = отвечен/Submit.
   for (const line of lines) {
     if (line.indexOf('←') < 0 || line.indexOf('→') < 0) continue;
-    if (!/[☐✔✓]/.test(line)) continue;
+    if (!/[☐☒✔✓]/.test(line)) continue;
     const inner = line.replace(/^[^←]*←/, '').replace(/→[^→]*$/, '');
     const tabs: QuestionTab[] = [];
-    const re = /([☐✔✓])️?\s*([^☐✔✓]+?)(?=\s{2,}[☐✔✓]|\s*$)/g;
+    const re = /([☐☒✔✓])️?\s*([^☐☒✔✓]+?)(?=\s{2,}[☐☒✔✓]|\s*$)/g;
     for (let m = re.exec(inner); m; m = re.exec(inner)) {
       const label = m[2].trim();
-      if (label) tabs.push({ label, done: /[✔✓]/.test(m[1]) });
+      if (label) tabs.push({ label, done: /[☒✔✓]/.test(m[1]) }); // ☒/✔/✓ = отвечен
     }
     if (tabs.length) return tabs;
   }
