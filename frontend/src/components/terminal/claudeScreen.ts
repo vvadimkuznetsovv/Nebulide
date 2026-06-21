@@ -170,6 +170,39 @@ export function scrapeMenu(buf: string): ScrapedMenu | null {
   return { kind, multi, question, options, detail, tabs };
 }
 
+export interface ResumeSession { name: string; meta: string; selected: boolean }
+
+/** Скрейп /resume-ПИКЕРА claude (список сессий, отдельный от меню сжатой сессии). Футер
+ *  «… Type to search · Esc to cancel» + заголовок «Resume session (X of Y)». Каждая сессия =
+ *  строка-ИМЯ (❯ на выбранной) + строка-МЕТА «58 seconds ago · HEAD · 62.2KB». Возвращает сессии
+ *  по порядку + индекс выбранной — карточка по клику навигирует стрелками от выбранной к цели. */
+export function scrapeResumePicker(buf: string): { sessions: ResumeSession[]; selectedIndex: number } | null {
+  if (!/Resume session/i.test(buf)) return null;
+  const lines = buf.split('\n');
+  let footerIdx = -1;
+  for (let i = lines.length - 1; i >= 0 && lines.length - i <= 10; i--) {
+    if (/Esc to cancel/.test(lines[i]) && /(Type to search|to rename|show all projects)/.test(lines[i])) { footerIdx = i; break; }
+  }
+  if (footerIdx < 0) return null;
+  const META = /\d+\s+(second|minute|hour|day|week|month)s?\s+ago/i;
+  const sessions: ResumeSession[] = [];
+  for (let i = 0; i < footerIdx; i++) {
+    if (!META.test(lines[i])) continue;
+    const meta = lines[i].replace(/\s+/g, ' ').trim();
+    let j = i - 1;
+    while (j >= 0 && !lines[j].trim()) j--;
+    const nameLine = lines[j] || '';
+    if (/Resume session|Search/i.test(nameLine)) continue;
+    const selected = nameLine.indexOf('❯') >= 0;
+    const name = nameLine.replace(/^[\s❯>]+/, '').trim();
+    if (name) sessions.push({ name, meta, selected });
+  }
+  if (sessions.length < 1) return null;
+  let selectedIndex = sessions.findIndex((s) => s.selected);
+  if (selectedIndex < 0) selectedIndex = 0;
+  return { sessions, selectedIndex };
+}
+
 /** Собрать строки [from, to) в текст: пропустить чисто-разделительные, обрезать пустые края. */
 function collectDetail(lines: string[], from: number, to: number, cap: number): string {
   const raw: string[] = [];
@@ -185,6 +218,7 @@ function collectDetail(lines: string[], from: number, to: number, cap: number): 
 export interface ScreenAnalysis {
   resumeMenu: boolean;     // блокирующее меню «как восстановить» (claude --resume сжатой сессии)
   resumeInfo: string;
+  resumePicker: { sessions: ResumeSession[]; selectedIndex: number } | null; // /resume — список сессий
   menu: ScrapedMenu | null; // permission / question / plan / подтверждение
   hasMarkers: boolean;     // на экране есть busy- ИЛИ idle-маркер (claude жив и не в меню-загрузке)
   busy: boolean;           // claude РАБОТАЕТ (esc to interrupt / Compacting позже idle-маркера)
@@ -200,7 +234,8 @@ export function analyzeScreen(buf: string, prevMode: string): ScreenAnalysis {
   const resumeMenu = buf.includes('Resume from summary') && buf.includes('Resume full session') && /Don.?t ask me again/.test(buf);
   let resumeInfo = '';
   if (resumeMenu) { const m = buf.match(/This session is[^\n]*?tokens?\./); resumeInfo = m ? m[0].trim() : ''; }
-  const menu = resumeMenu ? null : scrapeMenu(buf);
+  const resumePicker = resumeMenu ? null : scrapeResumePicker(buf);
+  const menu = resumeMenu || resumePicker ? null : scrapeMenu(buf);
 
   // busy vs idle — позиция последнего маркера. Сжатие ("Compacting conversation…") = busy.
   // Новые версии claude (2.1.18x) УБРАЛИ "esc to interrupt" из части busy-состояний — теперь
@@ -228,12 +263,13 @@ export function analyzeScreen(buf: string, prevMode: string): ScreenAnalysis {
   return {
     resumeMenu,
     resumeInfo,
+    resumePicker,
     menu,
     hasMarkers,
     busy,
     idleVisible: idleIdx >= 0,
     mode,
     workStatus: busy ? extractWorkStatus(buf) : '',
-    alive: hasMarkers || resumeMenu || !!menu,
+    alive: hasMarkers || resumeMenu || !!menu || !!resumePicker,
   };
 }

@@ -167,6 +167,7 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
   const [status, setStatus] = useState<'connecting' | 'ready' | 'working' | 'error' | 'closed'>('connecting');
   const [workStatus, setWorkStatus] = useState(''); // живой статус из экрана: "Caramelizing… (5s · ↑ 87 tokens)"
   const [resumeMenu, setResumeMenu] = useState<{ info: string } | null>(null); // блокирующее меню "как восстановить"
+  const [resumePicker, setResumePicker] = useState<{ sessions: { name: string; meta: string }[]; selectedIndex: number } | null>(null); // /resume — список сессий
   const [ctx, setCtx] = useState<ContextInfo | undefined>(() => contextCache.get(instanceId)); // живой контекст/токены
   const [input, setInput] = useState(() => draftInputs.get(instanceId) || '');
   const [pillCollapsed, setPillCollapsed] = useState(false);
@@ -374,14 +375,14 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
   // ── Частый опрос ТЕКУЩЕГО состояния экрана claude (250мс). Надёжно — НЕ теряется при
   //    ремоунте/смене вида. Источник правды для стоп-кнопки, индикатора, resume/perm-меню. ──
   useEffect(() => {
-    const la = { busy: undefined as boolean | undefined, ws: '', resume: false, permSig: '', mode: '' };
+    const la = { busy: undefined as boolean | undefined, ws: '', resume: false, permSig: '', mode: '', rp: '' };
     const tick = () => {
       const st = getTerminalScreenState(instanceId);
       if (!st) return;
       if (st.alive) {
         readyInstances.add(instanceId);
         const pend = pendingSendRef.current;
-        if (pend && !st.resumeMenu && !st.permMenu) { pendingSendRef.current = null; submitPromptToTerminal(instanceId, pend); setTimeout(() => poll(), 600); }
+        if (pend && !st.resumeMenu && !st.permMenu && !st.resumePicker) { pendingSendRef.current = null; submitPromptToTerminal(instanceId, pend); setTimeout(() => poll(), 600); }
       }
       // Режим claude — из экрана (надёжно, не теряется при ремоунте/смене вида).
       if (st.mode && st.mode !== la.mode) { la.mode = st.mode; setMode(st.mode as PermissionMode); }
@@ -389,6 +390,9 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
       const ws = st.busy ? st.workStatus : '';
       if (ws !== la.ws) { la.ws = ws; setWorkStatus(ws); }
       if (st.resumeMenu !== la.resume) { la.resume = st.resumeMenu; setResumeMenu(st.resumeMenu ? { info: st.resumeInfo } : null); }
+      // /resume-пикер — список сессий; сигнатура = кол-во + выбранная, чтобы перерисовывать при навигации.
+      const rpSig = st.resumePicker ? st.resumePicker.sessions.length + ':' + st.resumePicker.selectedIndex : '';
+      if (rpSig !== la.rp) { la.rp = rpSig; setResumePicker(st.resumePicker ? { sessions: st.resumePicker.sessions.map((x) => ({ name: x.name, meta: x.meta })), selectedIndex: st.resumePicker.selectedIndex } : null); }
       // permission — варианты СКРЕЙПЛЕНЫ с экрана (2 или 3); сигнатура = вопрос+цифры.
       // Сигнатура включает состояние чекбоксов (✔/ ) — чтобы тогл в мульти-селекте перерисовывал карточку.
       const permSig = st.permMenu ? st.permKind + '|' + st.permQuestion + '|' + (st.permOptions || []).map(o => o.digit + (o.checked ? '1' : o.checked === false ? '0' : '')).join('') : '';
@@ -558,7 +562,7 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
     // Если открыто блокирующее меню (permission/resume) — НЕЛЬЗЯ слать текст: Enter в конце
     // подтвердил бы меню (по умолчанию ❯ Yes). Придерживаем до закрытия меню.
     const scr = getTerminalScreenState(instanceId);
-    const menuUp = !!(scr && (scr.resumeMenu || scr.permMenu));
+    const menuUp = !!(scr && (scr.resumeMenu || scr.permMenu || scr.resumePicker));
     if (readyInstances.has(instanceId) && !menuUp) {
       submitPromptToTerminal(instanceId, text); // claude готов, меню нет → шлём (bracketed paste + Enter)
       setTimeout(() => poll(), 600);
@@ -569,7 +573,7 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
       setTimeout(() => {
         if (pendingSendRef.current !== text) return;
         const s = getTerminalScreenState(instanceId);
-        if (s && (s.resumeMenu || s.permMenu)) return; // меню ещё открыто — НЕ отправляем
+        if (s && (s.resumeMenu || s.permMenu || s.resumePicker)) return; // меню ещё открыто — НЕ отправляем
         pendingSendRef.current = null; submitPromptToTerminal(instanceId, text); setTimeout(() => poll(), 600);
       }, 9000);
     }
@@ -610,6 +614,16 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
     sendKey(digit);
     setResumeMenu(null);
     setTimeout(() => poll(), 500);
+  }, [sendKey, poll]);
+
+  // Клик по сессии в /resume-пикере: навигируем стрелками от ВЫБРАННОЙ к ЦЕЛИ, затем Enter.
+  const resumePickerChoose = useCallback((targetIndex: number, selectedIndex: number) => {
+    const delta = targetIndex - selectedIndex;
+    const key = delta > 0 ? '\x1b[B' : '\x1b[A';
+    for (let i = 0; i < Math.abs(delta); i++) sendKey(key);
+    setTimeout(() => sendKey('\r'), 120 + Math.abs(delta) * 12); // Enter после прокрутки курсора
+    setResumePicker(null);
+    setTimeout(() => poll(), 700);
   }, [sendKey, poll]);
 
   // Сменить режим = Shift+Tab в реальный claude (циклит default→acceptEdits→plan→auto).
@@ -726,6 +740,30 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
               <button type="button" onClick={() => resumeChoose('1')} style={pbtn('rgba(var(--accent-rgb),0.18)', 'rgba(var(--accent-rgb),0.4)', 'var(--accent-bright)')}>Из сводки (реком.)</button>
               <button type="button" onClick={() => resumeChoose('2')} style={pbtn('rgba(255,255,255,0.06)', 'var(--glass-border)', 'var(--text-secondary)')}>Полностью как есть</button>
               <button type="button" onClick={() => resumeChoose('3')} style={pbtn('rgba(255,255,255,0.04)', 'var(--glass-border)', 'var(--text-muted)')}>Не спрашивать</button>
+            </div>
+          </div>
+        )}
+
+        {/* /resume — список сессий, обёрнут картой (клик навигирует курсор в claude + Enter) */}
+        {!query && resumePicker && (
+          <div style={{ margin: '10px 0', borderRadius: 12, overflow: 'hidden', border: '1px solid rgba(var(--accent-rgb),0.45)', background: 'rgba(var(--accent-rgb),0.1)' }}>
+            <div style={{ padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>Возобновить сессию</span>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{resumePicker.sessions.length} сессий</span>
+            </div>
+            <div style={{ maxHeight: 320, overflowY: 'auto', borderTop: '1px solid var(--glass-border)' }}>
+              {resumePicker.sessions.map((s, i) => (
+                <button key={i} type="button" onClick={() => resumePickerChoose(i, resumePicker.selectedIndex)}
+                  style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2, width: '100%', textAlign: 'left', padding: '8px 12px', cursor: 'pointer', fontFamily: 'inherit',
+                    background: i === resumePicker.selectedIndex ? 'rgba(var(--accent-rgb),0.15)' : 'transparent', border: 'none', borderBottom: '1px solid var(--glass-border)', color: 'var(--text-primary)' }}>
+                  <span style={{ fontSize: 12.5, fontWeight: 600, maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span>
+                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{s.meta}</span>
+                </button>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: 8, padding: '8px 12px', borderTop: '1px solid var(--glass-border)' }}>
+              <button type="button" onClick={() => { setResumePicker(null); sendKey('\x1b'); }} style={pbtn('rgba(255,255,255,0.05)', 'var(--glass-border)', 'var(--text-secondary)')}>Отмена</button>
+              {onRequestTerminal && <button type="button" onClick={() => { setResumePicker(null); onRequestTerminal(); }} style={pbtn('rgba(255,255,255,0.05)', 'var(--glass-border)', 'var(--text-secondary)')}>⌨ Терминал</button>}
             </div>
           </div>
         )}

@@ -1,0 +1,20 @@
+/resume
+
+  Resume session (1 of 16)
+
+  Search...
+
+nebulide-ws
+
+❯ Ответ одним словом
+  58 seconds ago · HEAD · 62.2KB
+  /exit
+  2 hours ago · HEAD · 16.2KB
+  Создать приложение todo на React
+  4 hours ago · HEAD · 99.1KB
+  Написать рассказ про море
+  5 hours ago · HEAD · 45.2KB
+  Написать рассказ про море на 300 слов
+  5 hours ago · HEAD · 41.5KB
+
+  Ctrl+A to show all projects · Ctrl+B to only show current branch · Space to preview · Ctrl+O to rename · Type to search · Esc to cancel

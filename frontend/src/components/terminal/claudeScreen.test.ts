@@ -5,7 +5,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { scrapeMenu, analyzeScreen } from './claudeScreen';
+import { scrapeMenu, analyzeScreen, scrapeResumePicker } from './claudeScreen';
 
 const FX_DIR = join(dirname(fileURLToPath(import.meta.url)), 'claudeScreen.fixtures');
 const fx = (name: string) => readFileSync(join(FX_DIR, name), 'utf8');
@@ -86,6 +86,26 @@ describe('scrapeMenu — question / plan / multiselect', () => {
     expect(m.options.map((o) => o.digit)).toEqual(['1', '2']);
     expect(m.question).toBe('Change effort level?');
     expect(m.detail).toContain('cached');
+  });
+});
+
+describe('scrapeResumePicker — /resume список сессий', () => {
+  it('сессии по порядку + выбранная (❯) + индекс', () => {
+    const r = scrapeResumePicker(fx('resume-picker.txt'))!;
+    expect(r.sessions.length).toBeGreaterThanOrEqual(5);
+    expect(r.sessions[0].name).toBe('Ответ одним словом');
+    expect(r.sessions[0].selected).toBe(true);
+    expect(r.selectedIndex).toBe(0);
+    expect(r.sessions.find((s) => s.name === 'Создать приложение todo на React')?.meta).toContain('99.1KB');
+  });
+  it('обычное меню НЕ принимается за resume-пикер', () => {
+    expect(scrapeResumePicker(fx('question-gitpull.txt'))).toBeNull();
+  });
+  it('analyzeScreen: resumePicker распознан, menu не ложно-срабатывает', () => {
+    const a = analyzeScreen(fx('resume-picker.txt'), 'default');
+    expect(a.resumePicker).not.toBeNull();
+    expect(a.menu).toBeNull();
+    expect(a.alive).toBe(true);
   });
 });
 

@@ -9,7 +9,7 @@ import { useLongPress } from '../../hooks/useLongPress';
 import { ensureFreshToken, refreshTokenOnce } from '../../api/tokenRefresh';
 import { useWorkspaceSessionStore } from '../../store/workspaceSessionStore';
 import { emitActivity } from '../../utils/activityBus';
-import { analyzeScreen, type MenuOption, type QuestionTab } from './claudeScreen';
+import { analyzeScreen, type MenuOption, type QuestionTab, type ResumeSession } from './claudeScreen';
 import { registerTerminal, unregisterTerminal, getTerminalNumber, useTerminalRegistryVersion, markTerminalClosed } from '../../utils/terminalRegistry';
 import { usePetStore } from '../../store/petStore';
 import api from '../../api/client';
@@ -78,6 +78,8 @@ interface TermSession {
   /** Current claude screen state (source of truth, polled by the chat view). */
   resumeMenuShown: boolean;
   resumeInfo: string;
+  /** /resume — список сессий (карточка по клику навигирует к выбранной). */
+  resumePicker: { sessions: ResumeSession[]; selectedIndex: number } | null;
   permMenuShown: boolean;
   permQuestion: string;
   /** Тип меню: permission (Yes/No) или question (AskUserQuestion, много пунктов). */
@@ -171,6 +173,7 @@ function detectClaudeScreen(session: TermSession, instanceId: string) {
 
   session.resumeMenuShown = a.resumeMenu;
   if (a.resumeMenu) session.resumeInfo = a.resumeInfo;
+  session.resumePicker = a.resumePicker;
 
   session.permMenuShown = !!a.menu;
   if (a.menu) {
@@ -210,6 +213,7 @@ export function getTerminalScreenState(instanceId: string) {
     mode: s.claudeMode,
     resumeMenu: s.resumeMenuShown,
     resumeInfo: s.resumeInfo,
+    resumePicker: s.resumePicker,
     permMenu: s.permMenuShown,
     permKind: s.permKind,
     permMulti: s.permMulti,
@@ -408,6 +412,7 @@ function createXterm(instanceId: string): TermSession {
     lastProgressText: '',
     resumeMenuShown: false,
     resumeInfo: '',
+    resumePicker: null,
     permMenuShown: false,
     permQuestion: '',
     permKind: '',
