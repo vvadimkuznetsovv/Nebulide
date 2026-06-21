@@ -25,6 +25,9 @@ const payload = {
   cwd: inp.cwd,
   permission_mode: inp.permission_mode,
   status: inp.status,
+  // ТОЧНЫЙ путь к JSONL сессии — бэкенд берёт его напрямую (не угадывает слаг из cwd, что
+  // ломалось на git-руте/регистре диска/смене версий claude).
+  transcript_path: inp.transcript_path,
 };
 
 const ctrl = new AbortController();

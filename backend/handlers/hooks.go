@@ -25,10 +25,11 @@ import (
 // instance, learned from Claude Code hook events. Lets the chat-view wrapper
 // map a terminal instanceId → its exact live session JSONL (sessionId + cwd).
 type liveClaudeSession struct {
-	SessionID string
-	CWD       string
-	Event     string
-	UpdatedAt time.Time
+	SessionID      string
+	CWD            string
+	TranscriptPath string // точный путь к JSONL от claude — резолв берёт его напрямую
+	Event          string
+	UpdatedAt      time.Time
 }
 
 var (
@@ -37,7 +38,7 @@ var (
 )
 
 // recordLiveSession is called on every hook event to keep the instance→session map fresh.
-func recordLiveSession(instanceID, sessionID, cwd, event string) {
+func recordLiveSession(instanceID, sessionID, cwd, transcriptPath, event string) {
 	if instanceID == "" || sessionID == "" {
 		return
 	}
@@ -46,7 +47,10 @@ func recordLiveSession(instanceID, sessionID, cwd, event string) {
 	if cwd == "" {
 		cwd = prev.CWD // keep last known cwd if this event omitted it
 	}
-	liveSess[instanceID] = liveClaudeSession{SessionID: sessionID, CWD: cwd, Event: event, UpdatedAt: time.Now()}
+	if transcriptPath == "" {
+		transcriptPath = prev.TranscriptPath
+	}
+	liveSess[instanceID] = liveClaudeSession{SessionID: sessionID, CWD: cwd, TranscriptPath: transcriptPath, Event: event, UpdatedAt: time.Now()}
 	liveSessMu.Unlock()
 }
 
@@ -65,13 +69,13 @@ func clearLiveSession(instanceID string) {
 }
 
 // GetLiveSession returns the latest hook-tracked session for a terminal instance.
-func GetLiveSession(instanceID string) (sessionID, cwd string, ok bool) {
+func GetLiveSession(instanceID string) (sessionID, cwd, transcriptPath string, ok bool) {
 	liveSessMu.RLock()
 	defer liveSessMu.RUnlock()
 	if s, found := liveSess[instanceID]; found {
-		return s.SessionID, s.CWD, true
+		return s.SessionID, s.CWD, s.TranscriptPath, true
 	}
-	return "", "", false
+	return "", "", "", false
 }
 
 // Claude Code fires hooks (UserPromptSubmit, PreToolUse, PostToolUse,
@@ -90,6 +94,7 @@ func NewHookHandler(cfg *config.Config) *HookHandler {
 type ClaudeHookEvent struct {
 	SessionID      string                 `json:"session_id"`
 	CWD            string                 `json:"cwd,omitempty"`
+	TranscriptPath string                 `json:"transcript_path,omitempty"`
 	Event          string                 `json:"event"`
 	Status         string                 `json:"status,omitempty"`
 	Tool           string                 `json:"tool,omitempty"`
@@ -155,7 +160,7 @@ func (h *HookHandler) HandleClaudeHook(c *gin.Context) {
 	if event.Event == "SessionEnd" {
 		clearLiveSession(event.InstanceID)
 	} else {
-		recordLiveSession(event.InstanceID, event.SessionID, event.CWD, event.Event)
+		recordLiveSession(event.InstanceID, event.SessionID, event.CWD, event.TranscriptPath, event.Event)
 	}
 
 	if database.RDB != nil {

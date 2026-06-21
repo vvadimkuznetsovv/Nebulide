@@ -60,15 +60,10 @@ func (h *ClaudeSessionsHandler) claudeBaseDir() string {
 var slugNonAlnumRe = regexp.MustCompile(`[^a-zA-Z0-9]`)
 
 func workspaceSlug(wsPath string) string {
-	p := filepath.ToSlash(wsPath)
-	// Windows: claude приводит БУКВУ ДИСКА к нижнему регистру в слаге проекта
-	// ("C:/Users/..." → "c--Users-..."). Без этого слаг бэкенда ("C--...") не совпадает
-	// с реальной папкой claude ("c--...") → JSONL сессии не находится → чат пустой.
-	// На Linux пути без буквы диска — ветка не срабатывает, поведение прежнее.
-	if len(p) >= 2 && p[1] == ':' {
-		p = strings.ToLower(p[:1]) + p[1:]
-	}
-	return slugNonAlnumRe.ReplaceAllString(p, "-")
+	// claude СОХРАНЯЕТ регистр буквы диска из cwd ("C:/..." → "C--...", "c:/..." → "c--...").
+	// Слаг должен совпадать с тем, как claude назвал папку, поэтому регистр НЕ трогаем.
+	// (Надёжный путь резолва — tier-0 по transcript_path, см. ResolveLive; слаг — фолбэк.)
+	return slugNonAlnumRe.ReplaceAllString(filepath.ToSlash(wsPath), "-")
 }
 
 // slugToPath tries to convert a Claude project slug back to a filesystem path.
@@ -1275,9 +1270,9 @@ func (h *ClaudeSessionsHandler) ResolveLive(c *gin.Context) {
 	wsSlug := h.userWorkspaceSlug(c)
 	projectsDir := filepath.Join(h.claudeBaseDir(), "projects")
 
-	hookSid, hookCwd, hookOk := GetLiveSession(instanceID)
-	log.Printf("[ResolveLive] instance=%s cwd=%q hint=%s wsSlug=%s hook(ok=%v sid=%s cwd=%q)",
-		instanceID, cwdHint, sessionHint, wsSlug, hookOk, hookSid, hookCwd)
+	hookSid, hookCwd, hookTranscript, hookOk := GetLiveSession(instanceID)
+	log.Printf("[ResolveLive] instance=%s cwd=%q hint=%s wsSlug=%s hook(ok=%v sid=%s cwd=%q transcript=%q)",
+		instanceID, cwdHint, sessionHint, wsSlug, hookOk, hookSid, hookCwd, hookTranscript)
 
 	respond := func(tier, project, sessionFile, sessionID, cwd string) {
 		log.Printf("[ResolveLive] → %s project=%s file=%s sid=%s", tier, project, sessionFile, sessionID)
@@ -1300,6 +1295,20 @@ func (h *ClaudeSessionsHandler) ResolveLive(c *gin.Context) {
 	// hint (tier 1.5). Форк в ТОЙ ЖЕ папке (hook новее) — по-прежнему выигрывает (cwd совпадает).
 	staleHook := sessionHint != "" && sessionHint != hookSid &&
 		cwdHint != "" && workspaceSlug(cwdHint) != workspaceSlug(hookCwd)
+
+	// 0) ТОЧНЫЙ путь к JSONL из хука (transcript_path) — самый надёжный источник: claude сам
+	// сообщил, ГДЕ файл сессии. Не угадываем слаг из cwd (ломалось на git-руте, регистре буквы
+	// диска на Windows, смене версий claude). Авторитетно (инстанс совпал), кроме staleHook.
+	if hookTranscript != "" && !staleHook {
+		if st, err := os.Stat(hookTranscript); err == nil && !st.IsDir() &&
+			strings.HasPrefix(filepath.Clean(hookTranscript), filepath.Clean(projectsDir)) {
+			project := filepath.Base(filepath.Dir(hookTranscript))
+			sessionFile := strings.TrimSuffix(filepath.Base(hookTranscript), ".jsonl")
+			respond("tier0-transcript", project, sessionFile, hookSid, hookCwd)
+			return
+		}
+	}
+
 	if hookOk && hookSid != "" && hookCwd != "" && !staleHook {
 		slug := workspaceSlug(hookCwd)
 		if file := sessionFileBySessionID(filepath.Join(projectsDir, slug), hookSid); file != "" {

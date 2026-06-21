@@ -10,7 +10,8 @@
 // заменяется на индикатор режима — поэтому idle = ЛЮБОЙ из них (иначе в acceptEdits/plan/
 // auto claude «никогда не idle» и стоп залипает). Заодно даёт текущий режим.
 export const IDLE_MARKS: { s: string; mode: string }[] = [
-  { s: '? for shortcuts', mode: 'default' },
+  { s: '? for shortcuts', mode: 'default' },      // claude ≤2.1.17x
+  { s: 'for agents', mode: 'default' },            // claude 2.1.18x: "← for agents" заменил "? for shortcuts"
   { s: 'accept edits on', mode: 'acceptEdits' },
   { s: 'plan mode on', mode: 'plan' },
   { s: 'auto mode on', mode: 'auto' },
@@ -54,7 +55,10 @@ export function scrapeMenu(buf: string): ScrapedMenu | null {
   // «ctrl+g to edit in Vim · ~/.claude/plans/…». Проверяем первым.
   let isPlan = false;
   for (let i = lines.length - 1; i >= 0 && lines.length - i <= 40; i--) {
-    if (/ctrl\+g to edit|\.claude[\\/]plans[\\/]/.test(lines[i])) { footerIdx = i; kind = 'question'; isPlan = true; break; }
+    // ТОЛЬКО по уникальному "ctrl+g to edit". Путь ".claude/plans/" НЕ годится — claude
+    // печатает "Planning: ~/.claude/plans/..." в обычном разговоре → ложно ловило футер на
+    // этой строке и собирало варианты из случайного списка выше (баг: слова юзера как опции).
+    if (/ctrl\+g to edit/.test(lines[i])) { footerIdx = i; kind = 'question'; isPlan = true; break; }
   }
   // СТРОГО: permission = «… Tab to amend …», question = «… Enter to select …».
   // Прочие select-меню (/model, /clear и т.п.) НЕ перехватываем (иначе кривая карта).
@@ -176,15 +180,27 @@ export function analyzeScreen(buf: string, prevMode: string): ScreenAnalysis {
   if (resumeMenu) { const m = buf.match(/This session is[^\n]*?tokens?\./); resumeInfo = m ? m[0].trim() : ''; }
   const menu = resumeMenu ? null : scrapeMenu(buf);
 
-  // busy vs idle — позиция последнего маркера. Сжатие ("Compacting conversation…") = busy,
-  // даже если "esc to interrupt" не показан.
-  const bi = Math.max(buf.lastIndexOf('esc to interrupt'), buf.lastIndexOf('Compacting conversation'));
+  // busy vs idle — позиция последнего маркера. Сжатие ("Compacting conversation…") = busy.
+  // Новые версии claude (2.1.18x) УБРАЛИ "esc to interrupt" из части busy-состояний — теперь
+  // живая строка статуса выглядит как "✻ Billowing… (… · ↓ 3 tokens)". Поэтому busy ловим и по
+  // строке статуса со счётчиком токенов (тот же паттерн, что extractWorkStatus).
+  const workRe = /[A-Za-z]+(?: [a-z]+)*(?:…|\.\.\.)\s*\([^)]*tokens[^)]*\)/g;
+  let workIdx = -1;
+  for (let m = workRe.exec(buf); m; m = workRe.exec(buf)) workIdx = m.index;
+  const bi = Math.max(buf.lastIndexOf('esc to interrupt'), buf.lastIndexOf('Compacting conversation'), workIdx);
+  // idle-присутствие: позиция последнего ЛЮБОГО idle-хинта (claude жив и ждёт ввода).
   let idleIdx = -1;
+  for (const m of IDLE_MARKS) { const idx = buf.lastIndexOf(m.s); if (idx > idleIdx) idleIdx = idx; }
+  // Режим — ТОЛЬКО из специфичных маркеров (plan/acceptEdits/auto). "← for agents" / "? for
+  // shortcuts" — общий хинт, есть во ВСЕХ режимах (в т.ч. рядом с "plan mode on"), режим не задаёт.
   let mode = prevMode;
+  let modeIdx = -1;
   for (const m of IDLE_MARKS) {
+    if (m.mode === 'default') continue;
     const idx = buf.lastIndexOf(m.s);
-    if (idx > idleIdx) { idleIdx = idx; mode = m.mode; }
+    if (idx > modeIdx) { modeIdx = idx; mode = m.mode; }
   }
+  if (idleIdx >= 0 && modeIdx < 0) mode = 'default'; // idle есть, спец-маркера режима нет → default
   const hasMarkers = bi >= 0 || idleIdx >= 0;
   const busy = hasMarkers && bi > idleIdx;
   return {

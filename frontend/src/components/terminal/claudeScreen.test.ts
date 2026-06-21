@@ -66,6 +66,13 @@ describe('scrapeMenu — question / plan / multiselect', () => {
     expect(m.detail).toContain('Verification');
   });
 
+  it('НЕ принимает "Planning: ~/.claude/plans/…" в разговоре за план-футер (слова юзера НЕ опции)', () => {
+    const m = scrapeMenu(fx('question-with-tasklist-above.txt'))!;
+    expect(m.question).toContain('Задача 4');
+    expect(m.options[0].label).toContain('Этап + код 3DS');
+    expect(m.options.map((o) => o.label).join(' ')).not.toContain('проверить что странице');
+  });
+
   it('подтверждение БЕЗ nav-футера (Change effort level)', () => {
     const m = scrapeMenu(fx('change-effort-level.txt'))!;
     expect(m.kind).toBe('question');
@@ -106,5 +113,20 @@ describe('analyzeScreen — busy / idle / режим / сжатие', () => {
     const a = analyzeScreen('● Вот ответ:\n  1. первый пункт\n  2. второй пункт\n\n  ? for shortcuts', 'default');
     expect(a.menu).toBeNull();
     expect(a.busy).toBe(false);
+  });
+
+  // claude 2.1.18x: "← for agents" вместо "? for shortcuts", busy без "esc to interrupt".
+  it('idle claude 2.1.18x ("← for agents") → alive, не busy', () => {
+    const a = analyzeScreen(fx('idle-agents.txt'), 'default');
+    expect(a.alive).toBe(true);       // РАНЬШЕ было false → чат придерживал сообщения
+    expect(a.busy).toBe(false);
+    expect(a.idleVisible).toBe(true);
+    expect(a.mode).toBe('default');
+  });
+
+  it('busy claude 2.1.18x (строка статуса с токенами, без "esc to interrupt") → busy', () => {
+    const a = analyzeScreen(fx('busy-agents-tokens.txt'), 'default');
+    expect(a.busy).toBe(true);        // РАНЬШЕ было false → «думает» не показывалось
+    expect(a.workStatus).toContain('Billowing');
   });
 });
