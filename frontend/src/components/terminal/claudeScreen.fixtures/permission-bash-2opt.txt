@@ -1,0 +1,9 @@
+──────────────────────────────────────────────────────────────────────────────────
+ Bash command
+   V=$(echo test) && echo $V
+   Run echo test command
+ Contains simple_expansion
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. No
+ Esc to cancel · Tab to amend · ctrl+e to explain

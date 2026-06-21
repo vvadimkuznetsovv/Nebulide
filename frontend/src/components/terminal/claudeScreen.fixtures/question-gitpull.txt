@@ -1,0 +1,16 @@
+←  ☐ Пул  ✔️ Submit  →
+
+Что делать с незакоммиченными правками перед git pull?
+
+❯ 1. git stash → pull → stash pop
+     Спрятать локальные правки, спуллить origin/main, вернуть правки поверх.
+  2. Закоммитить, потом pull
+     Сделать коммит локальных правок, затем pull/--rebase.
+  3. pull --rebase --autostash
+     Автоматически застэшить, ребейзнуть на origin/main.
+  4. Пока не трогать
+     Оставить пул на потом.
+  5. Type something.
+  6. Chat about this
+
+Enter to select · ↑/↓ to navigate · Esc to cancel

@@ -1,0 +1,13 @@
+{
+  "name": "claude-capture",
+  "private": true,
+  "type": "module",
+  "description": "Гоняет НАСТОЯЩИЙ Claude Code CLI через PTY + headless-xterm, снимает рендер-грид интерактивных состояний в фикстуры для тестов детектора (claudeScreen.test.ts). Работает на Windows (ConPTY) и Linux (PTY) одинаково.",
+  "scripts": {
+    "capture": "node capture.mjs"
+  },
+  "dependencies": {
+    "@xterm/headless": "^6.0.0",
+    "node-pty": "^1.0.0"
+  }
+}

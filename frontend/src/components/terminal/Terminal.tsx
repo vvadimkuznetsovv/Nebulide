@@ -9,6 +9,7 @@ import { useLongPress } from '../../hooks/useLongPress';
 import { ensureFreshToken, refreshTokenOnce } from '../../api/tokenRefresh';
 import { useWorkspaceSessionStore } from '../../store/workspaceSessionStore';
 import { emitActivity } from '../../utils/activityBus';
+import { analyzeScreen, type MenuOption } from './claudeScreen';
 import { registerTerminal, unregisterTerminal, getTerminalNumber, useTerminalRegistryVersion, markTerminalClosed } from '../../utils/terminalRegistry';
 import { usePetStore } from '../../store/petStore';
 import api from '../../api/client';
@@ -128,162 +129,7 @@ export function focusTerminal(instanceId: string): void {
 // Strip ANSI/CSI so we can substring-scrape the raw output stream.
 const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '').replace(/\x1b[\]P][^\x07\x1b]*(?:\x07|\x1b\\)?/g, '');
 
-/** Scrape the live working line, e.g. "Caramelizing… (5s · ↑ 87 tokens)" или многословное
- *  "Compacting conversation… (3m 41s · ↑ 16.3k tokens)". Last match wins. */
-function extractWorkStatus(text: string): string {
-  const withStats = text.match(/([A-Za-z]+(?: [a-z]+)*(?:…|\.\.\.)\s*\([^)]*tokens[^)]*\))/g);
-  if (withStats && withStats.length) return withStats[withStats.length - 1].replace(/\s+/g, ' ').trim().slice(0, 70);
-  const glyph = text.match(/[✻✶✳✽✺✷✦✧·*]\s*([A-Za-z]+(?: [a-z]+)*(?:…|\.\.\.)[^\n]*)/);
-  return glyph ? glyph[1].replace(/\s+/g, ' ').trim().slice(0, 50) : '';
-}
 
-// Prompt-ready (idle) индикаторы нижней строки. В НЕ-default режимах "? for shortcuts"
-// заменяется на индикатор режима — поэтому idle = ЛЮБОЙ из них (иначе в acceptEdits/plan/
-// auto claude «никогда не idle» и стоп залипает). Заодно даёт текущий режим.
-const IDLE_MARKS: { s: string; mode: string }[] = [
-  { s: '? for shortcuts', mode: 'default' },
-  { s: 'accept edits on', mode: 'acceptEdits' },
-  { s: 'plan mode on', mode: 'plan' },
-  { s: 'auto mode on', mode: 'auto' },
-];
-
-/** Чистим лейбл варианта permission в краткий русский (полный текст идёт в title). */
-function cleanPermLabel(raw: string): string {
-  const r = raw.replace(/\s*\(shift\+tab\)\s*$/i, '').trim();
-  if (/^no\b/i.test(r)) return 'Нет';
-  if (/^yes$/i.test(r)) return 'Да';
-  if (/^yes\b/i.test(r)) return /all edits|don'?t ask|allow all/i.test(r) ? 'Да, всегда' : 'Да, разрешить';
-  return r.slice(0, 40);
-}
-
-export interface MenuOption { digit: string; label: string; raw: string; desc: string; checked?: boolean }
-export interface ScrapedMenu { kind: 'permission' | 'question'; multi: boolean; question: string; options: MenuOption[]; detail: string }
-
-/** Скрейп ЛЮБОГО интерактивного select-меню claude из рендер-грида (выверено на 2.1.175):
- *  - permission: «Do you want to …?» + Yes/No(+allow) + футер «Esc to cancel · Tab to amend …»
- *  - question (AskUserQuestion): вопрос + МНОГО пунктов с описаниями (+ Type something / Chat
- *    about this) + футер «Enter to select · ↑/↓ to navigate · Esc to cancel».
- *  Определяем по ФУТЕРУ (а не по «Do you want to»), пункты берём ВСЕ (1..N, многоцифровые),
- *  описания (отступ под пунктом) собираем. Выбор — по цифре (проверено: цифра выбирает сразу). */
-function scrapeMenu(buf: string): ScrapedMenu | null {
-  const lines = buf.split('\n');
-  // Футер у самого низа → тип меню.
-  let footerIdx = -1;
-  let kind: 'permission' | 'question' = 'permission';
-  // План-меню (ExitPlanMode «Ready to code?») — УНИКАЛЬНЫЙ футер без «Esc to cancel»:
-  // «ctrl+g to edit in Vim · ~/.claude/plans/…». Проверяем первым.
-  let isPlan = false;
-  for (let i = lines.length - 1; i >= 0 && lines.length - i <= 40; i--) {
-    if (/ctrl\+g to edit|\.claude[\\/]plans[\\/]/.test(lines[i])) { footerIdx = i; kind = 'question'; isPlan = true; break; }
-  }
-  // СТРОГО: permission = «… Tab to amend …», question = «… Enter to select …».
-  // Прочие select-меню (/model, /clear и т.п.) НЕ перехватываем (иначе кривая карта).
-  if (footerIdx < 0) {
-    for (let i = lines.length - 1; i >= 0 && lines.length - i <= 30; i--) {
-      const t = lines[i];
-      if (!t.includes('Esc to cancel')) continue;
-      if (/Tab to amend/.test(t)) { footerIdx = i; kind = 'permission'; break; }
-      if (/Enter to select/.test(t)) { footerIdx = i; kind = 'question'; break; }
-    }
-  }
-  // Фолбэк: подтверждающее меню БЕЗ явного nav-футера (напр. «Change effort level?»
-  // при большом контексте) — якоримся на КУРСОР ❯ на нумерованном пункте у низа.
-  if (footerIdx < 0) {
-    for (let i = lines.length - 1; i >= 0 && lines.length - i <= 22; i--) {
-      if (/^\s*❯\s*\d{1,2}\.\s+\S/.test(lines[i])) {
-        let end = i + 1;
-        while (end < lines.length && /^\s*[❯>]?\s*\d{1,2}\.\s/.test(lines[end])) end++;
-        footerIdx = end; kind = 'question'; break;
-      }
-    }
-  }
-  if (footerIdx < 0) return null;
-  // Пункт «1.» ближайший НАД футером — начало блока вариантов.
-  let firstOptIdx = -1;
-  for (let i = footerIdx - 1; i >= 0 && footerIdx - i <= 50; i--) {
-    if (/^\s*[❯>]?\s*1\.\s/.test(lines[i])) { firstOptIdx = i; break; }
-  }
-  if (firstOptIdx < 0) return null;
-  // Все пункты 1..N (многоцифровые) + их описания (отступ-строки под пунктом).
-  const options: MenuOption[] = [];
-  let cur: MenuOption | null = null;
-  for (let i = firstOptIdx; i < footerIdx; i++) {
-    const m = lines[i].match(/^\s*[❯>]?\s*(\d{1,2})\.\s+(.+?)\s*$/);
-    if (m) {
-      const raw = m[2].trim();
-      // Чекбокс мульти-селекта: «[ ] Логи» / «[✔] Кэш» → checked + чистый лейбл.
-      const cb = raw.match(/^\[([^\]]?)\]\s*(.*)$/);
-      let label = kind === 'permission' ? cleanPermLabel(raw) : raw;
-      let checked: boolean | undefined;
-      if (cb) { checked = /[xX✔✓]/.test(cb[1]); label = cb[2].trim() || raw; }
-      cur = { digit: m[1], label, raw, desc: '', checked };
-      options.push(cur);
-    } else if (cur && lines[i].trim() && !/^[❯>\s]*[╌╴─—═]+\s*$/.test(lines[i])) {
-      cur.desc = (cur.desc ? cur.desc + ' ' : '') + lines[i].trim();
-    }
-  }
-  if (options.length < 2) return null;
-  const multi = kind === 'question' && options.some((o) => o.checked !== undefined);
-  // Вопрос НАД пунктом 1: предпочитаем ближайшую строку, ОКАНЧИВАЮЩУЮСЯ на «?» (это и есть
-  // заголовок-вопрос, напр. «Change effort level?» / «Do you want to proceed?»), иначе —
-  // ближайшую непустую (описание уйдёт в detail).
-  let question = '';
-  let qIdx = firstOptIdx;
-  let firstText = '';
-  let firstTextIdx = firstOptIdx;
-  for (let i = firstOptIdx - 1; i >= 0 && firstOptIdx - i <= 10; i--) {
-    const t = lines[i].trim();
-    if (!t || /^[╌╴─—═]+$/.test(t)) continue;
-    if (!firstText) { firstText = t; firstTextIdx = i; }
-    if (/\?$/.test(t)) { question = t.replace(/\s+/g, ' ').slice(0, 140); qIdx = i; break; }
-  }
-  if (!question && firstText) { question = firstText.replace(/\s+/g, ' ').slice(0, 140); qIdx = firstTextIdx; }
-  // Деталь (команда/файл) — только для permission: блок от верхней линии ───── до вопроса.
-  let detail = '';
-  if (kind === 'permission') {
-    // Команда может быть МНОГОСТРОЧНОЙ (heredoc/SQL на 20+ строк) — ищем верхнюю линию
-    // ───── далеко вверх (до 80 строк), иначе фолбэк терял всё кроме хвоста.
-    let topIdx = -1;
-    for (let i = qIdx - 1; i >= 0 && qIdx - i <= 80; i--) {
-      if (/^[─—]{10,}$/.test(lines[i].trim())) { topIdx = i; break; }
-    }
-    const from = topIdx >= 0 ? topIdx + 1 : Math.max(0, qIdx - 50);
-    const raw: string[] = [];
-    for (let i = from; i < qIdx; i++) {
-      if (/^[╌╴─—═]+$/.test(lines[i].trim())) continue;
-      raw.push(lines[i].replace(/\s+$/, ''));
-    }
-    while (raw.length && !raw[0].trim()) raw.shift();
-    while (raw.length && !raw[raw.length - 1].trim()) raw.pop();
-    detail = raw.join('\n').slice(0, 2000);
-  } else if (isPlan) {
-    // Текст плана = блок между «Here is Claude's plan:» и вопросом (без линий-разделителей).
-    let hdr = -1;
-    for (let i = qIdx - 1; i >= 0 && qIdx - i <= 80; i--) {
-      if (/Here is Claude.s plan:/.test(lines[i])) { hdr = i; break; }
-    }
-    const from = hdr >= 0 ? hdr + 1 : Math.max(0, qIdx - 40);
-    const raw: string[] = [];
-    for (let i = from; i < qIdx; i++) {
-      if (/^[╌╴─—═]+$/.test(lines[i].trim())) continue;
-      raw.push(lines[i].replace(/\s+$/, ''));
-    }
-    while (raw.length && !raw[0].trim()) raw.shift();
-    while (raw.length && !raw[raw.length - 1].trim()) raw.pop();
-    detail = raw.join('\n').slice(0, 2500);
-  } else if (kind === 'question' && qIdx < firstOptIdx - 1) {
-    // Описание МЕЖДУ вопросом и пунктами (напр. у «Change effort level?» — про кэш/скорость).
-    const raw: string[] = [];
-    for (let i = qIdx + 1; i < firstOptIdx; i++) {
-      if (/^[╌╴─—═]+$/.test(lines[i].trim())) continue;
-      raw.push(lines[i].replace(/\s+$/, ''));
-    }
-    while (raw.length && !raw[0].trim()) raw.shift();
-    while (raw.length && !raw[raw.length - 1].trim()) raw.pop();
-    detail = raw.join('\n').slice(0, 600);
-  }
-  return { kind, multi, question, options, detail };
-}
 
 /** Чистый рендер-грид xterm (ровные строки, как tmux capture-pane) — в отличие от сырого
  *  rawTail, где TUI-перерисовки курсором после strip-ANSI СЛИПАЮТСЯ в одну строку. Нужен для
@@ -314,29 +160,23 @@ function xtermScreenText(session: TermSession): string {
  *  busy/idle по «последний маркер статус-строки побеждает» (claude перерисовывает её часто).
  *  Чат-вью ПОЛЛИТ getTerminalScreenState → состояние не теряется. Выверено на claude 2.1.175. */
 function detectClaudeScreen(session: TermSession, instanceId: string) {
-  // Читаем РЕНДЕР-ГРИД xterm (ровные строки текущего экрана), а НЕ сырой rawTail — в
-  // потоке строки слипаются от TUI-перерисовок курсором, из-за чего ломался построчный
-  // матч (раньше детект был на гриде и работал; rawTail-вариант был регрессией). Грид
-  // живёт и без DOM (buffer.active не зависит от рендерера) → переживает смену вида.
+  // Грид xterm (ровные строки текущего экрана), а НЕ сырой rawTail (там строки слипаются от
+  // TUI-перерисовок). Грид живёт и без DOM → переживает смену вида. Сам анализ — чистый
+  // analyzeScreen() из claudeScreen.ts (общий с тестами); здесь только применяем к сессии.
   const buf = xtermScreenText(session) || session.rawTail;
   if (!buf) return;
+  const a = analyzeScreen(buf, session.claudeMode);
 
-  // Меню "как восстановить" — по СОЧЕТАНИЮ всех трёх пунктов.
-  session.resumeMenuShown = buf.includes('Resume from summary') && buf.includes('Resume full session') && /Don.?t ask me again/.test(buf);
-  if (session.resumeMenuShown) {
-    const m = buf.match(/This session is[^\n]*?tokens?\./);
-    session.resumeInfo = m ? m[0].trim() : '';
-  }
-  // Интерактивное меню claude (permission ИЛИ question) — скрейп по футеру. buf уже грид.
-  // resume-меню имеет свой обработчик — не дублируем.
-  const pm = session.resumeMenuShown ? null : scrapeMenu(buf);
-  session.permMenuShown = !!pm;
-  if (pm) {
-    session.permKind = pm.kind;
-    session.permMulti = pm.multi;
-    session.permQuestion = pm.question;
-    session.permOptions = pm.options;
-    session.permDetail = pm.detail;
+  session.resumeMenuShown = a.resumeMenu;
+  if (a.resumeMenu) session.resumeInfo = a.resumeInfo;
+
+  session.permMenuShown = !!a.menu;
+  if (a.menu) {
+    session.permKind = a.menu.kind;
+    session.permMulti = a.menu.multi;
+    session.permQuestion = a.menu.question;
+    session.permOptions = a.menu.options;
+    session.permDetail = a.menu.detail;
   } else {
     session.permKind = '';
     session.permMulti = false;
@@ -344,23 +184,13 @@ function detectClaudeScreen(session: TermSession, instanceId: string) {
     session.permDetail = '';
   }
 
-  // busy vs idle — позиция последнего маркера в потоке. Сжатие контекста ("Compacting
-  // conversation…") — тоже busy, даже если "esc to interrupt" не показан.
-  const bi = Math.max(buf.lastIndexOf('esc to interrupt'), buf.lastIndexOf('Compacting conversation'));
-  let idleIdx = -1;
-  let idleMode = session.claudeMode;
-  for (const m of IDLE_MARKS) {
-    const idx = buf.lastIndexOf(m.s);
-    if (idx > idleIdx) { idleIdx = idx; idleMode = m.mode; }
-  }
-  if (bi >= 0 || idleIdx >= 0) {
+  if (a.hasMarkers) {
     session.claudeAlive = true;
-    const busyNow = bi > idleIdx;
-    if (busyNow && !session.claudeBusy) { session.claudeBusy = true; emitActivity({ type: 'terminal_busy', instanceId }); }
-    else if (!busyNow && session.claudeBusy) { session.claudeBusy = false; emitActivity({ type: 'terminal_idle', instanceId }); }
-    session.workStatusCur = busyNow ? extractWorkStatus(buf) : '';
-    if (!busyNow && idleIdx >= 0) session.claudeMode = idleMode; // режим виден только на prompt
-  } else if (session.resumeMenuShown || session.permMenuShown) {
+    if (a.busy && !session.claudeBusy) { session.claudeBusy = true; emitActivity({ type: 'terminal_busy', instanceId }); }
+    else if (!a.busy && session.claudeBusy) { session.claudeBusy = false; emitActivity({ type: 'terminal_idle', instanceId }); }
+    session.workStatusCur = a.busy ? a.workStatus : '';
+    if (!a.busy && a.idleVisible) session.claudeMode = a.mode; // режим виден только на prompt
+  } else if (a.resumeMenu || a.menu) {
     session.claudeAlive = true;
   }
 }
