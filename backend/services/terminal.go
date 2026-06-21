@@ -478,35 +478,49 @@ func (s *TerminalService) createLocked(sessionKey string, workingDir string, san
 		cmd.Dir = workingDir
 	}
 
-	// Build environment: ensure critical vars exist for shell init
-	env := os.Environ()
+	// Build environment: ensure critical vars exist for shell init.
+	// ВАЖНО: фильтруем маркеры запущенного Claude Code (CLAUDECODE / CLAUDE_CODE_* /
+	// CLAUDE_AGENT_SDK*). Если бэкенд сам запущен ИЗ-ПОД claude (dev в IDE), дочерний
+	// ТЕРМИНАЛЬНЫЙ claude увидел бы их, счёл бы себя ВЛОЖЕННОЙ сессией и НЕ писал бы транскрипт
+	// (JSONL) → чат не подтягивает ответы (в терминале ответ есть). На проде этих переменных нет;
+	// фильтр делает поведение одинаковым в любом окружении.
+	raw := os.Environ()
+	env := make([]string, 0, len(raw))
 	has := make(map[string]bool)
-	for _, e := range env {
+	for _, e := range raw {
+		k := e
 		if i := strings.IndexByte(e, '='); i > 0 {
-			has[e[:i]] = true
+			k = e[:i]
 		}
+		if strings.HasPrefix(k, "CLAUDE_CODE") || k == "CLAUDECODE" || strings.HasPrefix(k, "CLAUDE_AGENT_SDK") {
+			continue
+		}
+		env = append(env, e)
+		has[k] = true
 	}
-	if !has["HOME"] {
-		env = append(env, "HOME="+workingDir)
-	}
-	if !has["USER"] {
-		env = append(env, "USER=root")
-	}
-	if !has["SHELL"] {
-		env = append(env, "SHELL="+shell)
-	}
-	if !has["PATH"] {
-		env = append(env, "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+	// Unix shell-init переменные — ТОЛЬКО на Unix. На Windows (PowerShell в ConPTY) они вредны
+	// и бессмысленны: HOME=workingDir увело бы ~/.claude в рабочую папку; USER=root/SHELL/PATH/
+	// HISTFILE/PROMPT_COMMAND — bash-измы. Под ними claude в ConPTY вёл себя иначе и НЕ писал
+	// транскрипт сессии (JSONL) → чат не подтягивал ответы. На Windows инжектим только TERM.
+	if runtime.GOOS != "windows" {
+		if !has["HOME"] {
+			env = append(env, "HOME="+workingDir)
+		}
+		if !has["USER"] {
+			env = append(env, "USER=root")
+		}
+		if !has["SHELL"] {
+			env = append(env, "SHELL="+shell)
+		}
+		if !has["PATH"] {
+			env = append(env, "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+		}
+		// Per-user bash history: persists across deploys in workspace directory.
+		histFile := filepath.Join(workingDir, ".nebulide_history")
+		env = append(env, "HISTFILE="+histFile, "HISTSIZE=10000", "HISTFILESIZE=20000")
+		env = append(env, "PROMPT_COMMAND=history -a; history -r")
 	}
 	env = append(env, "TERM=xterm-256color", "COLORTERM=truecolor")
-
-	// Per-user bash history: persists across deploys in workspace directory.
-	// All terminals of the same user share one history file.
-	histFile := filepath.Join(workingDir, ".nebulide_history")
-	env = append(env, "HISTFILE="+histFile, "HISTSIZE=10000", "HISTFILESIZE=20000")
-	// Flush history after every command so arrow-up works across sessions/reconnects.
-	// PROMPT_COMMAND runs after each interactive command in bash.
-	env = append(env, "PROMPT_COMMAND=history -a; history -r")
 
 	for k, v := range extraEnv {
 		env = append(env, k+"="+v)
