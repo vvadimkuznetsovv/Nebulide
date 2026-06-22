@@ -35,6 +35,11 @@ services:
     image: nebulide:latest
     build: .
     restart: unless-stopped
+    # tini как PID 1 → АВТО-РЕАПИТ осиротевших детей (напр. curl-поллинг через Claude Code, чьи
+    # родители завершились). Без этого ./nebulide был PID 1 без reaper'а → зомби копились (13336 за
+    # ~2 суток) → таблица процессов забивалась → `fork: Resource temporarily unavailable` → claude падал.
+    # Наши собственные дочерние процессы по-прежнему реапятся приложением; tini добивает ТОЛЬКО сирот.
+    init: true
     cap_add:
       - SYS_ADMIN
     # Ubuntu 24.04: docker-default AppArmor profile blocks the mount-namespace

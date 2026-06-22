@@ -57,7 +57,7 @@ function CopyRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-const allPanels: BasePanelId[] = ['chat', 'files', 'editor', 'preview', 'terminal', 'pet', 'llm'];
+const allPanels: BasePanelId[] = ['chat', 'files', 'editor', 'preview', 'terminal', 'pet', 'llm', 'skills'];
 
 /* ─────────────────────── Settings Modal ─────────────────────── */
 
@@ -692,7 +692,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
         <div className="glass-divider mx-3" />
 
         {/* Workspace Sessions */}
-        <div className="px-3 py-2 flex-1">
+        <div className="px-3 py-2 flex-1 flex flex-col min-h-0">
           <div className="flex items-center justify-between mb-2">
             <span className="text-xs font-semibold uppercase tracking-wider" style={{ color: 'var(--text-muted)', fontSize: '10px', letterSpacing: '0.1em' }}>
               Workspaces
@@ -742,8 +742,8 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
             </div>
           )}
 
-          {/* Sessions list */}
-          <div className="space-y-1 max-h-48 overflow-y-auto" style={{ scrollbarWidth: 'thin' }}>
+          {/* Sessions list — тянется на всю доступную высоту секции (не жёсткий max-h), свой скроллбар */}
+          <div className="space-y-1 flex-1 min-h-0 overflow-y-auto ws-list">
             {wsSessions.map((ws) => {
               const isActive = ws.id === activeSessionId;
               const wsLock = lockStatus[ws.id];

@@ -42,6 +42,7 @@ interface PanelVisibility {
   terminal: boolean;
   pet: boolean;
   llm: boolean;
+  skills: boolean;
 }
 
 interface DndState {
@@ -171,6 +172,7 @@ const defaultVisibility: PanelVisibility = {
   terminal: true,
   pet: false,
   llm: false,
+  skills: false,
 };
 
 const stored = loadFromStorage();
@@ -584,7 +586,7 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
 
       // If we closed the last panel, pick the first remaining visible panel
       if (newPanels.length === 0) {
-        const allPanels: PanelId[] = ['chat', 'files', 'editor', 'preview', 'terminal', 'pet'];
+        const allPanels: PanelId[] = ['chat', 'files', 'editor', 'preview', 'terminal', 'pet', 'skills'];
         const firstVisible = allPanels.find((p) => newVis[p]);
         newPanels = firstVisible ? [firstVisible] : ['chat'];
         // Ensure at least chat is visible
@@ -666,7 +668,7 @@ export const useLayoutStore = create<LayoutState>((set, get) => ({
       const isMobile = window.innerWidth <= 640;
       if (isMobile) {
         // Priority order for mobile: show the most relevant visible panels (max 2)
-        const mobileOrder: PanelId[] = ['terminal', 'chat', 'files', 'editor', 'pet', 'preview'];
+        const mobileOrder: PanelId[] = ['terminal', 'chat', 'files', 'editor', 'pet', 'preview', 'skills'];
         const visibleBase = mobileOrder.filter((p) => visibility[p]);
         if (visibleBase.length > 0 && (mobilePanels.length === 0 || !mobilePanels.some((p) => visibility[p]))) {
           mobilePanels = visibleBase.slice(0, 2);

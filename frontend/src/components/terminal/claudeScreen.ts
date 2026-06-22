@@ -21,9 +21,27 @@ export const IDLE_MARKS: { s: string; mode: string }[] = [
  *  "Compacting conversation… (3m 41s · ↑ 16.3k tokens)". Last match wins. */
 export function extractWorkStatus(text: string): string {
   const withStats = text.match(/([A-Za-z]+(?: [a-z]+)*(?:…|\.\.\.)\s*\([^)]*tokens[^)]*\))/g);
-  if (withStats && withStats.length) return withStats[withStats.length - 1].replace(/\s+/g, ' ').trim().slice(0, 70);
+  if (withStats && withStats.length) return cleanStatus(withStats[withStats.length - 1], 70);
   const glyph = text.match(/[✻✶✳✽✺✷✦✧·*]\s*([A-Za-z]+(?: [a-z]+)*(?:…|\.\.\.)[^\n]*)/);
-  return glyph ? glyph[1].replace(/\s+/g, ' ').trim().slice(0, 50) : '';
+  return glyph ? cleanStatus(glyph[1], 50) : '';
+}
+
+// Срезаем инлайн прогресс-бар (block-глифы) и хвостовой "NN%" из лейбла статуса — бар/процент
+// выносим в отдельное поле (extractProgress) и рисуем настоящим прогресс-баром в чате.
+function cleanStatus(s: string, max: number): string {
+  return s.replace(/[█▉▊▋▌▍▎▏▰▱░▒▓].*$/u, '').replace(/\s*\d{1,3}\s*%\s*$/, '').replace(/\s+/g, ' ').trim().slice(0, max);
+}
+
+/** Прогресс длинной операции (compact / SessionStart hooks): "…▱▱▱▱ 0%", "…▰▰▰ 33%".
+ *  Числовой процент рядом с баром из block-глифов. Возвращает 0..100 (последний на экране) или null. */
+export function extractProgress(text: string): number | null {
+  const re = /[█▉▊▋▌▍▎▏▰▱░▒▓]\s*(\d{1,3})\s*%/g;
+  let last: number | null = null;
+  for (let m = re.exec(text); m; m = re.exec(text)) {
+    const v = parseInt(m[1], 10);
+    if (v >= 0 && v <= 100) last = v;
+  }
+  return last;
 }
 
 /** Чистим лейбл варианта permission в краткий русский (полный текст идёт в title). */
@@ -84,8 +102,10 @@ export function scrapeMenu(buf: string): ScrapedMenu | null {
   // Прочие select-меню (/model, /clear и т.п.) НЕ перехватываем (иначе кривая карта).
   if (footerIdx < 0) {
     for (let i = lines.length - 1; i >= 0 && lines.length - i <= 30; i--) {
-      const t = lines[i];
-      if (!t.includes('Esc to cancel')) continue;
+      // ФУТЕР МОЖЕТ ПЕРЕНОСИТЬСЯ по ширине грида (узкий чат-онли вид): «… Esc to\ncancel». Склеиваем
+      // со следующей строкой, иначе `Esc to cancel` не находится и детект меню «умирает» (без хуков).
+      const t = lines[i] + ' ' + (lines[i + 1] || '');
+      if (!/Esc to cancel/.test(t)) continue;
       if (/Tab to amend/.test(t)) { footerIdx = i; kind = 'permission'; break; }
       if (/Enter to select/.test(t)) { footerIdx = i; kind = 'question'; break; }
     }
@@ -93,7 +113,7 @@ export function scrapeMenu(buf: string): ScrapedMenu | null {
   // Фолбэк: подтверждающее меню БЕЗ явного nav-футера (напр. «Change effort level?»
   // при большом контексте) — якоримся на КУРСОР ❯ на нумерованном пункте у низа.
   if (footerIdx < 0) {
-    for (let i = lines.length - 1; i >= 0 && lines.length - i <= 22; i--) {
+    for (let i = lines.length - 1; i >= 0 && lines.length - i <= 45; i--) {
       if (/^\s*❯\s*\d{1,2}\.\s+\S/.test(lines[i])) {
         let end = i + 1;
         while (end < lines.length && /^\s*[❯>]?\s*\d{1,2}\.\s/.test(lines[end])) end++;
@@ -224,7 +244,8 @@ export interface ScreenAnalysis {
   busy: boolean;           // claude РАБОТАЕТ (esc to interrupt / Compacting позже idle-маркера)
   idleVisible: boolean;    // виден idle-индикатор (можно обновить режим)
   mode: string;            // режим из idle-индикатора (или prevMode)
-  workStatus: string;      // живая строка статуса при busy
+  workStatus: string;      // живая строка статуса при busy (без инлайн-бара/процента)
+  progress: number | null; // прогресс длинной операции (compact/hooks) 0..100, иначе null
   alive: boolean;          // claude TUI присутствует (маркеры ИЛИ любое меню)
 }
 
@@ -270,6 +291,7 @@ export function analyzeScreen(buf: string, prevMode: string): ScreenAnalysis {
     idleVisible: idleIdx >= 0,
     mode,
     workStatus: busy ? extractWorkStatus(buf) : '',
+    progress: busy ? extractProgress(buf) : null,
     alive: hasMarkers || resumeMenu || !!menu || !!resumePicker,
   };
 }

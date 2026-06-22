@@ -1,0 +1,11 @@
+import { chromium } from 'playwright';
+const b = await chromium.launch();
+const p = await (await b.newContext({ viewport: { width: 1400, height: 950 } })).newPage();
+await p.goto('http://localhost:5173/login', { waitUntil: 'networkidle' });
+await p.fill('input[placeholder="Enter username"]', 'admin'); await p.fill('input[placeholder="Enter password"]', 'admin12345');
+await p.click('button[type="submit"]'); await p.waitForTimeout(5000);
+const v = await p.evaluate(() => { const raw = localStorage.getItem('nebulide-layout-v7'); if(!raw) return 'НЕТ КЛЮЧА'; try { const d=JSON.parse(raw); return 'visibility='+JSON.stringify(d.visibility)+' | layout.type='+(d.layout&&d.layout.type)+' | mobilePanels='+JSON.stringify(d.mobilePanels); } catch(e){ return 'PARSE ERR '+e.message; } });
+console.log('LAYOUT STATE:', v);
+const isMobile = await p.evaluate(() => window.matchMedia('(max-width: 640px)').matches + ' innerW='+window.innerWidth);
+console.log('mobile?', isMobile);
+await b.close();

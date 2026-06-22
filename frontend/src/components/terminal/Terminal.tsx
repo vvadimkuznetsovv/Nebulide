@@ -81,6 +81,8 @@ interface TermSession {
   /** /resume — список сессий (карточка по клику навигирует к выбранной). */
   resumePicker: { sessions: ResumeSession[]; selectedIndex: number } | null;
   permMenuShown: boolean;
+  /** Время последнего РЕАЛЬНОГО обнаружения меню в гриде — для sticky-удержания при busy-мигании. */
+  permMenuLastSeen: number;
   permQuestion: string;
   /** Тип меню: permission (Yes/No) или question (AskUserQuestion, много пунктов). */
   permKind: 'permission' | 'question' | '';
@@ -92,6 +94,7 @@ interface TermSession {
   /** Заголовки/прогресс мульти-вопроса AskUserQuestion (табы «← ☐ H1 ✔️ H2 →»). */
   permTabs: QuestionTab[];
   workStatusCur: string;
+  workProgressCur: number | null;
   /** claude TUI присутствует на экране (загрузился) — для гейта отложенной отправки. */
   claudeAlive: boolean;
   /** Текущий режim claude из экрана (default/acceptEdits/plan/auto). */
@@ -175,15 +178,22 @@ function detectClaudeScreen(session: TermSession, instanceId: string) {
   if (a.resumeMenu) session.resumeInfo = a.resumeInfo;
   session.resumePicker = a.resumePicker;
 
-  session.permMenuShown = !!a.menu;
   if (a.menu) {
+    session.permMenuShown = true;
     session.permKind = a.menu.kind;
     session.permMulti = a.menu.multi;
     session.permQuestion = a.menu.question;
     session.permOptions = a.menu.options;
     session.permDetail = a.menu.detail;
     session.permTabs = a.menu.tabs;
+    session.permMenuLastSeen = Date.now();
+  } else if (session.permMenuShown && (a.busy || Date.now() - session.permMenuLastSeen < 5000)) {
+    // STICKY: AskUserQuestion/permission ЖДЁТ ответа, но claude показывает busy-статус «Actioning…»
+    // (футер меню в гриде при этом ПРОПАДАЕТ → scrapeMenu=null). Держим прежнее меню, ПОКА claude
+    // busy (вся фаза ожидания) ИЛИ ещё 5с грейса. Сбрасываем только когда claude реально освободился
+    // и меню нет. Иначе детект меню «умирал» при busy-спиннере (без хуков / в чат-онли виде). Поля НЕ трогаем.
   } else {
+    session.permMenuShown = false;
     session.permKind = '';
     session.permMulti = false;
     session.permOptions = [];
@@ -196,6 +206,7 @@ function detectClaudeScreen(session: TermSession, instanceId: string) {
     if (a.busy && !session.claudeBusy) { session.claudeBusy = true; emitActivity({ type: 'terminal_busy', instanceId }); }
     else if (!a.busy && session.claudeBusy) { session.claudeBusy = false; emitActivity({ type: 'terminal_idle', instanceId }); }
     session.workStatusCur = a.busy ? a.workStatus : '';
+    session.workProgressCur = a.busy ? a.progress : null;
     if (!a.busy && a.idleVisible) session.claudeMode = a.mode; // режим виден только на prompt
   } else if (a.resumeMenu || a.menu) {
     session.claudeAlive = true;
@@ -222,6 +233,7 @@ export function getTerminalScreenState(instanceId: string) {
     permDetail: s.permDetail,
     permTabs: s.permTabs,
     workStatus: s.workStatusCur,
+    progress: s.workProgressCur,
   };
 }
 
@@ -408,6 +420,7 @@ function createXterm(instanceId: string): TermSession {
     inputBuffer: '',
     inEscape: 0,
     claudeBusy: false,
+    permMenuLastSeen: 0,
     lastProgressAt: 0,
     lastProgressText: '',
     resumeMenuShown: false,
@@ -421,6 +434,7 @@ function createXterm(instanceId: string): TermSession {
     permDetail: '',
     permTabs: [],
     workStatusCur: '',
+    workProgressCur: null,
     claudeAlive: false,
     claudeMode: 'default',
     rawTail: '',
@@ -601,6 +615,7 @@ async function connectWs(instanceId: string): Promise<void> {
     // Without this, ResizeObserver / fit() / active-effect fire extra resizes
     // that cause duplicate prompt lines on mobile.
     session.resizeLocked = true;
+    let sentResize = false;
     try {
       session.fitAddon.fit();
       const dims = session.fitAddon.proposeDimensions();
@@ -609,8 +624,18 @@ async function connectWs(instanceId: string): Promise<void> {
         session.lastRows = dims.rows;
         session.lastResizeSent = Date.now();
         ws.send(JSON.stringify({ type: 'resize', rows: dims.rows, cols: dims.cols }));
+        sentResize = true;
       }
     } catch { /* xterm may not be attached yet */ }
+    if (!sentResize) {
+      // ЧАТ-ОНЛИ ВИД: xterm НЕ смонтирован → fitAddon не может посчитать размер, resize не уходит →
+      // PTY и headless-xterm РАЗНОГО размера → грид кривой → scrapeMenu не видит меню (детект «умирает»
+      // без хуков/DOM). Выравниваем ОБА на фиксированный размер, чтобы грид был ровным и меню ловилось.
+      const COLS = 120, ROWS = 40;
+      try { session.xterm.resize(COLS, ROWS); } catch { /* */ }
+      session.lastCols = COLS; session.lastRows = ROWS; session.lastResizeSent = Date.now();
+      try { ws.send(JSON.stringify({ type: 'resize', rows: ROWS, cols: COLS })); } catch { /* */ }
+    }
     // Unlock resize after layout settles — 1500ms accommodates slow
     // mobile devices where CSS transitions / tab switches take longer.
     // One final fit to catch correct dimensions after layout settled.

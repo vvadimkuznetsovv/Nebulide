@@ -47,3 +47,7 @@ CLAUDE.md
 # Backups
 backups/tools/ui-shot/node_modules/
 tools/ui-shot/shots/
+
+# ui-shot: не коммитим зависимости и профиль браузера
+tools/ui-shot/node_modules/
+tools/ui-shot/pw-profile/

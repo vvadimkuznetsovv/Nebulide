@@ -10,6 +10,7 @@ import PreviewPanel from '../preview/PreviewPanel';
 import TerminalChatPanel from '../terminal/TerminalChatPanel';
 import TamagotchiPanel from '../pet/TamagotchiPanel';
 import LLMPanel from '../llm/LLMPanel';
+import SkillsPanel from '../skills/SkillsPanel';
 
 const basePanelIcons: Record<BasePanelId, React.ReactNode> = {
   chat: (
@@ -55,6 +56,12 @@ const basePanelIcons: Record<BasePanelId, React.ReactNode> = {
       <path d="M12 2l2.4 7.2L22 12l-7.6 2.8L12 22l-2.4-7.2L2 12l7.6-2.8z" />
     </svg>
   ),
+  skills: (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M5 3l1.6 3.4L10 8 6.6 9.6 5 13l-1.6-3.4L0 8l3.4-1.6z" transform="translate(2 1)" />
+      <path d="M15 11l1.2 2.6L19 15l-2.8 1.4L15 19l-1.2-2.6L11 15l2.8-1.4z" transform="translate(1 0)" />
+    </svg>
+  ),
 };
 
 const basePanelTitles: Record<BasePanelId, string> = {
@@ -65,6 +72,7 @@ const basePanelTitles: Record<BasePanelId, string> = {
   terminal: 'Terminal',
   pet: 'Pet',
   llm: 'LLM Chat',
+  skills: 'Скиллы',
 };
 
 // Dynamic icon lookup — detached editors use the code icon, detached terminals use the terminal icon
@@ -146,6 +154,9 @@ export default function PanelContent({ panelId }: { panelId: PanelId }) {
 
     case 'llm':
       return <LLMPanel />;
+
+    case 'skills':
+      return <SkillsPanel />;
 
     default:
       return null;

@@ -1,0 +1,12 @@
+import { chromium } from 'playwright';
+const b = await chromium.launch();
+const p = await (await b.newContext({ viewport: { width: 1400, height: 950 } })).newPage();
+await p.goto('http://localhost:5173/login', { waitUntil: 'networkidle' });
+await p.fill('input[placeholder="Enter username"]', 'admin'); await p.fill('input[placeholder="Enter password"]', 'admin12345');
+await p.click('button[type="submit"]'); await p.waitForTimeout(5000);
+console.log('до reload: панелей', await p.locator('.droppable-panel').count());
+const ls = await p.evaluate(() => Object.keys(localStorage).filter(k=>/layout|nebulide/i.test(k)).map(k=>k+'='+(localStorage.getItem(k)||'').slice(0,60)));
+console.log('localStorage layout:', JSON.stringify(ls));
+await p.reload({ waitUntil: 'networkidle' }); await p.waitForTimeout(6000);
+console.log('после reload: панелей', await p.locator('.droppable-panel').count(), '| xterm', await p.locator('.xterm,.xterm-screen').count());
+await b.close();

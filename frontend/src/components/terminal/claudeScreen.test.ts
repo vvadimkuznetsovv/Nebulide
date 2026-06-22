@@ -5,7 +5,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { scrapeMenu, analyzeScreen, scrapeResumePicker } from './claudeScreen';
+import { scrapeMenu, analyzeScreen, scrapeResumePicker, extractWorkStatus, extractProgress } from './claudeScreen';
 
 const FX_DIR = join(dirname(fileURLToPath(import.meta.url)), 'claudeScreen.fixtures');
 const fx = (name: string) => readFileSync(join(FX_DIR, name), 'utf8');
@@ -134,6 +134,18 @@ describe('analyzeScreen — busy / idle / режим / сжатие', () => {
     const a = analyzeScreen(fx('compacting.txt'), 'default');
     expect(a.busy).toBe(true);
     expect(a.workStatus).toBe('Compacting conversation… (3m 41s · ↑ 16.3k tokens)');
+    expect(a.progress).toBeNull(); // токен-форма без бара → процента нет
+  });
+
+  it('compact с инлайн прогресс-баром: процент вынесен, лейбл очищен', () => {
+    const line = '✻ Compacting conversation…▱▱▱▱▱▱▱▱▱▱0%──── simple-click-counter ──';
+    expect(extractWorkStatus(line)).toBe('Compacting conversation…');
+    expect(extractProgress(line)).toBe(0);
+  });
+
+  it('частично заполненный бар → числовой процент, без бара → null', () => {
+    expect(extractProgress('✽ Running SessionStart hooks…… (35s)▰▰▰▰▰33%')).toBe(33);
+    expect(extractProgress('Compacting conversation… (3m 41s · ↑ 16.3k tokens)')).toBeNull();
   });
 
   it('меню НЕ ложно-срабатывает на нумерованном списке в ответе', () => {

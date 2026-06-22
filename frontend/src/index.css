@@ -460,6 +460,21 @@
   @keyframes claudeChatPulse { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: 0.35; transform: scale(0.7); } }
   .claude-chat-pulse { animation: claudeChatPulse 1.1s ease-in-out infinite; }
 
+  /* Бегущий блик по заливке прогресс-бара компакта (двигаем transform — GPU, не layout-проп). */
+  @keyframes progress-sheen {
+    0% { transform: translateX(-130%); }
+    55%, 100% { transform: translateX(280%); }
+  }
+  .compact-progress-sheen { animation: progress-sheen 1.6s cubic-bezier(0.4, 0, 0.2, 1) infinite; will-change: transform; }
+  @media (max-width: 640px) { .compact-progress-sheen { animation: none; } }
+
+  /* Скроллбар списка Workspaces — тонкий, под тему (вместо дефолтного браузерного). */
+  .ws-list { scrollbar-width: thin; scrollbar-color: rgba(var(--accent-rgb), 0.3) transparent; }
+  .ws-list::-webkit-scrollbar { width: 6px; }
+  .ws-list::-webkit-scrollbar-track { background: transparent; }
+  .ws-list::-webkit-scrollbar-thumb { background: rgba(var(--accent-rgb), 0.28); border-radius: 3px; }
+  .ws-list::-webkit-scrollbar-thumb:hover { background: rgba(var(--accent-rgb), 0.5); }
+
   /* Themed scrollbar for the agent chat input (textarea) */
   .agent-input { scrollbar-width: thin; scrollbar-color: rgba(var(--accent-rgb), 0.45) transparent; }
   .agent-input::-webkit-scrollbar { width: 8px; }

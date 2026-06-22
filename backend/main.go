@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"runtime"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -95,6 +96,7 @@ func main() {
 	syncHandler := handlers.NewSyncHandler(cfg, presenceService, terminalService)
 	hookHandler := handlers.NewHookHandler(cfg)
 	llmHandler := handlers.NewLLMHandler(cfg)
+	skillsHandler := handlers.NewSkillsHandler(cfg)
 
 	// Router
 	r := gin.Default()
@@ -106,7 +108,7 @@ func main() {
 
 	// Public routes
 	r.GET("/api/health", func(c *gin.Context) {
-		c.JSON(200, gin.H{"status": "ok"})
+		c.JSON(200, gin.H{"status": "ok", "os": runtime.GOOS})
 	})
 
 	// Auth routes
@@ -215,6 +217,13 @@ func main() {
 		protected.GET("/files/search", filesHandler.SearchFiles)
 		protected.POST("/files/extract", filesHandler.Extract)
 		protected.GET("/files/convert-pdf", filesHandler.ConvertToPDF)
+
+		// Skills (per-user Claude Code skills)
+		protected.GET("/skills", skillsHandler.List)
+		protected.POST("/skills/upload", skillsHandler.Upload)
+		protected.POST("/skills/rename", skillsHandler.Rename)
+		protected.DELETE("/skills", skillsHandler.Delete)
+		protected.GET("/skills/read", skillsHandler.Read)
 
 		// Terminal management (user kills own sessions)
 		protected.DELETE("/terminals/:instanceId", terminalHandler.KillTerminal)

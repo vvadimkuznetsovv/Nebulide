@@ -7,6 +7,7 @@ import { sendToTerminal, submitPromptToTerminal, getTerminalScreenState } from '
 import { onActivity } from '../../utils/activityBus';
 import { getSessionHint } from '../../utils/terminalViewMode';
 import { listFiles } from '../../api/files';
+import { listSkills } from '../../api/skills';
 import ClaudeMessage from '../chat/ClaudeMessage';
 
 // "Чат" — тонкая обёртка над живым `claude` в PTY: лента из JSONL, действия → клавиши в PTY.
@@ -17,18 +18,17 @@ interface Props {
   cwd?: string;
   /** Показать настоящий экран терминала (родные меню: permission / rewind / resume). */
   onRequestTerminal?: () => void;
+  /** Слот переключателей вида (Терминал/Чат) — встраивается ПЕРВЫМ в строку инструментов чата,
+   *  чтобы переключатели и инструменты жили в ОДНОЙ строке. */
+  toggle?: ReactNode;
 }
 
 interface PermOption { digit: string; label: string; raw: string; desc?: string; checked?: boolean }
-interface PermReq { kind?: 'permission' | 'question' | ''; multi?: boolean; question?: string; detail?: string; options: PermOption[]; tool?: string; input?: unknown; tabs?: { label: string; done: boolean }[] }
+interface PermReq { kind?: 'permission' | 'question' | ''; multi?: boolean; question?: string; detail?: string; options: PermOption[]; tool?: string; input?: unknown }
 
 // Tail-кэш на instanceId (переживает перемонтирование вида).
-interface TailCache { project: string; sessionFile: string; sessionId: string; offset: number; messages: RichMessage[] }
+interface TailCache { project: string; sessionFile: string; sessionId: string; cwd?: string; offset: number; messages: RichMessage[] }
 const tailCache = new Map<string, TailCache>();
-
-// Сравнение папок (терминала и привязанной сессии) кросс-ОС: слеши к "/", хвостовой срезаем.
-const sameFolder = (a?: string, b?: string) =>
-  !!a && !!b && a.replace(/\\/g, '/').replace(/\/+$/, '') === b.replace(/\\/g, '/').replace(/\/+$/, '');
 // instanceId, для которых claude уже хоть раз показал готовность (hook/экран). Module-level —
 // переживает перемонтирование вида; решает «отправка до готовности claude теряется».
 const readyInstances = new Set<string>();
@@ -88,6 +88,24 @@ const SLASH_COMMANDS: { cmd: string; desc: string }[] = [
   { cmd: '/vim', desc: 'Включить vim-режим ввода' },
   { cmd: '/help', desc: 'Справка по командам' },
 ];
+
+// Скиллы Claude Code вызываются как слэш-команды. Список — из реального скана папок через API
+// (api/skills): «свои» (.md в {workspace}/.claude/skills) + «claude» (плагины/бандл). См. ownSkills/claudeSkills.
+
+// Нормализация пути для сравнения папок (cross-OS): '\' → '/', схлопнуть слэши, убрать
+// хвостовой '/', привести к нижнему регистру (Windows регистронезависим).
+function normFolder(p?: string): string {
+  if (!p) return '';
+  return p.replace(/\\/g, '/').replace(/\/+/g, '/').replace(/\/$/, '').toLowerCase();
+}
+
+// Та же папка? Пустые значения трактуем как «совпадает» — нечего ребиндить, если папка
+// неизвестна (бэкенд tier3 отдаёт пустой cwd). Сравниваем только когда обе известны.
+function sameFolder(a?: string, b?: string): boolean {
+  const na = normFolder(a), nb = normFolder(b);
+  if (!na || !nb) return true;
+  return na === nb;
+}
 
 // Подсветка ввода (оверлей-зеркало над textarea): ведущая /команда и @-файлы — цветные.
 function renderInputHighlight(text: string): ReactNode[] {
@@ -160,14 +178,14 @@ function messageText(m: RichMessage): string {
   return m.blocks.map(b => b.text || b.content || b.name || '').join(' ').toLowerCase();
 }
 
-export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: Props) {
+export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, toggle }: Props) {
   const [messages, setMessages] = useState<RichMessage[]>(() => tailCache.get(instanceId)?.messages ?? []);
   const [perm, setPerm] = useState<PermReq | null>(null);
   const [mode, setMode] = useState<PermissionMode>('default');
   const [status, setStatus] = useState<'connecting' | 'ready' | 'working' | 'error' | 'closed'>('connecting');
   const [workStatus, setWorkStatus] = useState(''); // живой статус из экрана: "Caramelizing… (5s · ↑ 87 tokens)"
+  const [progress, setProgress] = useState<number | null>(null); // прогресс длинной операции (compact/hooks) 0..100, иначе null
   const [resumeMenu, setResumeMenu] = useState<{ info: string } | null>(null); // блокирующее меню "как восстановить"
-  const [resumePicker, setResumePicker] = useState<{ sessions: { name: string; meta: string }[]; selectedIndex: number } | null>(null); // /resume — список сессий
   const [ctx, setCtx] = useState<ContextInfo | undefined>(() => contextCache.get(instanceId)); // живой контекст/токены
   const [input, setInput] = useState(() => draftInputs.get(instanceId) || '');
   const [pillCollapsed, setPillCollapsed] = useState(false);
@@ -179,6 +197,12 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
   const [cmd, setCmd] = useState<{ query: string } | null>(null);
   const [cmdIdx, setCmdIdx] = useState(0);
   const [cmdOpen, setCmdOpen] = useState(false);
+  // Скиллы из реального скана (api/skills): свои (.md в workspace) + claude (плагины/бандл).
+  const [ownSkills, setOwnSkills] = useState<{ cmd: string; desc: string }[]>([]);
+  const [claudeSkills, setClaudeSkills] = useState<{ cmd: string; desc: string }[]>([]);
+  // Drill-down навигация выпадашки (кнопкой): root → commands | skills → own | claude.
+  const [paletteNav, setPaletteNav] = useState<'root' | 'commands' | 'skills' | 'own' | 'claude'>('root');
+  const [paletteSearch, setPaletteSearch] = useState('');
   const [findOpen, setFindOpen] = useState(false);
   const [query, setQuery] = useState('');
   const [fontPx, setFontPx] = useState(() => {
@@ -207,7 +231,7 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
   const targetRef = useRef<{ project: string; sessionFile: string; offset: number; sessionId: string; cwd?: string } | null>(
     // offset из кэша берём ТОЛЬКО если есть кэш-сообщения, иначе 0 — иначе восстановимся
     // «в конце файла» без сообщений и чат будет пустым (хотя сессия полная).
-    cInit ? { project: cInit.project, sessionFile: cInit.sessionFile, offset: cInit.messages?.length ? cInit.offset : 0, sessionId: cInit.sessionId } : null
+    cInit ? { project: cInit.project, sessionFile: cInit.sessionFile, offset: cInit.messages?.length ? cInit.offset : 0, sessionId: cInit.sessionId, cwd: cInit.cwd } : null
   );
   const pollingRef = useRef(false);
   const emptyReloadRef = useRef(false); // один форс full-reload на сессию при offset>0 без сообщений
@@ -230,7 +254,7 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
 
   const persist = useCallback(() => {
     const t = targetRef.current;
-    if (t) tailCache.set(instanceId, { project: t.project, sessionFile: t.sessionFile, sessionId: t.sessionId, offset: t.offset, messages: messagesRef.current });
+    if (t) tailCache.set(instanceId, { project: t.project, sessionFile: t.sessionFile, sessionId: t.sessionId, cwd: t.cwd, offset: t.offset, messages: messagesRef.current });
   }, [instanceId]);
 
   // ── Poll the JSONL tail (incremental; rewind → full reload via parent_uuid break) ──
@@ -279,69 +303,79 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
     finally { pollingRef.current = false; persist(); }
   }, [persist]);
 
-  // ── Resolve + keep reconciling which JSONL this terminal's claude writes ──
-  // Backend tier-1 (hook-tracked instanceId→session) даёт ТОЧНУЮ сессию (непустой
-  // session_id) и переопределяет слабый cwd/новейший фолбэк. Резолвим периодически,
-  // НЕ завязываясь на разовое событие хука: чинит «два терминала тянут одну историю»
-  // и следует за перезапуском claude / сменой сессии (--resume) в том же терминале.
-  // Перепривязка к новой сессии (или в пустой чат при target=null). Оптимистичные плейсхолдеры
-  // СОХРАНЯЕМ — иначе только что отправленный текст пропадёт.
-  const rebind = useCallback((target: { project: string; sessionFile: string; sessionId: string; cwd?: string } | null) => {
+  // Привязать вид к сессии: записываем cwd (из ответа бэка, иначе — папка терминала),
+  // сбрасываем offset/empty-guard, чистим оптимистичные плейсхолдеры (kept), грузим ленту.
+  const bindSession = useCallback((data: { project: string; session_file: string; session_id: string; cwd?: string }) => {
     tailCache.delete(instanceId);
-    targetRef.current = target ? { ...target, offset: 0 } : null;
+    targetRef.current = { project: data.project, sessionFile: data.session_file, offset: 0, sessionId: data.session_id || '', cwd: data.cwd || cwd };
     const keptOpt = messagesRef.current.filter(m => m.uuid.startsWith('optimistic-'));
     messagesRef.current = keptOpt; // синхронно, чтобы параллельный poll не подмешал старую сессию
     setMessages(keptOpt);
     emptyReloadRef.current = false;
     setStatus('ready');
-    if (target) poll(true);
-  }, [instanceId, poll]);
+    poll(true);
+  }, [instanceId, cwd, poll]);
 
+  // Пересвязать вид с папкой терминала. rebind(null) сбрасывает текущую привязку →
+  // следующий reconcile() резолвит сессию для актуального cwd заново (смена папки).
+  // (Параметр зарезервирован: непустой id в будущем мог бы привязать конкретную сессию;
+  // сейчас любой вызов сбрасывает привязку, а reconcile резолвит правильную сессию.)
+  const rebind = useCallback((_sessionId: string | null) => {
+    targetRef.current = null;
+    emptyReloadRef.current = false;
+  }, []);
+
+  // ── Resolve + keep reconciling which JSONL this terminal's claude writes ──
+  // Backend tier-1 (hook-tracked instanceId→session) даёт ТОЧНУЮ сессию (непустой
+  // session_id) и переопределяет слабый cwd/новейший фолбэк. Резолвим периодически,
+  // НЕ завязываясь на разовое событие хука: чинит «два терминала тянут одну историю»
+  // и следует за перезапуском claude / сменой сессии (--resume) в том же терминале.
   const reconcile = useCallback(async () => {
     try {
       const { data } = await resolveLiveSession(instanceId, cwd, getSessionHint(instanceId));
+      if (!data.session_file) return;
       const cur = targetRef.current;
-      // Папка терминала ≠ папка привязанной сессии → привязка от ДРУГОЙ папки (переоткрыли папку
-      // в том же терминале / новый чат). Перепривязываемся к выбранной папке — это и был баг
-      // «открыл новую папку, а показалась старая сессия другой папки».
-      const folderChanged = !!cur && !!cwd && !!cur.cwd && !sameFolder(cur.cwd, cwd);
-      if (!data.session_file) {
-        // Для запрошенной папки сессии ещё нет. Если текущая — от ДРУГОЙ папки, сбрасываем в
-        // пустой чат (готов к новой сессии этой папки), а не держим чужую историю.
-        if (folderChanged) rebind(null);
-        return;
-      }
-      const authoritative = !!data.session_id; // непустой session_id = точная сессия (хук/transcript)
-      if (!cur) {
-        targetRef.current = { project: data.project, sessionFile: data.session_file, offset: 0, sessionId: data.session_id || '', cwd: data.cwd };
-        emptyReloadRef.current = false;
-        setStatus('ready');
-        poll(true);
-      } else if ((authoritative && data.session_id !== cur.sessionId) || folderChanged) {
-        // Другая сессия (перезапуск/чужой фолбэк) ИЛИ сменилась папка → переключаемся.
-        rebind({ project: data.project, sessionFile: data.session_file, sessionId: data.session_id, cwd: data.cwd });
-      } else if (!cur.cwd && data.cwd) {
-        cur.cwd = data.cwd; // дозаполняем папку привязки (для будущих сравнений)
+      const authoritative = !!data.session_id; // непустой = точная сессия из хука
+      // Смена ПАПКИ терминала: привязанная сессия из другой папки (известны обе) →
+      // принудительный ребинд на сессию актуального cwd. Срабатывает и при первом
+      // открытии вида в другой папке (cur уже из кэша другой папки).
+      const folderChanged = !!cur && !!data.cwd && !sameFolder(cur.cwd, data.cwd);
+      if (folderChanged) {
+        rebind(null);
+        bindSession(data);
+      } else if (!cur) {
+        bindSession(data);
+      } else if (authoritative && data.session_id !== cur.sessionId) {
+        // tier-1 указал другую сессию (чужой фолбэк / перезапуск) → переключаемся.
+        bindSession(data);
       }
     } catch { /* claude ещё не стартовал — ретраим */ }
-  }, [instanceId, cwd, poll, rebind]);
+  }, [instanceId, cwd, rebind, bindSession]);
 
-  // Кнопка «сбросить чат» — принудительно отвязать от текущей сессии и перепривязать к папке
-  // терминала (на случай, когда авто-сравнение не сработало или юзер хочет начать заново).
+  // Сброс чата: очистить ленту/кэш и пересвязаться с папкой терминала (reconcile подтянет).
   const resetChat = useCallback(() => {
     tailCache.delete(instanceId);
-    targetRef.current = null;
+    draftInputs.delete(instanceId);
+    rebind(null);
     messagesRef.current = [];
     setMessages([]);
-    emptyReloadRef.current = false;
+    setInput('');
+    setPerm(null);
+    setResumeMenu(null);
+    setStatus('connecting');
     reconcile();
-  }, [instanceId, reconcile]);
+  }, [instanceId, rebind, reconcile]);
 
   useEffect(() => {
+    // Авто-ребинд ПРИ ОТКРЫТИИ вида: если папка терминала (cwd) не совпадает с папкой
+    // привязанной (кэшированной) сессии — сбрасываем привязку, чтобы reconcile() ниже
+    // переразрешил сессию для правильной папки.
+    const cur = targetRef.current;
+    if (cur && cwd && !sameFolder(cur.cwd, cwd)) rebind(null);
     reconcile();
     const iv = setInterval(reconcile, 3000);
     return () => { clearInterval(iv); recognitionRef.current?.abort(); };
-  }, [reconcile]);
+  }, [reconcile, cwd, rebind]);
 
   useEffect(() => {
     poll();
@@ -375,24 +409,22 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
   // ── Частый опрос ТЕКУЩЕГО состояния экрана claude (250мс). Надёжно — НЕ теряется при
   //    ремоунте/смене вида. Источник правды для стоп-кнопки, индикатора, resume/perm-меню. ──
   useEffect(() => {
-    const la = { busy: undefined as boolean | undefined, ws: '', resume: false, permSig: '', mode: '', rp: '' };
+    const la = { busy: undefined as boolean | undefined, ws: '', resume: false, permSig: '', mode: '' };
     const tick = () => {
       const st = getTerminalScreenState(instanceId);
       if (!st) return;
       if (st.alive) {
         readyInstances.add(instanceId);
         const pend = pendingSendRef.current;
-        if (pend && !st.resumeMenu && !st.permMenu && !st.resumePicker) { pendingSendRef.current = null; submitPromptToTerminal(instanceId, pend); setTimeout(() => poll(), 600); }
+        if (pend && !st.resumeMenu && !st.permMenu) { pendingSendRef.current = null; submitPromptToTerminal(instanceId, pend); setTimeout(() => poll(), 600); }
       }
       // Режим claude — из экрана (надёжно, не теряется при ремоунте/смене вида).
       if (st.mode && st.mode !== la.mode) { la.mode = st.mode; setMode(st.mode as PermissionMode); }
       if (st.busy !== la.busy) { la.busy = st.busy; setStatus(st.busy ? 'working' : 'ready'); }
       const ws = st.busy ? st.workStatus : '';
       if (ws !== la.ws) { la.ws = ws; setWorkStatus(ws); }
+      setProgress(st.busy ? (st.progress ?? null) : null); // React пропустит ре-рендер при том же значении
       if (st.resumeMenu !== la.resume) { la.resume = st.resumeMenu; setResumeMenu(st.resumeMenu ? { info: st.resumeInfo } : null); }
-      // /resume-пикер — список сессий; сигнатура = кол-во + выбранная, чтобы перерисовывать при навигации.
-      const rpSig = st.resumePicker ? st.resumePicker.sessions.length + ':' + st.resumePicker.selectedIndex : '';
-      if (rpSig !== la.rp) { la.rp = rpSig; setResumePicker(st.resumePicker ? { sessions: st.resumePicker.sessions.map((x) => ({ name: x.name, meta: x.meta })), selectedIndex: st.resumePicker.selectedIndex } : null); }
       // permission — варианты СКРЕЙПЛЕНЫ с экрана (2 или 3); сигнатура = вопрос+цифры.
       // Сигнатура включает состояние чекбоксов (✔/ ) — чтобы тогл в мульти-селекте перерисовывал карточку.
       const permSig = st.permMenu ? st.permKind + '|' + st.permQuestion + '|' + (st.permOptions || []).map(o => o.digit + (o.checked ? '1' : o.checked === false ? '0' : '')).join('') : '';
@@ -400,7 +432,7 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
         la.permSig = permSig;
         if (st.permMenu) {
           const d = permDetailsRef.current;
-          setPerm({ kind: st.permKind, multi: st.permMulti, question: st.permQuestion, detail: st.permDetail, options: st.permOptions || [], tool: d?.tool, input: d?.input, tabs: st.permTabs || [] });
+          setPerm({ kind: st.permKind, multi: st.permMulti, question: st.permQuestion, detail: st.permDetail, options: st.permOptions || [], tool: d?.tool, input: d?.input });
         } else { setPerm(null); permDetailsRef.current = null; }
       }
     };
@@ -416,7 +448,7 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
 
   const RANGE = 120;   // px of scroll to fully toggle the input open/closed
   const MIN_ROW = 38;  // textarea never smaller than one row
-  const FOOTER_H = 32; // mode-line full height
+  const FOOTER_H = 46; // buttons row full height (30px buttons + 6/9 padding)
 
   // Cache the textarea's natural content height — only re-measured on input,
   // so the per-frame scroll resize never does an `auto` reflow (= no flicker).
@@ -494,16 +526,50 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
     setTimeout(() => { const ta = taRef.current; if (ta) { ta.focus(); ta.setSelectionRange(pos, pos); } }, 0);
   }, [input, mention]);
 
-  // Команды, подходящие под текущий ввод (или все, если палитра открыта кнопкой с пустым '/').
-  const cmdMatches = (cmd || cmdOpen)
-    ? SLASH_COMMANDS.filter(c => c.cmd.slice(1).toLowerCase().startsWith((cmd?.query || '').toLowerCase()))
+  // Команды/скиллы, подходящие под текущий ввод (или все, если палитра открыта кнопкой
+  // с пустым '/'). Скиллы Claude Code вызываются так же, как слэш-команды.
+  const cmdQuery = (cmd?.query || '').toLowerCase();
+  const paletteOpen = !!(cmd || cmdOpen);
+  const allSkills = [...ownSkills, ...claudeSkills];
+  const cmdMatches = paletteOpen
+    ? SLASH_COMMANDS.filter(c => c.cmd.slice(1).toLowerCase().startsWith(cmdQuery))
     : [];
+  const skillMatches = paletteOpen
+    ? allSkills.filter(c => c.cmd.slice(1).toLowerCase().startsWith(cmdQuery))
+    : [];
+  // Плоский список для клавиатурной навигации при вводе '/' (cmdIdx — сквозь обе секции).
+  const paletteFlat = [...cmdMatches, ...skillMatches];
 
   const pickCommand = useCallback((c: { cmd: string }) => {
     setInput(c.cmd + ' ');
     setCmd(null); setCmdOpen(false); setCmdIdx(0);
     setTimeout(() => { const ta = taRef.current; if (ta) { const p = c.cmd.length + 1; ta.focus(); ta.setSelectionRange(p, p); } }, 0);
   }, []);
+
+  // Свежий список скиллов из API (свои + claude). Обновляем на маунте и при открытии палитры.
+  const refreshSkills = useCallback(async () => {
+    try {
+      const { data } = await listSkills();
+      setOwnSkills((data.own || []).map(s => ({ cmd: '/' + s.name, desc: s.description || 'Свой скилл' })));
+      setClaudeSkills((data.claude || []).map(s => ({ cmd: '/' + s.name, desc: s.description || 'Скилл Claude' })));
+    } catch { /* нет API/скиллов — оставляем пусто */ }
+  }, []);
+  useEffect(() => { refreshSkills(); }, [refreshSkills]);
+
+  // Закрывать выпадашку команд/скиллов по клику ВНЕ композера (capture-phase pointerdown — как
+  // ContextMenu). НЕ полагаемся на blur текстареи: при заходе в список autoFocus поля «Поиск…»
+  // крадёт фокус → blur → палитра мигала и закрывалась (баг). composerRef оборачивает палитру +
+  // textarea + кнопку, поэтому contains() покрывает все внутренние клики.
+  useEffect(() => {
+    if (!cmdOpen) return;
+    const onDown = (e: PointerEvent) => {
+      const t = e.target as Node | null;
+      if (t && composerRef.current && composerRef.current.contains(t)) return;
+      setCmdOpen(false);
+    };
+    window.addEventListener('pointerdown', onDown, true);
+    return () => window.removeEventListener('pointerdown', onDown, true);
+  }, [cmdOpen]);
 
   // Direction-based: scrolling DOWN opens the input (even mid-history), scrolling
   // UP closes it; pinned fully open at the very bottom. Self-induced scroll (the
@@ -562,7 +628,7 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
     // Если открыто блокирующее меню (permission/resume) — НЕЛЬЗЯ слать текст: Enter в конце
     // подтвердил бы меню (по умолчанию ❯ Yes). Придерживаем до закрытия меню.
     const scr = getTerminalScreenState(instanceId);
-    const menuUp = !!(scr && (scr.resumeMenu || scr.permMenu || scr.resumePicker));
+    const menuUp = !!(scr && (scr.resumeMenu || scr.permMenu));
     if (readyInstances.has(instanceId) && !menuUp) {
       submitPromptToTerminal(instanceId, text); // claude готов, меню нет → шлём (bracketed paste + Enter)
       setTimeout(() => poll(), 600);
@@ -573,7 +639,7 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
       setTimeout(() => {
         if (pendingSendRef.current !== text) return;
         const s = getTerminalScreenState(instanceId);
-        if (s && (s.resumeMenu || s.permMenu || s.resumePicker)) return; // меню ещё открыто — НЕ отправляем
+        if (s && (s.resumeMenu || s.permMenu)) return; // меню ещё открыто — НЕ отправляем
         pendingSendRef.current = null; submitPromptToTerminal(instanceId, text); setTimeout(() => poll(), 600);
       }, 9000);
     }
@@ -614,16 +680,6 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
     sendKey(digit);
     setResumeMenu(null);
     setTimeout(() => poll(), 500);
-  }, [sendKey, poll]);
-
-  // Клик по сессии в /resume-пикере: навигируем стрелками от ВЫБРАННОЙ к ЦЕЛИ, затем Enter.
-  const resumePickerChoose = useCallback((targetIndex: number, selectedIndex: number) => {
-    const delta = targetIndex - selectedIndex;
-    const key = delta > 0 ? '\x1b[B' : '\x1b[A';
-    for (let i = 0; i < Math.abs(delta); i++) sendKey(key);
-    setTimeout(() => sendKey('\r'), 120 + Math.abs(delta) * 12); // Enter после прокрутки курсора
-    setResumePicker(null);
-    setTimeout(() => poll(), 700);
   }, [sendKey, poll]);
 
   // Сменить режим = Shift+Tab в реальный claude (циклит default→acceptEdits→plan→auto).
@@ -674,8 +730,11 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
 
   return (
     <div ref={rootRef} style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden', position: 'relative' }}>
-      {/* Slim toolbar: Find + Font (ported from terminal) */}
+      {/* Единая шапка: переключатели Терминал/Чат (слот toggle) + инструменты чата (Find, вниз,
+          шрифт, терминал, индикатор контекста) — всё в ОДНОЙ строке. */}
       <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 4, padding: '4px 8px', borderBottom: '1px solid var(--glass-border)', background: 'rgba(0,0,0,0.12)' }}>
+        {toggle}
+        {toggle && <span style={{ flexShrink: 0, width: 1, height: 18, margin: '0 2px', background: 'var(--glass-border)' }} />}
         {findOpen ? (
           <>
             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="var(--text-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
@@ -705,9 +764,6 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
             </button>
             <button type="button" onClick={() => setFindOpen(true)} title="Поиск" style={iconBtn}>
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8" /><line x1="21" y1="21" x2="16.65" y2="16.65" /></svg>
-            </button>
-            <button type="button" onClick={resetChat} title="Сбросить чат — перепривязать к папке этого терминала" style={iconBtn}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="23 4 23 10 17 10" /><polyline points="1 20 1 14 7 14" /><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15" /></svg>
             </button>
             <button type="button" onClick={() => changeFont(-1)} title="Меньше шрифт" style={iconBtn}>A−</button>
             <button type="button" onClick={() => changeFont(1)} title="Больше шрифт" style={iconBtn}>A+</button>
@@ -744,30 +800,6 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
           </div>
         )}
 
-        {/* /resume — список сессий, обёрнут картой (клик навигирует курсор в claude + Enter) */}
-        {!query && resumePicker && (
-          <div style={{ margin: '10px 0', borderRadius: 12, overflow: 'hidden', border: '1px solid rgba(var(--accent-rgb),0.45)', background: 'rgba(var(--accent-rgb),0.1)' }}>
-            <div style={{ padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>Возобновить сессию</span>
-              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{resumePicker.sessions.length} сессий</span>
-            </div>
-            <div style={{ maxHeight: 320, overflowY: 'auto', borderTop: '1px solid var(--glass-border)' }}>
-              {resumePicker.sessions.map((s, i) => (
-                <button key={i} type="button" onClick={() => resumePickerChoose(i, resumePicker.selectedIndex)}
-                  style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2, width: '100%', textAlign: 'left', padding: '8px 12px', cursor: 'pointer', fontFamily: 'inherit',
-                    background: i === resumePicker.selectedIndex ? 'rgba(var(--accent-rgb),0.15)' : 'transparent', border: 'none', borderBottom: '1px solid var(--glass-border)', color: 'var(--text-primary)' }}>
-                  <span style={{ fontSize: 12.5, fontWeight: 600, maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{s.name}</span>
-                  <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{s.meta}</span>
-                </button>
-              ))}
-            </div>
-            <div style={{ display: 'flex', gap: 8, padding: '8px 12px', borderTop: '1px solid var(--glass-border)' }}>
-              <button type="button" onClick={() => { setResumePicker(null); sendKey('\x1b'); }} style={pbtn('rgba(255,255,255,0.05)', 'var(--glass-border)', 'var(--text-secondary)')}>Отмена</button>
-              {onRequestTerminal && <button type="button" onClick={() => { setResumePicker(null); onRequestTerminal(); }} style={pbtn('rgba(255,255,255,0.05)', 'var(--glass-border)', 'var(--text-secondary)')}>⌨ Терминал</button>}
-            </div>
-          </div>
-        )}
-
         {/* (4) permission — варианты и текст СКРЕЙПЛЕНЫ с реального экрана (2 или 3 кнопки) */}
         {!query && perm && (
           <div style={{ margin: '10px 0', borderRadius: 12, overflow: 'hidden', border: '1px solid rgba(var(--accent-rgb),0.45)', background: 'rgba(var(--accent-rgb),0.1)' }}>
@@ -778,23 +810,6 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
                 const detailText = hookCmd || perm.detail || '';
                 return (
                   <>
-                    {/* Заголовки/прогресс мульти-вопроса AskUserQuestion (← ☐ H1 ✔️ H2 →) */}
-                    {perm.kind === 'question' && perm.tabs && perm.tabs.length > 1 && (() => {
-                      const qTabs = perm.tabs.filter((t) => !/^(submit|cancel|готово|отмена)/i.test(t.label));
-                      if (qTabs.length < 1) return null;
-                      const doneN = qTabs.filter((t) => t.done).length;
-                      return (
-                        <div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                          <span style={{ fontSize: 11, fontWeight: 700, color: 'var(--accent-bright)', whiteSpace: 'nowrap' }}>Вопрос {Math.min(doneN + 1, qTabs.length)} из {qTabs.length}</span>
-                          {qTabs.map((t, i) => (
-                            <span key={i} style={{ fontSize: 10.5, padding: '2px 7px', borderRadius: 10, whiteSpace: 'nowrap',
-                              background: t.done ? 'rgba(var(--success-rgb),0.18)' : 'rgba(var(--accent-rgb),0.14)',
-                              border: `1px solid ${t.done ? 'rgba(var(--success-rgb),0.4)' : 'rgba(var(--accent-rgb),0.3)'}`,
-                              color: t.done ? 'var(--success)' : 'var(--text-secondary)' }}>{t.done ? '✓ ' : ''}{t.label}</span>
-                          ))}
-                        </div>
-                      );
-                    })()}
                     <div style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--text-primary)', marginBottom: detailText ? 6 : 0 }}>
                       {perm.question || 'Claude запрашивает доступ'}
                     </div>
@@ -853,19 +868,31 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
             </div>
           </div>
         )}
+
+        {/* Живой индикатор «думает» — из чтения экрана. При длинной операции (compact/hooks)
+            лейбл и НАСТОЯЩИЙ прогресс-бар обёрнуты ОДНОЙ карточкой (процент вынесен из текста). */}
+        {status === 'working' && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '8px 4px 2px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--accent-bright)', fontSize: 12.5 }}>
+              <span className="claude-chat-pulse" style={{ fontSize: 14, lineHeight: 1, flexShrink: 0 }}>✻</span>
+              <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{workStatus || 'Claude думает…'}</span>
+              {progress != null && <span style={{ flexShrink: 0, marginLeft: 'auto', fontVariantNumeric: 'tabular-nums', fontSize: 11.5, color: 'var(--text-muted)' }}>{progress}%</span>}
+            </div>
+            {progress != null && (
+              <span style={{ position: 'relative', display: 'block', height: 6, borderRadius: 999, background: 'rgba(255,255,255,0.08)', overflow: 'hidden' }}>
+                {/* Заливка: градиент, ширина через scaleX (GPU); поверх — бегущий блик. */}
+                <span style={{ position: 'absolute', inset: 0, transformOrigin: 'left center', transform: `scaleX(${Math.min(1, Math.max(0, progress / 100))})`, borderRadius: 999, background: 'linear-gradient(90deg, var(--accent), var(--accent-bright))', transition: 'transform 0.35s ease', overflow: 'hidden' }}>
+                  <span className="compact-progress-sheen" style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: '45%', background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.6), transparent)' }} />
+                </span>
+              </span>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Composer (pill + input + mode footer) — in normal flow, so the full
           message history always sits ABOVE the input (never behind it). */}
       <div ref={composerRef} style={{ flexShrink: 0 }}>
-
-      {/* Живой индикатор «думает» — ПРЯМО НАД полем ввода (прижат к низу, не висит в ленте) */}
-      {status === 'working' && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px 2px', color: 'var(--accent-bright)', fontSize: 12.5 }}>
-          <span className="claude-chat-pulse" style={{ fontSize: 14, lineHeight: 1 }}>✻</span>
-          <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{workStatus || 'Claude думает…'}</span>
-        </div>
-      )}
 
       {/* Input + voice */}
       <div style={{ position: 'relative', flexShrink: 0, borderTop: '1px solid var(--glass-border)', padding: 8, background: 'rgba(0,0,0,0.15)', display: 'flex', gap: 8, alignItems: 'flex-end' }}>
@@ -894,24 +921,74 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
             </button>
           )
         )}
-        {/* Палитра слэш-команд (автокомплит по '/' или по кнопке у режима) */}
-        {(cmd || cmdOpen) && cmdMatches.length > 0 && (
-          <div style={{ position: 'absolute', left: 8, right: 8, bottom: 'calc(100% + 4px)', zIndex: 9, maxHeight: 280, overflowY: 'auto', borderRadius: 10, background: 'rgba(10,2,16,0.98)', border: '1px solid var(--glass-border)', boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }}>
-            {cmdMatches.map((c, i) => {
-              const q = cmd?.query || '';
-              const matchLen = c.cmd.slice(1).toLowerCase().startsWith(q.toLowerCase()) ? q.length : 0;
+        {/* Палитра под вводом. Ввод '/' → плоский фильтр (Команды+Скиллы, cmdIdx сквозной).
+            Кнопкой → drill-down: root → Команды | Скиллы → Свои | Claude → список. Скиллы — из API. */}
+        {paletteOpen && (cmd ? (
+          paletteFlat.length > 0 && (() => {
+            const row = (c: { cmd: string; desc: string }, flat: number, keyId: string) => {
+              const matchLen = c.cmd.slice(1).toLowerCase().startsWith(cmdQuery) ? cmdQuery.length : 0;
               return (
-                <div key={c.cmd} onMouseDown={(e) => { e.preventDefault(); pickCommand(c); }}
-                  style={{ display: 'flex', alignItems: 'baseline', gap: 10, padding: '7px 11px', fontSize: 12.5, cursor: 'pointer', background: i === cmdIdx ? 'rgba(var(--accent-rgb),0.22)' : 'transparent' }}>
+                <div key={keyId} onMouseDown={(e) => { e.preventDefault(); pickCommand(c); }}
+                  onMouseEnter={() => setCmdIdx(flat)}
+                  style={{ display: 'flex', alignItems: 'baseline', gap: 10, padding: '7px 11px', fontSize: 12.5, cursor: 'pointer', background: flat === cmdIdx ? 'rgba(var(--accent-rgb),0.22)' : 'transparent' }}>
                   <span style={{ flexShrink: 0, fontFamily: 'monospace', fontWeight: 600, color: 'var(--accent-bright)' }}>
                     /<span style={{ color: 'var(--text-primary)', background: matchLen ? 'rgba(var(--accent-rgb),0.35)' : 'transparent', borderRadius: 3 }}>{c.cmd.slice(1, 1 + matchLen)}</span>{c.cmd.slice(1 + matchLen)}
                   </span>
                   <span style={{ minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-muted)', fontSize: 11.5 }}>{c.desc}</span>
                 </div>
               );
-            })}
-          </div>
-        )}
+            };
+            const hdrStyle: React.CSSProperties = { padding: '6px 11px 3px', fontSize: 10.5, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--text-tertiary)', position: 'sticky', top: 0, background: 'rgba(10,2,16,0.98)' };
+            return (
+              <div style={{ position: 'absolute', left: 8, right: 8, bottom: 'calc(100% + 4px)', zIndex: 9, maxHeight: 320, overflowY: 'auto', borderRadius: 10, background: 'rgba(10,2,16,0.98)', border: '1px solid var(--glass-border)', boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }}>
+                {cmdMatches.length > 0 && <div style={hdrStyle}>Команды</div>}
+                {cmdMatches.map((c, i) => row(c, i, 'cmd:' + c.cmd))}
+                {skillMatches.length > 0 && <div style={{ ...hdrStyle, borderTop: cmdMatches.length ? '1px solid var(--glass-border)' : 'none' }}>Скиллы</div>}
+                {skillMatches.map((c, i) => row(c, cmdMatches.length + i, 'skill:' + c.cmd))}
+              </div>
+            );
+          })()
+        ) : (() => {
+          const drop: React.CSSProperties = { position: 'absolute', left: 8, right: 8, bottom: 'calc(100% + 4px)', zIndex: 9, maxHeight: 340, overflowY: 'auto', borderRadius: 10, background: 'rgba(10,2,16,0.98)', border: '1px solid var(--glass-border)', boxShadow: '0 8px 24px rgba(0,0,0,0.5)' };
+          const go = (to: typeof paletteNav) => { setPaletteNav(to); setPaletteSearch(''); setCmdIdx(0); };
+          const navRow = (label: string, to: typeof paletteNav, hint: string) => (
+            <button key={to} type="button" onMouseDown={(e) => { e.preventDefault(); go(to); }}
+              style={{ display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left', padding: '11px 12px', cursor: 'pointer', background: 'transparent', border: 'none', borderBottom: '1px solid var(--glass-border)', color: 'var(--text-primary)', fontFamily: 'inherit' }}>
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ fontSize: 13.5, fontWeight: 600 }}>{label}</span>
+                <span style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{hint}</span>
+              </span>
+              <span style={{ flexShrink: 0, color: 'var(--text-tertiary)', fontSize: 16 }}>›</span>
+            </button>
+          );
+          const back = (label: string, to: typeof paletteNav) => (
+            <button type="button" onMouseDown={(e) => { e.preventDefault(); go(to); }}
+              style={{ display: 'flex', alignItems: 'center', gap: 6, width: '100%', padding: '8px 11px', cursor: 'pointer', background: 'rgba(255,255,255,0.03)', border: 'none', borderBottom: '1px solid var(--glass-border)', color: 'var(--text-secondary)', fontFamily: 'inherit', fontSize: 12, fontWeight: 600, position: 'sticky', top: 0 }}>
+              ‹ {label}
+            </button>
+          );
+          if (paletteNav === 'root') return <div style={drop}>{navRow('Команды', 'commands', 'Слэш-команды Claude Code')}{navRow('Скиллы', 'skills', 'Свои .md и скиллы Claude')}</div>;
+          if (paletteNav === 'skills') return <div style={drop}>{back('Назад', 'root')}{navRow('Свои', 'own', 'Загруженные тобой .md-скиллы')}{navRow('Claude', 'claude', 'Плагины и встроенные')}</div>;
+          const items = paletteNav === 'commands' ? SLASH_COMMANDS : paletteNav === 'own' ? ownSkills : claudeSkills;
+          const q = paletteSearch.toLowerCase();
+          const filtered = items.filter(c => !q || c.cmd.slice(1).toLowerCase().includes(q) || c.desc.toLowerCase().includes(q));
+          const crumb = paletteNav === 'commands' ? 'Команды' : paletteNav === 'own' ? 'Скиллы › Свои' : 'Скиллы › Claude';
+          return (
+            <div style={drop}>
+              {back(crumb, paletteNav === 'commands' ? 'root' : 'skills')}
+              <input autoFocus value={paletteSearch} onChange={(e) => setPaletteSearch(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter' && filtered[0]) { e.preventDefault(); pickCommand(filtered[0]); } else if (e.key === 'Escape') { e.preventDefault(); setCmdOpen(false); } }}
+                placeholder="Поиск…" style={{ width: '100%', boxSizing: 'border-box', padding: '7px 11px', background: 'rgba(255,255,255,0.04)', border: 'none', borderBottom: '1px solid var(--glass-border)', outline: 'none', color: 'var(--text-primary)', fontSize: 12.5, fontFamily: 'inherit' }} />
+              {filtered.length ? filtered.map((c, i) => (
+                <div key={c.cmd + ':' + i} onMouseDown={(e) => { e.preventDefault(); pickCommand(c); }}
+                  style={{ display: 'flex', alignItems: 'baseline', gap: 10, padding: '7px 11px', fontSize: 12.5, cursor: 'pointer' }}>
+                  <span style={{ flexShrink: 0, fontFamily: 'monospace', fontWeight: 600, color: 'var(--accent-bright)' }}>{c.cmd}</span>
+                  <span style={{ minWidth: 0, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-muted)', fontSize: 11.5 }}>{c.desc}</span>
+                </div>
+              )) : <div style={{ padding: 14, fontSize: 12, color: 'var(--text-muted)', textAlign: 'center' }}>{paletteNav === 'own' ? 'Своих скиллов пока нет — загрузи .md в панели «Скиллы»' : 'Ничего не найдено'}</div>}
+            </div>
+          );
+        })())}
         {/* @-автокомплит файлов */}
         {mention && mentionFiles.length > 0 && (
           <div style={{ position: 'absolute', left: 8, right: 8, bottom: 'calc(100% + 4px)', zIndex: 8, maxHeight: 220, overflowY: 'auto', borderRadius: 10, background: 'rgba(10,2,16,0.97)', border: '1px solid var(--glass-border)', boxShadow: '0 8px 24px rgba(0,0,0,0.5)' }}>
@@ -943,12 +1020,19 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
             if (cmdOpen && !c) setCmdOpen(false);
           }}
           onFocus={expandComposer}
-          onBlur={() => setTimeout(() => setCmdOpen(false), 150)}
           onKeyDown={(e) => {
-            if ((cmd || cmdOpen) && cmdMatches.length) {
-              if (e.key === 'ArrowDown') { e.preventDefault(); setCmdIdx(i => Math.min(i + 1, cmdMatches.length - 1)); return; }
+            if (paletteOpen && paletteFlat.length) {
+              if (e.key === 'ArrowDown') { e.preventDefault(); setCmdIdx(i => Math.min(i + 1, paletteFlat.length - 1)); return; }
               if (e.key === 'ArrowUp') { e.preventDefault(); setCmdIdx(i => Math.max(i - 1, 0)); return; }
-              if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); pickCommand(cmdMatches[cmdIdx]); return; }
+              if (e.key === 'Enter' || e.key === 'Tab') {
+                e.preventDefault();
+                const sel = paletteFlat[Math.min(cmdIdx, paletteFlat.length - 1)];
+                // Ввод УЖЕ полная команда без аргументов (/compact, /clear) + Enter → ОТПРАВЛЯЕМ в claude;
+                // иначе (частичный ввод / Tab) — дополняем строку команды.
+                if (e.key === 'Enter' && input.trim() === sel.cmd) { setCmd(null); setCmdOpen(false); sendUser(); }
+                else pickCommand(sel);
+                return;
+              }
               if (e.key === 'Escape') { e.preventDefault(); setCmd(null); setCmdOpen(false); return; }
             }
             if (mention && mentionFiles.length) {
@@ -981,17 +1065,33 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal }: P
         </button>
       </div>
 
-      {/* (6) mode footer under input — colored, click / Shift+Tab cycles. Collapses with scroll. */}
-      <div ref={footerRef} style={{ flexShrink: 0, padding: '6px 12px 9px', background: 'rgba(0,0,0,0.15)', display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, overflow: 'hidden', boxSizing: 'border-box' }}>
-        <button type="button" title="Команды Claude" onClick={() => { setCmdOpen(o => !o); setCmdIdx(0); setTimeout(() => taRef.current?.focus(), 0); }}
-          style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 22, borderRadius: 6, cursor: 'pointer', fontFamily: 'monospace', fontWeight: 700, fontSize: 14, lineHeight: 1,
+      {/* (6) Кнопки под вводом: «команды и скиллы» + режим + сброс. Collapses with scroll. */}
+      <div ref={footerRef} style={{ flexShrink: 0, padding: '6px 10px 9px', background: 'rgba(0,0,0,0.15)', display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, overflow: 'hidden', boxSizing: 'border-box' }}>
+        {/* Команды и скиллы — иконка-открывашка drill-down выпадашки (без текста) */}
+        <button type="button" title="Команды и скиллы Claude" onClick={() => { const next = !cmdOpen; setCmdOpen(next); if (next) { setPaletteNav('root'); setPaletteSearch(''); refreshSkills(); } setCmdIdx(0); setTimeout(() => taRef.current?.focus(), 0); }}
+          style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 30, borderRadius: 8, cursor: 'pointer',
             background: cmdOpen ? 'rgba(var(--accent-rgb),0.28)' : 'rgba(255,255,255,0.05)', border: `1px solid ${cmdOpen ? 'rgba(var(--accent-rgb),0.5)' : 'var(--glass-border)'}`, color: 'var(--accent-bright)' }}>
-          /
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0 }}>
+            <path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z" />
+          </svg>
         </button>
-        <span onClick={cycleMode} title="Сменить режим (Shift+Tab)" style={{ cursor: 'pointer', fontWeight: 600, userSelect: 'none', color: modeInfo.color }}>
-          ⏵ {modeInfo.label}
-        </span>
-        <span style={{ color: 'var(--text-tertiary)', fontSize: 11 }}>shift+tab — сменить режим</span>
+        {/* Режим работы Claude — клик циклит (Shift+Tab) */}
+        <button type="button" onClick={cycleMode} title="Сменить режим Claude (Shift+Tab)"
+          style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 7, minHeight: 30, padding: '0 12px', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 600, fontSize: 12.5, lineHeight: 1, userSelect: 'none',
+            background: 'rgba(255,255,255,0.05)', border: '1px solid var(--glass-border)', color: modeInfo.color }}>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" style={{ flexShrink: 0 }}><polygon points="5 3 19 12 5 21 5 3" /></svg>
+          <span style={{ color: 'var(--text-muted)', fontWeight: 500 }}>режим:</span>
+          <span style={{ color: modeInfo.color }}>{modeInfo.label}</span>
+        </button>
+        <span style={{ flex: 1, minWidth: 0 }} />
+        {/* Сброс чата — пересвязать с папкой терминала, очистить ленту вида */}
+        <button type="button" onClick={resetChat} title="Сбросить чат (пересвязать с папкой терминала)"
+          style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', width: 30, height: 30, borderRadius: 8, cursor: 'pointer',
+            background: 'rgba(255,255,255,0.04)', border: '1px solid var(--glass-border)', color: 'var(--text-muted)' }}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polyline points="1 4 1 10 7 10" /><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" />
+          </svg>
+        </button>
       </div>
       </div>{/* /composer */}
     </div>

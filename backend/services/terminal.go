@@ -215,6 +215,12 @@ type TerminalSession struct {
 	Cmd  *gopty.Cmd
 	Done chan struct{}
 
+	// ptyCloseOnce гарантирует закрытие нативного ConPTY-хэндла РОВНО один раз. Несколько путей
+	// могут звать закрытие (горутина cmd.Wait при выходе шелла + CloseKeepScrollback/Close при
+	// пересоздании мёртвой сессии) — двойной Close() ConPTY на Windows = double-free → heap
+	// corruption (0xc0000374). Once делает закрытие идемпотентным.
+	ptyCloseOnce sync.Once
+
 	mw *multiWriter // broadcasts PTY output to all attached WS connections
 
 	// Last known PTY dimensions — used to deduplicate resize calls.
@@ -454,6 +460,13 @@ func (s *TerminalService) createLocked(sessionKey string, workingDir string, san
 		workingDir = os.TempDir()
 	}
 
+	// Ensure the project skills dir exists at session start so uploaded skills
+	// hot-reload into Claude Code without a restart. Best-effort — ignore error.
+	os.MkdirAll(filepath.Join(workingDir, ".claude", "skills"), 0o755)
+	// Ensure the "communication chats" dir exists so opening a new chat from the Chat
+	// window only needs `cd "<dir>" && claude` (no mkdir in the command). Best-effort.
+	os.MkdirAll(filepath.Join(workingDir, ".nebulide_chats"), 0o755)
+
 	p, err := gopty.New()
 	if err != nil {
 		return nil, err
@@ -555,8 +568,9 @@ func (s *TerminalService) createLocked(sessionKey string, workingDir string, san
 		} else {
 			log.Printf("[TerminalService] shell exited normally (key=%s)", sessionKey)
 		}
-		// Close PTY to unblock pumpOutput's Read()
-		p.Close()
+		// Close PTY to unblock pumpOutput's Read() — идемпотентно (см. closePty), чтобы не
+		// конфликтовать с CloseKeepScrollback/Close при пересоздании сессии.
+		session.closePty()
 	}()
 
 	s.sessions[sessionKey] = session
@@ -701,15 +715,23 @@ func (ts *TerminalSession) Close() {
 	ts.killProcessTree()
 }
 
+// closePty закрывает нативный PTY РОВНО один раз (идемпотентно) — защита от double-free ConPTY
+// при гонке путей закрытия (горутина выхода шелла vs CloseKeepScrollback/Close). См. ptyCloseOnce.
+func (ts *TerminalSession) closePty() {
+	ts.ptyCloseOnce.Do(func() {
+		if ts.Pty != nil {
+			ts.Pty.Close()
+		}
+	})
+}
+
 // killProcessTree kills the shell and all its child processes.
 // Platform-specific: see terminal_kill_unix.go / terminal_kill_windows.go.
 func (ts *TerminalSession) killProcessTree() {
 	if ts.Cmd != nil && ts.Cmd.Process != nil {
 		killProcessGroup(ts.Cmd.Process.Pid)
 	}
-	if ts.Pty != nil {
-		ts.Pty.Close()
-	}
+	ts.closePty()
 }
 
 // CloseKeepScrollback terminates the session but keeps the scrollback file.
@@ -719,9 +741,7 @@ func (ts *TerminalSession) CloseKeepScrollback() {
 	if ts.Cmd != nil && ts.Cmd.Process != nil {
 		killProcessGroup(ts.Cmd.Process.Pid)
 	}
-	if ts.Pty != nil {
-		ts.Pty.Close()
-	}
+	ts.closePty()
 }
 
 // ── Admin management methods ──

@@ -13,6 +13,7 @@ import {
   getClaudeOpenMode, setClaudeOpenMode, useClaudeOpenMode,
   setInitialTerminalViewMode, setTerminalCwdHint, markTrustPending, setSessionHint,
 } from '../../utils/terminalViewMode';
+import { fetchServerOs, buildCdClaudeCmd } from '../../utils/serverOs';
 
 /** Normalize a path for cross-OS comparison: forward slashes, no trailing slash. */
 const normPath = (p?: string) => (p || '').replace(/\\/g, '/').replace(/\/+$/, '');
@@ -229,7 +230,10 @@ export default function ChatPanel(_props: ChatPanelProps) {
     // Чат покажет настоящий терминал, пока сессия не стартует (см. TerminalChatPanel).
     markTrustPending(instanceId);
     openTerminalWithId(instanceId);
-    const ok = await sendCommandWhenReady(instanceId, `mkdir -p "${absPath}" && cd "${absPath}" && claude`);
+    // Простой cd + claude (папку .nebulide_chats создаёт бэкенд). Разделитель под ОС (bash `&&` /
+    // PowerShell `;` — там нет `&&`), иначе claude не стартовал бы на Windows-сервере.
+    await fetchServerOs();
+    const ok = await sendCommandWhenReady(instanceId, buildCdClaudeCmd(absPath, 'claude'));
     if (!ok) toast.error('Failed to connect to terminal');
   }, [openTerminalWithId]);
 
@@ -369,7 +373,9 @@ export default function ChatPanel(_props: ChatPanelProps) {
     openTerminalWithId(instanceId);
 
     const resumeCmd = `claude --resume ${session.session_id}`;
-    const cmd = session.cwd ? `cd "${session.cwd}" && ${resumeCmd}` : resumeCmd;
+    // ПОД СЕРВЕРНУЮ ОС (Windows PowerShell не понимает `&&` → claude не resume'ился).
+    await fetchServerOs();
+    const cmd = buildCdClaudeCmd(session.cwd, resumeCmd);
     const ok = await sendCommandWhenReady(instanceId, cmd);
     if (!ok) {
       toast.error('Failed to connect to terminal');
@@ -892,6 +898,31 @@ export default function ChatPanel(_props: ChatPanelProps) {
       )}
 
       <div style={{ flex: 1, overflow: 'auto', padding: '8px 0' }}>
+        {/* «Новый чат» прямо во «Все чаты» (не нужно уходить в «Чаты общения»). По умолчанию — корень
+            воркспейса; если выбрана папка/пикер — в неё. Доступен даже при пустом списке сессий. */}
+        {viewMode === 'normal' && !searchQuery && (
+          <div style={{ padding: '4px 16px 8px' }}>
+            <button
+              type="button"
+              onClick={() => { const target = folderTargetPath || normPath(user?.workspace_dir); if (target) startNewChatInFolder(target); }}
+              disabled={!user?.workspace_dir && !folderTargetPath}
+              style={{
+                width: '100%', padding: '9px 12px', borderRadius: 8, fontSize: 12, fontWeight: 600,
+                cursor: (user?.workspace_dir || folderTargetPath) ? 'pointer' : 'not-allowed', fontFamily: 'inherit',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+                background: 'rgba(var(--accent-rgb), 0.18)',
+                border: '1px solid rgba(var(--accent-rgb), 0.4)',
+                color: 'var(--accent-bright)',
+                opacity: (user?.workspace_dir || folderTargetPath) ? 1 : 0.5,
+              }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+              Новый чат{folderTargetPath ? ` в ${baseName(folderTargetPath)}` : ''}
+            </button>
+          </div>
+        )}
         {viewMode === 'normal' && isEmpty && (
           <div style={{
             display: 'flex', flexDirection: 'column', alignItems: 'center',

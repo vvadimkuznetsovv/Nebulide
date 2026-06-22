@@ -1,0 +1,12 @@
+import { chromium } from 'playwright';
+const b = await chromium.launch();
+const p = await (await b.newContext({ viewport: { width: 1400, height: 950 } })).newPage();
+const errs = [];
+p.on('console', m => { if (m.type()==='error') errs.push('CONSOLE: '+m.text().slice(0,300)); });
+p.on('pageerror', e => errs.push('PAGEERROR: '+e.message.slice(0,400)));
+await p.goto('http://localhost:5173/login', { waitUntil: 'networkidle' });
+await p.fill('input[placeholder="Enter username"]', 'admin'); await p.fill('input[placeholder="Enter password"]', 'admin12345');
+await p.click('button[type="submit"]'); await p.waitForTimeout(5000);
+console.log('=== ОШИБКИ ===');
+console.log(errs.slice(0,10).join('\n') || '(нет ошибок консоли)');
+await b.close();
