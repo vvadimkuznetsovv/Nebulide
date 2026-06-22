@@ -39,6 +39,33 @@ func TestApplyNebulideHooks_PreservesForeign(t *testing.T) {
 	}
 }
 
+// Устаревшая мёртвая запись (старый .sh из entrypoint-эпохи) ЗАМЕНЯЕТСЯ на актуальную .mjs,
+// а не копится рядом — это и есть главный баг «nebulide-hook.sh: not found».
+func TestApplyNebulideHooks_ReplacesStaleSh(t *testing.T) {
+	s := map[string]any{
+		"hooks": map[string]any{
+			"Stop": []any{
+				map[string]any{"matcher": "", "hooks": []any{map[string]any{"type": "command", "command": "/app/hooks/nebulide-hook.sh"}}},
+				map[string]any{"matcher": "", "hooks": []any{map[string]any{"type": "command", "command": "foreign-notify"}}},
+			},
+		},
+	}
+	applyNebulideHooks(s, `node "h.mjs"`, `node "s.mjs"`)
+	stop, _ := s["hooks"].(map[string]any)["Stop"].([]any)
+	if len(stop) != 2 {
+		t.Fatalf("Stop: ждём 2 (чужой + актуальный наш), получили %d", len(stop))
+	}
+	if hookArrayHasCommand(stop, "/app/hooks/nebulide-hook.sh") {
+		t.Fatal("устаревший .sh не удалён")
+	}
+	if !hookArrayHasCommand(stop, `node "h.mjs"`) {
+		t.Fatal("актуальный .mjs не добавлен")
+	}
+	if !hookArrayHasCommand(stop, "foreign-notify") {
+		t.Fatal("чужой хук потерян")
+	}
+}
+
 // Повторный вызов не плодит дубли (идемпотентность).
 func TestApplyNebulideHooks_Idempotent(t *testing.T) {
 	s := map[string]any{}

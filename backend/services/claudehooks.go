@@ -61,9 +61,12 @@ func RegisterClaudeHooks() {
 	log.Printf("[claudehooks] hooks + statusLine зарегистрированы в %s (скрипты: %s)", settingsPath, dir)
 }
 
-// applyNebulideHooks мутирует settings: ДОБАВЛЯЕТ наш hook-command в массив каждого события
-// (с дедупом, не затирая чужие хуки) и ставит statusLine (если пусто или уже наш; чужой кастом
-// не трогаем). Чистая — тестируется без файловой системы.
+// applyNebulideHooks мутирует settings: для каждого события СНОСИТ все прежние группы НАШИХ хуков
+// и ставит ровно одну актуальную (.mjs). Это чинит главный баг: старая мёртвая запись из
+// entrypoint-эпохи (/app/hooks/nebulide-hook.sh, которой уже нет в образе) копилась рядом с
+// актуальной .mjs — claude дёргал несуществующий скрипт на КАЖДОМ событии («nebulide-hook.sh:
+// not found»). Чужие хуки (плагины и т.п.) сохраняем; statusLine ставим, только если пусто/наш.
+// Чистая — тестируется без файловой системы. Идемпотентна (повторный вызов не плодит дубли).
 func applyNebulideHooks(settings map[string]any, hookCmd, statusCmd string) {
 	hooks, _ := settings["hooks"].(map[string]any)
 	if hooks == nil {
@@ -71,12 +74,11 @@ func applyNebulideHooks(settings map[string]any, hookCmd, statusCmd string) {
 	}
 	for _, ev := range hookEvents {
 		arr, _ := hooks[ev].([]any)
-		if !hookArrayHasCommand(arr, hookCmd) {
-			arr = append(arr, map[string]any{
-				"matcher": "",
-				"hooks":   []any{map[string]any{"type": "command", "command": hookCmd}},
-			})
-		}
+		arr = stripNebulideHookGroups(arr, hookCmd) // убрать прежние наши (в т.ч. устаревшие .sh)
+		arr = append(arr, map[string]any{
+			"matcher": "",
+			"hooks":   []any{map[string]any{"type": "command", "command": hookCmd}},
+		})
 		hooks[ev] = arr
 	}
 	settings["hooks"] = hooks
@@ -89,6 +91,37 @@ func applyNebulideHooks(settings map[string]any, hookCmd, statusCmd string) {
 		}
 	}
 	settings["statusLine"] = map[string]any{"type": "command", "command": statusCmd}
+}
+
+// stripNebulideHookGroups убирает из массива групп события ВСЕ группы, чей хоть один hook-command
+// — наш: подстрока "nebulide-hook" (ловит устаревший .sh и прежние пути) ЛИБО точное совпадение с
+// текущей командой cur (гарантирует идемпотентность при любом виде команды). Чужие группы
+// (плагины и т.п.) сохраняем. Возвращает НОВЫЙ слайс (исходный не мутируем).
+func stripNebulideHookGroups(arr []any, cur string) []any {
+	out := make([]any, 0, len(arr))
+	for _, g := range arr {
+		grp, ok := g.(map[string]any)
+		if !ok {
+			out = append(out, g)
+			continue
+		}
+		hs, _ := grp["hooks"].([]any)
+		ours := false
+		for _, h := range hs {
+			hm, ok := h.(map[string]any)
+			if !ok {
+				continue
+			}
+			if c, _ := hm["command"].(string); strings.Contains(c, "nebulide-hook") || c == cur {
+				ours = true
+				break
+			}
+		}
+		if !ours {
+			out = append(out, g)
+		}
+	}
+	return out
 }
 
 // hookArrayHasCommand — есть ли уже наша command-команда в массиве групп события (дедуп).
