@@ -5,7 +5,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { scrapeMenu, analyzeScreen, scrapeResumePicker, extractWorkStatus, extractProgress } from './claudeScreen';
+import { scrapeMenu, analyzeScreen, scrapeResumePicker, extractWorkStatus, extractProgress, extractError } from './claudeScreen';
 
 const FX_DIR = join(dirname(fileURLToPath(import.meta.url)), 'claudeScreen.fixtures');
 const fx = (name: string) => readFileSync(join(FX_DIR, name), 'utf8');
@@ -175,6 +175,16 @@ describe('analyzeScreen — busy / idle / режим / сжатие', () => {
   it('частично заполненный бар → числовой процент, без бара → null', () => {
     expect(extractProgress('✽ Running SessionStart hooks…… (35s)▰▰▰▰▰33%')).toBe(33);
     expect(extractProgress('Compacting conversation… (3m 41s · ↑ 16.3k tokens)')).toBeNull();
+  });
+
+  it('ошибки claude (API Error / сеть) → extractError + analyzeScreen.errorMsg', () => {
+    expect(extractError('✶ Waiting for API response · will retry in 10s · check your network'))
+      .toBe('Waiting for API response · will retry in 10s · check your network');
+    expect(extractError('  API Error: 500 Internal server error. This is a server-side issue'))
+      .toBe('API Error: 500 Internal server error. This is a server-side issue');
+    expect(extractError('обычный экран без ошибок')).toBe('');
+    const a = analyzeScreen('❯ привет\n✶ Waiting for API response · will retry in 5s · check your network\n  ? for shortcuts', 'default');
+    expect(a.errorMsg).toContain('check your network');
   });
 
   it('голый спиннер «✶ Shenaniganing…» (plan-режим, без скобок/esc) → busy + workStatus', () => {

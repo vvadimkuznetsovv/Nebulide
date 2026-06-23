@@ -253,6 +253,18 @@ export interface ScreenAnalysis {
   workStatus: string;      // живая строка статуса при busy (без инлайн-бара/процента)
   progress: number | null; // прогресс длинной операции (compact/hooks) 0..100, иначе null
   alive: boolean;          // claude TUI присутствует (маркеры ИЛИ любое меню)
+  errorMsg: string;        // ошибка/сетевая проблема claude (API Error / Waiting for API · network) — в чат КРАСНЫМ
+}
+
+/** Ошибка/сетевая проблема claude для показа КРАСНЫМ в чате (одной карточкой, не плодим). Ловим
+ *  «API Error: …» (последнюю) и ретрай «Waiting for API response · … · check your network». Из РФ
+ *  API часто недоступен → claude висит на ретраях; пользователь должен видеть это явно. */
+export function extractError(buf: string): string {
+  const apiErr = buf.match(/API Error:[^\n│]*/g);
+  if (apiErr && apiErr.length) return cleanStatus(apiErr[apiErr.length - 1], 180);
+  const net = buf.match(/Waiting for API response[^\n│]*?check your network/);
+  if (net) return cleanStatus(net[0], 180);
+  return '';
 }
 
 /** ЧИСТЫЙ анализ экрана → состояние. Terminal.tsx применяет его к сессии и эмитит события;
@@ -317,5 +329,6 @@ export function analyzeScreen(buf: string, prevMode: string): ScreenAnalysis {
     workStatus: busy ? extractWorkStatus(buf) : '',
     progress: busy ? extractProgress(buf) : null,
     alive: hasMarkers || resumeMenu || !!menu || !!resumePicker,
+    errorMsg: extractError(buf),
   };
 }

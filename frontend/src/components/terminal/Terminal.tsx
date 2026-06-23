@@ -96,6 +96,7 @@ interface TermSession {
   /** Меню — это план (ExitPlanMode): detail = текст плана, рендерим крупным markdown. */
   permIsPlan: boolean;
   workStatusCur: string;
+  errorMsgCur: string; // ошибка/сетевая проблема claude (API Error / network) — в чат красным
   workProgressCur: number | null;
   /** claude TUI присутствует на экране (загрузился) — для гейта отложенной отправки. */
   claudeAlive: boolean;
@@ -220,6 +221,7 @@ function detectClaudeScreen(session: TermSession, instanceId: string) {
     if (a.busy && !session.claudeBusy) { session.claudeBusy = true; emitActivity({ type: 'terminal_busy', instanceId }); }
     else if (!a.busy && session.claudeBusy) { session.claudeBusy = false; emitActivity({ type: 'terminal_idle', instanceId }); }
     session.workStatusCur = a.busy ? a.workStatus : '';
+    session.errorMsgCur = a.errorMsg;
     session.workProgressCur = a.busy ? a.progress : null;
     if (!a.busy && a.idleVisible) session.claudeMode = a.mode; // режим виден только на prompt
   } else if (a.resumeMenu || a.menu) {
@@ -248,6 +250,7 @@ export function getTerminalScreenState(instanceId: string) {
     permTabs: s.permTabs,
     permIsPlan: s.permIsPlan,
     workStatus: s.workStatusCur,
+    errorMsg: s.errorMsgCur,
     progress: s.workProgressCur,
   };
 }
@@ -450,6 +453,7 @@ function createXterm(instanceId: string): TermSession {
     permTabs: [],
     permIsPlan: false,
     workStatusCur: '',
+    errorMsgCur: '',
     workProgressCur: null,
     claudeAlive: false,
     claudeMode: 'default',

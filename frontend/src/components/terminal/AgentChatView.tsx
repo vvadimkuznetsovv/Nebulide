@@ -185,6 +185,7 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
   const [mode, setMode] = useState<PermissionMode>('default');
   const [status, setStatus] = useState<'connecting' | 'ready' | 'working' | 'error' | 'closed'>('connecting');
   const [workStatus, setWorkStatus] = useState(''); // живой статус из экрана: "Caramelizing… (5s · ↑ 87 tokens)"
+  const [error, setError] = useState(''); // ошибка/сетевая проблема claude (API Error / network) — красная карточка
   const [progress, setProgress] = useState<number | null>(null); // прогресс длинной операции (compact/hooks) 0..100, иначе null
   const [resumeMenu, setResumeMenu] = useState<{ info: string } | null>(null); // блокирующее меню "как восстановить"
   const [resumePicker, setResumePicker] = useState<{ sessions: { name: string; meta: string }[]; selectedIndex: number; total: number } | null>(null); // /resume — список сессий
@@ -415,7 +416,7 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
   // ── Частый опрос ТЕКУЩЕГО состояния экрана claude (250мс). Надёжно — НЕ теряется при
   //    ремоунте/смене вида. Источник правды для стоп-кнопки, индикатора, resume/perm-меню. ──
   useEffect(() => {
-    const la = { busy: undefined as boolean | undefined, ws: '', resume: false, permSig: '', mode: '', rp: '', compactActive: false, flashUntil: 0 };
+    const la = { busy: undefined as boolean | undefined, ws: '', err: '', resume: false, permSig: '', mode: '', rp: '', compactActive: false, flashUntil: 0 };
     const tick = () => {
       const st = getTerminalScreenState(instanceId);
       if (!st) return;
@@ -429,6 +430,7 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
       if (st.busy !== la.busy) { la.busy = st.busy; setStatus(st.busy ? 'working' : 'ready'); }
       const ws = st.busy ? st.workStatus : '';
       if (ws !== la.ws) { la.ws = ws; setWorkStatus(ws); }
+      if ((st.errorMsg || '') !== la.err) { la.err = st.errorMsg || ''; setError(st.errorMsg || ''); }
       // Прогресс компакта: claude отдаёт estimate, который доходит лишь до ~30% и операция
       // завершается — бар «обрывался» на 30% и пропадал (выглядело сломано). Поэтому при ЗАВЕРШЕНИИ
       // (был прогресс, busy спал) доводим бар до 100% и держим ~800мс, затем гасим.
@@ -983,6 +985,22 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
               {onRequestTerminal && (
                 <button type="button" onClick={() => { setPerm(null); onRequestTerminal(); }} style={pbtn('rgba(255,255,255,0.05)', 'var(--glass-border)', 'var(--text-secondary)')}>⌨ Терминал</button>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* Ошибка/сеть claude — ОДНА красная карточка (детект из экрана; не плодим повторы ретраев). */}
+        {!query && error && (
+          <div style={{ margin: '10px 0', borderRadius: 12, overflow: 'hidden', border: '1px solid rgba(var(--danger-rgb),0.5)', background: 'rgba(var(--danger-rgb),0.12)' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-start', gap: 9, padding: '10px 12px' }}>
+              <span style={{ flexShrink: 0, fontSize: 15, lineHeight: '20px' }}>⚠️</span>
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ display: 'block', fontSize: 12.5, fontWeight: 700, color: 'var(--danger)' }}>Ошибка Claude</span>
+                <span style={{ display: 'block', fontSize: 12, lineHeight: 1.5, color: 'var(--text-secondary)', marginTop: 3, wordBreak: 'break-word' }}>{error}</span>
+                {/check your network|Waiting for API/i.test(error) && (
+                  <span style={{ display: 'block', fontSize: 11, color: 'var(--text-muted)', marginTop: 4 }}>Нет связи с API Anthropic — проверьте интернет/VPN. Claude повторяет запрос автоматически.</span>
+                )}
+              </span>
             </div>
           </div>
         )}
