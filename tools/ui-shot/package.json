@@ -1,3 +1,1 @@
-{ "name": "ui-shot", "private": true, "type": "module",
-  "description": "Playwright headless — логинится в локальный Nebulide и снимает скриншоты UI.",
-  "dependencies": { "playwright": "^1.49.0" } }
+{"name":"ui-shot","private":true,"type":"module","description":"Playwright headless — логинится в локальный Nebulide и снимает скриншоты UI.","dependencies":{"playwright":"^1.49.0"},"devDependencies":{"rrweb":"^2.0.1","rrweb-player":"^2.0.1"}}

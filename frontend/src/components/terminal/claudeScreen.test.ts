@@ -177,6 +177,14 @@ describe('analyzeScreen — busy / idle / режим / сжатие', () => {
     expect(extractProgress('Compacting conversation… (3m 41s · ↑ 16.3k tokens)')).toBeNull();
   });
 
+  it('голый спиннер «✶ Shenaniganing…» (plan-режим, без скобок/esc) → busy + workStatus', () => {
+    // Реальный кадр из plan-flow: claude думает, показывая только глиф+слово+«…». Раньше busy=false.
+    const buf = '❯ составь план\n\n✶ Shenaniganing…\n\n  ⏸ plan mode on (shift+tab to cycle)';
+    const a = analyzeScreen(buf, 'plan');
+    expect(a.busy).toBe(true);
+    expect(a.workStatus).toBe('Shenaniganing…');
+  });
+
   it('РЕАЛЬНЫЙ формат /compact (claude v2.1.185): бар на отдельной строке с пробелом перед %', () => {
     // Снято из живого лога: спиннер + лейбл, БАР отдельной строкой «▰▱…▱ 3%» (пробел перед %).
     const buf = '❯ /compact\n✽ Compacting conversation…\n  ▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 3%';

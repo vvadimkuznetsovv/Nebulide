@@ -243,6 +243,10 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
   // показываем оптимистично, но шлём в PTY, только когда claude реально готов
   // (детектор экрана busy/idle или hook). pendingSend — отложенный текст.
   const pendingSendRef = useRef<string | null>(null);
+  // Свободный ответ на меню («Tell Claude what to change» / «Type something»): после активации
+  // claude в ТЕКСТОВОМ режиме, но план/меню ещё на экране → гейт menuUp заблокировал бы отправку.
+  // Флаг говорит submit: следующий текст слать НЕСМОТРЯ на видимое меню (мы сами в него вошли).
+  const freeTextRef = useRef(false);
   // Анти-дубль: setInput('') асинхронен, поэтому быстрый повтор Enter (автоповтор/двойное
   // нажатие) брал бы один и тот же input из замыкания → два сабмита. Гасим повтор того же
   // текста в окне 1.5с.
@@ -633,7 +637,9 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
     // Если открыто блокирующее меню (permission/resume) — НЕЛЬЗЯ слать текст: Enter в конце
     // подтвердил бы меню (по умолчанию ❯ Yes). Придерживаем до закрытия меню.
     const scr = getTerminalScreenState(instanceId);
-    const menuUp = !!(scr && (scr.resumeMenu || scr.permMenu || scr.resumePicker));
+    // Свободный ответ (freeTextRef) — claude уже ждёт текст, видимое план-меню игнорируем и шлём.
+    const menuUp = !freeTextRef.current && !!(scr && (scr.resumeMenu || scr.permMenu || scr.resumePicker));
+    freeTextRef.current = false;
     if (readyInstances.has(instanceId) && !menuUp) {
       submitPromptToTerminal(instanceId, text); // claude готов, меню нет → шлём (bracketed paste + Enter)
       setTimeout(() => poll(), 600);
@@ -675,6 +681,7 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
     if (/type something|chat about|tell claude|свой ответ|ввести|написать/i.test(o.label)) {
       sendKey(o.digit);
       setTimeout(() => sendKey('\r'), 90); // Enter активирует выбранный пункт → claude ждёт текст
+      freeTextRef.current = true; // следующий текст из композера слать, игнорируя видимое план-меню
       setPerm(null);
       applyRaw(1); // РАСКРЫТЬ композер — поле ввода «выдвигается» (футер+textarea на полную)
       setTimeout(() => { applyRaw(1); taRef.current?.focus(); }, 200);

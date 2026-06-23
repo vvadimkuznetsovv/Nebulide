@@ -115,7 +115,13 @@ type jsonlMeta struct {
 	UUID        string `json:"uuid"`
 	ParentUUID  string `json:"parentUuid"`
 	IsSidechain bool   `json:"isSidechain"` // true = Task/subagent thread (skip in main view)
-	CustomTitle string `json:"customTitle"` // type == "custom-title": user-assigned session/branch name
+	// IsCompactSummary: true = служебная инъекция-сводка после /compact
+	// ({"type":"user",...,"content":"This session is being continued…"}). Её НЕЛЬЗЯ
+	// показывать в чате — это внутренний контекст для модели, не сообщение пользователя.
+	// Запись маркируется ещё и "isVisibleInTranscriptOnly":true. Сам разделитель компакта
+	// ({"type":"system","subtype":"compact_boundary"}) уже отсеивается фильтром user/assistant.
+	IsCompactSummary bool   `json:"isCompactSummary"`
+	CustomTitle      string `json:"customTitle"` // type == "custom-title": user-assigned session/branch name
 	Message     *struct {
 		Role    string          `json:"role"`
 		Content json.RawMessage `json:"content"`
@@ -554,7 +560,7 @@ func (h *ClaudeSessionsHandler) List(c *gin.Context) {
 						si.CreatedAt = meta.Timestamp
 					}
 
-					if meta.Type == "user" {
+					if meta.Type == "user" && !meta.IsCompactSummary {
 						hasConversation = true
 						if !foundFirstMsg {
 							msg := extractTextContent(meta)
@@ -801,7 +807,7 @@ func (h *ClaudeSessionsHandler) searchInSession(filePath, qLower string, titles 
 			cwd = meta.CWD
 		}
 
-		if meta.Type == "user" || meta.Type == "assistant" {
+		if (meta.Type == "user" || meta.Type == "assistant") && !meta.IsCompactSummary {
 			text := extractTextContent(meta)
 			if text == "" {
 				continue
@@ -985,7 +991,7 @@ func (h *ClaudeSessionsHandler) ReadSession(c *gin.Context) {
 			continue
 		}
 
-		if meta.Type == "user" || meta.Type == "assistant" {
+		if (meta.Type == "user" || meta.Type == "assistant") && !meta.IsCompactSummary {
 			text := extractTextContent(meta)
 			if text != "" {
 				messages = append(messages, sessionMessage{
@@ -1505,6 +1511,9 @@ func (h *ClaudeSessionsHandler) TailSession(c *gin.Context) {
 			if meta.Type != "user" && meta.Type != "assistant" {
 				continue
 			}
+			if meta.IsCompactSummary {
+				continue // служебная сводка после /compact — не показываем в чате
+			}
 			blocks := extractBlocks(meta)
 			if len(blocks) == 0 {
 				continue
@@ -1555,7 +1564,7 @@ func (h *ClaudeSessionsHandler) TailSession(c *gin.Context) {
 			if meta.SessionID != "" {
 				sessionID = meta.SessionID
 			}
-			if meta.IsSidechain || (meta.Type != "user" && meta.Type != "assistant") {
+			if meta.IsSidechain || meta.IsCompactSummary || (meta.Type != "user" && meta.Type != "assistant") {
 				continue
 			}
 			blocks := extractBlocks(meta)

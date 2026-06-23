@@ -75,11 +75,17 @@ export const openClaudeViaChatWindow = async (p, { timeoutMs = 45000 } = {}) => 
 
   // 1. ОТКРЫТЬ окно Chat — РЕТРАЙ, пока панель «Claude Sessions» реально не появится (под параллелью
   //    клик мог не зайти). ГАРД: НЕ чистим панели, пока окно Chat не подтверждено (иначе снесём ВСЁ).
+  //    МОБАЙЛ: Workspace рендерит ДВА сайдбара — desktop `hidden lg:block` + mobile-оверлей `lg:hidden`.
+  //    Оба содержат кнопку «Show Chat», но desktop-копия скрыта (display:none) → клик по `.first()`
+  //    падает «element is not visible». Поэтому ВЕЗДЕ берём `:visible`. На мобиле сайдбар-оверлей уже
+  //    открыт сразу после логина (кнопки «Show sidebar» нет) — нужно лишь кликнуть видимый тоггл chat.
   let chatOpen = (await chatPanelLoc().count()) > 0;
   for (let attempt = 0; attempt < 5 && !chatOpen; attempt++) {
-    const showSb = p.locator('button[title="Show sidebar"]').first();
+    // Сайдбар: на десктопе раскрываем по «Show sidebar»; на мобиле он уже открыт оверлеем.
+    const showSb = p.locator('button[title="Show sidebar"]:visible').first();
     if (await showSb.count()) { await showSb.click().catch(() => {}); await sleep(700); }
-    const showChat = p.locator('button[title="Show Chat"]').first();
+    // Тоггл показа панели Chat — строго ВИДИМЫЙ (иначе попадём в скрытый desktop-сайдбар на мобиле).
+    const showChat = p.locator('button[title="Show Chat"]:visible').first();
     if (await showChat.count()) { await showChat.click().catch(() => {}); await sleep(1300); }
     if (await sidebarOpen(p)) await closeSidebar(p);
     await sleep(700);
