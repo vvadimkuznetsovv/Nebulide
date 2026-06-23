@@ -187,7 +187,7 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
   const [workStatus, setWorkStatus] = useState(''); // живой статус из экрана: "Caramelizing… (5s · ↑ 87 tokens)"
   const [progress, setProgress] = useState<number | null>(null); // прогресс длинной операции (compact/hooks) 0..100, иначе null
   const [resumeMenu, setResumeMenu] = useState<{ info: string } | null>(null); // блокирующее меню "как восстановить"
-  const [resumePicker, setResumePicker] = useState<{ sessions: { name: string; meta: string }[]; selectedIndex: number } | null>(null); // /resume — список сессий
+  const [resumePicker, setResumePicker] = useState<{ sessions: { name: string; meta: string }[]; selectedIndex: number; total: number } | null>(null); // /resume — список сессий
   const [ctx, setCtx] = useState<ContextInfo | undefined>(() => contextCache.get(instanceId)); // живой контекст/токены
   const [input, setInput] = useState(() => draftInputs.get(instanceId) || '');
   const [pillCollapsed, setPillCollapsed] = useState(false);
@@ -428,8 +428,8 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
       setProgress(st.busy ? (st.progress ?? null) : null); // React пропустит ре-рендер при том же значении
       if (st.resumeMenu !== la.resume) { la.resume = st.resumeMenu; setResumeMenu(st.resumeMenu ? { info: st.resumeInfo } : null); }
       // /resume-пикер — список сессий; сигнатура = кол-во + выбранная, чтобы перерисовывать при навигации.
-      const rpSig = st.resumePicker ? st.resumePicker.sessions.length + ':' + st.resumePicker.selectedIndex : '';
-      if (rpSig !== la.rp) { la.rp = rpSig; setResumePicker(st.resumePicker ? { sessions: st.resumePicker.sessions.map((x) => ({ name: x.name, meta: x.meta })), selectedIndex: st.resumePicker.selectedIndex } : null); }
+      const rpSig = st.resumePicker ? st.resumePicker.sessions.length + ':' + st.resumePicker.selectedIndex + ':' + st.resumePicker.total : '';
+      if (rpSig !== la.rp) { la.rp = rpSig; setResumePicker(st.resumePicker ? { sessions: st.resumePicker.sessions.map((x) => ({ name: x.name, meta: x.meta })), selectedIndex: st.resumePicker.selectedIndex, total: st.resumePicker.total } : null); }
       // permission — варианты СКРЕЙПЛЕНЫ с экрана (2 или 3); сигнатура = вопрос+цифры.
       // Сигнатура включает состояние чекбоксов (✔/ ) — чтобы тогл в мульти-селекте перерисовывал карточку.
       const permSig = st.permMenu ? st.permKind + '|' + st.permQuestion + '|' + (st.permOptions || []).map(o => o.digit + (o.checked ? '1' : o.checked === false ? '0' : '')).join('') + '|' + (st.permTabs || []).map(t => t.label + (t.done ? '1' : '0')).join(',') : '';
@@ -667,15 +667,17 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
     setTimeout(() => poll(), 400);
   }, [sendKey, poll]);
 
-  // «Type something» / «Chat about this» / «Tell Claude anything» = свободный ответ: шлём цифру
-  // (claude переходит в текстовый ввод), закрываем карточку и ОТКРЫВАЕМ нижнее поле (фокус композера),
-  // чтобы юзер сразу набрал свой ответ. Остальные варианты — обычный decide (цифра в меню).
+  // «Type something» / «Chat about this» / «Tell Claude what to change» = свободный ответ: цифра
+  // в меню плана/вопроса лишь ПЕРЕМЕЩАЕТ курсор на пункт (❯), а АКТИВИРУЕТ его Enter — без него
+  // claude не входит в текстовый ввод (проверено логом plan-flow: ❯ 4 висит, текст не уходит).
+  // Поэтому: цифра → Enter (активировать) → закрыть карточку → раскрыть нижнее поле (фокус композера).
   const chooseOption = useCallback((o: PermOption) => {
     if (/type something|chat about|tell claude|свой ответ|ввести|написать/i.test(o.label)) {
       sendKey(o.digit);
+      setTimeout(() => sendKey('\r'), 90); // Enter активирует выбранный пункт → claude ждёт текст
       setPerm(null);
       applyRaw(1); // РАСКРЫТЬ композер — поле ввода «выдвигается» (футер+textarea на полную)
-      setTimeout(() => { applyRaw(1); taRef.current?.focus(); }, 150);
+      setTimeout(() => { applyRaw(1); taRef.current?.focus(); }, 200);
     } else {
       decide(o.digit);
     }
@@ -709,6 +711,14 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
     setTimeout(() => sendKey('\r'), 120 + Math.abs(delta) * 12); // Enter после прокрутки курсора
     setResumePicker(null);
     setTimeout(() => poll(), 700);
+  }, [sendKey, poll]);
+
+  // Листание /resume-пикера: claude рисует ОКНО списка (видно не все сессии разом). Пачка стрелок
+  // ↓/↑ двигает курсор за край окна → claude прокручивает → опрос (250мс) ре-скрейпит новую порцию.
+  const scrollResume = useCallback((dir: 1 | -1) => {
+    const key = dir > 0 ? '\x1b[B' : '\x1b[A';
+    for (let i = 0; i < 6; i++) sendKey(key);
+    setTimeout(() => poll(), 300);
   }, [sendKey, poll]);
 
   // Сменить режим = Shift+Tab в реальный claude (циклит default→acceptEdits→plan→auto).
@@ -834,7 +844,15 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
           <div style={{ margin: '10px 0', borderRadius: 12, overflow: 'hidden', border: '1px solid rgba(var(--accent-rgb),0.45)', background: 'rgba(var(--accent-rgb),0.1)' }}>
             <div style={{ padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>Возобновить сессию</span>
-              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{resumePicker.sessions.length} сессий</span>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{resumePicker.sessions.length} из {Math.max(resumePicker.total, resumePicker.sessions.length)}</span>
+              {resumePicker.total > resumePicker.sessions.length && (
+                <span style={{ fontSize: 10.5, color: 'var(--text-tertiary)', marginLeft: 'auto' }}>листай ↓↑ чтобы видеть старее</span>
+              )}
+            </div>
+            {/* Листание: ↑ новее / ↓ старее — двигают окно списка в claude (видно не все разом). */}
+            <div style={{ display: 'flex', gap: 6, padding: '0 12px 8px' }}>
+              <button type="button" onClick={() => scrollResume(-1)} style={{ ...pbtn('rgba(var(--accent-rgb),0.1)', 'rgba(var(--accent-rgb),0.3)', 'var(--accent-bright)'), flex: 1, padding: '5px 0', fontSize: 11.5 }}>↑ новее</button>
+              <button type="button" onClick={() => scrollResume(1)} style={{ ...pbtn('rgba(var(--accent-rgb),0.1)', 'rgba(var(--accent-rgb),0.3)', 'var(--accent-bright)'), flex: 1, padding: '5px 0', fontSize: 11.5 }}>↓ старее</button>
             </div>
             <div style={{ maxHeight: 480, overflowY: 'auto', borderTop: '1px solid var(--glass-border)' }}>
               {resumePicker.sessions.map((s, i) => (
@@ -893,7 +911,7 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
                     </div>
                     {detailText && (
                       perm.isPlan
-                        ? <div className="plan-md" style={{ fontSize: 14.5, lineHeight: 1.72, color: 'var(--text-primary)', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--glass-border)', borderRadius: 12, padding: '16px 18px', maxHeight: 540, overflow: 'auto' }}>
+                        ? <div className="plan-md" style={{ fontSize: 14.5, lineHeight: 1.72, color: 'var(--text-primary)', background: 'rgba(0,0,0,0.2)', border: '1px solid var(--glass-border)', borderRadius: 12, padding: '16px 18px', maxHeight: 'min(70vh, 720px)', overflow: 'auto' }}>
                             <ReactMarkdown>{detailText}</ReactMarkdown>
                           </div>
                         : <pre style={{ margin: 0, padding: '8px 10px', fontSize: 11, lineHeight: 1.45, fontFamily: 'monospace', whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--text-secondary)', background: 'rgba(0,0,0,0.25)', border: '1px solid var(--glass-border)', borderRadius: 8, maxHeight: 320, overflow: 'auto' }}>
@@ -966,7 +984,7 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
               {progress != null && <span style={{ flexShrink: 0, marginLeft: 'auto', fontVariantNumeric: 'tabular-nums', fontSize: 11.5, color: 'var(--text-muted)' }}>{progress}%</span>}
             </div>
             {progress != null && (
-              <span style={{ position: 'relative', display: 'block', height: 6, borderRadius: 999, background: 'rgba(255,255,255,0.08)', overflow: 'hidden' }}>
+              <span style={{ position: 'relative', display: 'block', alignSelf: 'flex-start', width: 'min(220px, 60%)', height: 6, borderRadius: 999, background: 'rgba(255,255,255,0.08)', overflow: 'hidden' }}>
                 {/* Заливка: градиент, ширина через scaleX (GPU); поверх — бегущий блик. */}
                 <span style={{ position: 'absolute', inset: 0, transformOrigin: 'left center', transform: `scaleX(${Math.min(1, Math.max(0, progress / 100))})`, borderRadius: 999, background: 'linear-gradient(90deg, var(--accent), var(--accent-bright))', transition: 'transform 0.35s ease', overflow: 'hidden' }}>
                   <span className="compact-progress-sheen" style={{ position: 'absolute', top: 0, bottom: 0, left: 0, width: '45%', background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.6), transparent)' }} />

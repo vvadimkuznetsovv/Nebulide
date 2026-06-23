@@ -175,12 +175,14 @@ export function scrapeMenu(buf: string): ScrapedMenu | null {
     detail = collectDetail(lines, from, qIdx, 2000);
   } else if (isPlan) {
     // Текст плана = блок между «Here is Claude's plan:» и вопросом (без линий-разделителей).
+    // Длинный план может уходить выше вьюпорта в скроллбэк — ищем заголовок глубоко (до 200 строк)
+    // и берём с большим запасом (cap 6000), чтобы показать план ЦЕЛИКОМ, а не его хвост.
     let hdr = -1;
-    for (let i = qIdx - 1; i >= 0 && qIdx - i <= 80; i--) {
+    for (let i = qIdx - 1; i >= 0 && qIdx - i <= 200; i--) {
       if (/Here is Claude.s plan:/.test(lines[i])) { hdr = i; break; }
     }
-    const from = hdr >= 0 ? hdr + 1 : Math.max(0, qIdx - 40);
-    detail = collectDetail(lines, from, qIdx, 2500);
+    const from = hdr >= 0 ? hdr + 1 : Math.max(0, qIdx - 120);
+    detail = collectDetail(lines, from, qIdx, 6000);
   } else if (kind === 'question' && qIdx < firstOptIdx - 1) {
     // Описание МЕЖДУ вопросом и пунктами (напр. у «Change effort level?» — про кэш/скорость).
     detail = collectDetail(lines, qIdx + 1, firstOptIdx, 600);
@@ -196,7 +198,7 @@ export interface ResumeSession { name: string; meta: string; selected: boolean }
  *  «… Type to search · Esc to cancel» + заголовок «Resume session (X of Y)». Каждая сессия =
  *  строка-ИМЯ (❯ на выбранной) + строка-МЕТА «58 seconds ago · HEAD · 62.2KB». Возвращает сессии
  *  по порядку + индекс выбранной — карточка по клику навигирует стрелками от выбранной к цели. */
-export function scrapeResumePicker(buf: string): { sessions: ResumeSession[]; selectedIndex: number } | null {
+export function scrapeResumePicker(buf: string): { sessions: ResumeSession[]; selectedIndex: number; total: number } | null {
   const lines = buf.split('\n');
   // Детект — по УНИКАЛЬНОМУ футеру, НЕ по заголовку «Resume session» (при многих сессиях он
   // выдавливается за верх вьюпорта). ВАЖНО: футер в узком терминале ПЕРЕНОСИТСЯ на 2–3 строки
@@ -220,7 +222,11 @@ export function scrapeResumePicker(buf: string): { sessions: ResumeSession[]; se
   if (sessions.length < 1) return null;
   let selectedIndex = sessions.findIndex((s) => s.selected);
   if (selectedIndex < 0) selectedIndex = 0;
-  return { sessions, selectedIndex };
+  // «Resume session (X of Y)» — общее число сессий Y (когда заголовок виден; при прокрутке вверху).
+  // Если заголовок выдавлен — total = число видимых (минимум сколько точно есть).
+  const m = buf.match(/Resume session\s*\(\s*\d+\s+of\s+(\d+)\s*\)/i);
+  const total = m ? parseInt(m[1], 10) : sessions.length;
+  return { sessions, selectedIndex, total };
 }
 
 /** Собрать строки [from, to) в текст: пропустить чисто-разделительные, обрезать пустые края. */
@@ -238,7 +244,7 @@ function collectDetail(lines: string[], from: number, to: number, cap: number): 
 export interface ScreenAnalysis {
   resumeMenu: boolean;     // блокирующее меню «как восстановить» (claude --resume сжатой сессии)
   resumeInfo: string;
-  resumePicker: { sessions: ResumeSession[]; selectedIndex: number } | null; // /resume — список сессий
+  resumePicker: { sessions: ResumeSession[]; selectedIndex: number; total: number } | null; // /resume — список сессий
   menu: ScrapedMenu | null; // permission / question / plan / подтверждение
   hasMarkers: boolean;     // на экране есть busy- ИЛИ idle-маркер (claude жив и не в меню-загрузке)
   busy: boolean;           // claude РАБОТАЕТ (esc to interrupt / Compacting позже idle-маркера)

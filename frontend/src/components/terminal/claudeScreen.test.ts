@@ -90,12 +90,13 @@ describe('scrapeMenu — question / plan / multiselect', () => {
 });
 
 describe('scrapeResumePicker — /resume список сессий', () => {
-  it('сессии по порядку + выбранная (❯) + индекс', () => {
+  it('сессии по порядку + выбранная (❯) + индекс + total из «X of Y»', () => {
     const r = scrapeResumePicker(fx('resume-picker.txt'))!;
     expect(r.sessions.length).toBeGreaterThanOrEqual(5);
     expect(r.sessions[0].name).toBe('Ответ одним словом');
     expect(r.sessions[0].selected).toBe(true);
     expect(r.selectedIndex).toBe(0);
+    expect(r.total).toBe(16); // «Resume session (1 of 16)» → всего 16, хотя видно меньше
     expect(r.sessions.find((s) => s.name === 'Создать приложение todo на React')?.meta).toContain('99.1KB');
   });
   it('обычное меню НЕ принимается за resume-пикер', () => {
@@ -124,6 +125,7 @@ describe('scrapeResumePicker — /resume список сессий', () => {
     const r = scrapeResumePicker(buf)!;
     expect(r).not.toBeNull();
     expect(r.sessions.length).toBe(3);
+    expect(r.total).toBe(41); // «(1 of 41)» — всего 41, видно 3 → карточка покажет «3 из 41»
     expect(r.sessions[0].name).toBe('Написать рассказ об осени в лесу');
     expect(r.sessions[0].selected).toBe(true);
     expect(r.sessions[2].name).toBe('План добавления кнопки-счётчика на HTML'); // ↓ снят

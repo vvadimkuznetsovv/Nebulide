@@ -43,15 +43,15 @@ export function makeHarness(p, { dir }) {
   const dom = async () => p.evaluate(() => {
     const planMd = document.querySelector('.plan-md');
     const sheen = document.querySelector('.compact-progress-sheen');
-    const footer = document.querySelector('[data-composer-footer]');
+    const ta = document.querySelector('textarea[placeholder*="Сообщение для Claude"]');
     const txt = document.body.innerText || '';
     return {
       planMd: planMd ? getComputedStyle(planMd).fontSize : null,
       planTags: planMd ? [...planMd.querySelectorAll('h1,h2,h3,li,p,strong')].slice(0, 8).map((c) => c.tagName) : [],
       sheen: !!sheen,
-      resumeCard: /Возобновить разговор|сесси/i.test(txt) && /⌨ Терминал|Отмена/.test(txt),
+      resumeCard: /Возобновить сессию/i.test(txt),
       active: document.activeElement ? document.activeElement.tagName : null,
-      footerH: footer ? Math.round(footer.getBoundingClientRect().height) : null,
+      taH: ta ? Math.round(ta.getBoundingClientRect().height) : null, // высота поля ввода (раскрылось ли)
     };
   }).catch(() => ({}));
 
@@ -97,11 +97,20 @@ export function makeHarness(p, { dir }) {
   const box = () => p.locator('textarea[placeholder*="Сообщение для Claude"]').first();
 
   // Корректно закрыть claude: /exit завершает процесс → PTY-шелл возвращается → реапер чистит мёртвую
-  // сессию. Без этого закрытие браузера оставляет claude висеть (orphan). Фолбэк — просто подождать.
+  // сессию (иначе закрытие браузера рвёт WS, но claude висит → orphan копятся, тормозят ПК). НО /exit
+  // не сработает при ОТКРЫТОМ меню (план/resume): текст уйдёт в фильтр меню. Поэтому сперва закрываем
+  // карточку — клик «Отмена»/«Терминал» если есть + Escape, потом /exit. Финальная гарантия от
+  // orphan — отдельная PowerShell-уборка по родителю (cmd.exe) после прогонов.
   const closeClaude = async () => {
     try {
-      log('\n[closeClaude] шлю /exit');
-      await box().click({ timeout: 2000 });
+      log('\n[closeClaude] закрываю меню (Escape×2) + /exit');
+      await box().click({ timeout: 2000 }).catch(() => {});
+      for (const lbl of ['Отмена', 'No, keep']) {
+        const btn = p.getByText(lbl, { exact: false }).first();
+        if (await btn.count()) { await btn.click({ timeout: 1500 }).catch(() => {}); await p.waitForTimeout(300); }
+      }
+      await p.keyboard.press('Escape').catch(() => {}); await p.waitForTimeout(250);
+      await p.keyboard.press('Escape').catch(() => {}); await p.waitForTimeout(250);
       await box().fill('/exit');
       await box().press('Enter');
       await p.waitForTimeout(2500);

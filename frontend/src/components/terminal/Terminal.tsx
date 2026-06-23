@@ -79,7 +79,7 @@ interface TermSession {
   resumeMenuShown: boolean;
   resumeInfo: string;
   /** /resume — список сессий (карточка по клику навигирует к выбранной). */
-  resumePicker: { sessions: ResumeSession[]; selectedIndex: number } | null;
+  resumePicker: { sessions: ResumeSession[]; selectedIndex: number; total: number } | null;
   permMenuShown: boolean;
   /** Время последнего РЕАЛЬНОГО обнаружения меню в гриде — для sticky-удержания при busy-мигании. */
   permMenuLastSeen: number;
@@ -140,6 +140,16 @@ const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '').rep
 
 
 
+/** Форс БОЛЬШОГО грида (≥120×50) для claude-чат-инстансов (их экран скрейпится в чат-виде) И на
+ *  узком вьюпорте (мобиль): иначе PTY рендерит ~50 колонок → футеры меню/плана/resume ПЕРЕНОСЯТСЯ,
+ *  а план/список сессий обрезаются по высоте. В чат-виде xterm визуально не показан, так что
+ *  большой грид «бесплатен» и нужен лишь для корректного скрейпа. Десктоп-терминал не-claude — без форса. */
+function scrapeForcedSize(instanceId: string, cols: number, rows: number): { cols: number; rows: number } {
+  const force = instanceId.startsWith('claude-') || (typeof window !== 'undefined' && window.innerWidth < 640);
+  if (!force) return { cols, rows };
+  return { cols: Math.max(cols || 0, 120), rows: Math.max(rows || 0, 50) };
+}
+
 /** Чистый рендер-грид xterm (ровные строки, как tmux capture-pane) — в отличие от сырого
  *  rawTail, где TUI-перерисовки курсором после strip-ANSI СЛИПАЮТСЯ в одну строку. Нужен для
  *  ПОСТРОЧНОГО скрейпа меню. Буфер xterm наполняется и без смонтированного DOM (createXterm
@@ -154,7 +164,7 @@ function xtermScreenText(session: TermSession): string {
     // скроллбэк — без него деталь обрезалась до хвоста. Детект меню якорится на НИЖНИЙ
     // футер, поэтому лишние строки сверху не дают ложных срабатываний.
     const rows = xterm.rows || 24;
-    const want = Math.max(rows, 100);
+    const want = Math.max(rows, 200); // глубже скроллбэк: длинный ПЛАН выше вьюпорта захватываем целиком
     const out: string[] = [];
     for (let y = Math.max(0, b.length - want); y < b.length; y++) {
       const ln = b.getLine(y);
@@ -624,8 +634,10 @@ async function connectWs(instanceId: string): Promise<void> {
     let sentResize = false;
     try {
       session.fitAddon.fit();
-      const dims = session.fitAddon.proposeDimensions();
-      if (dims && dims.cols >= 1 && dims.rows >= 1) {
+      const proposed = session.fitAddon.proposeDimensions();
+      if (proposed && proposed.cols >= 1 && proposed.rows >= 1) {
+        const dims = scrapeForcedSize(instanceId, proposed.cols, proposed.rows); // форс ≥120×50 для скрейпа
+        try { session.xterm.resize(dims.cols, dims.rows); } catch { /* headless-xterm подгоняем под PTY */ }
         session.lastCols = dims.cols;
         session.lastRows = dims.rows;
         session.lastResizeSent = Date.now();
@@ -637,7 +649,7 @@ async function connectWs(instanceId: string): Promise<void> {
       // ЧАТ-ОНЛИ ВИД: xterm НЕ смонтирован → fitAddon не может посчитать размер, resize не уходит →
       // PTY и headless-xterm РАЗНОГО размера → грид кривой → scrapeMenu не видит меню (детект «умирает»
       // без хуков/DOM). Выравниваем ОБА на фиксированный размер, чтобы грид был ровным и меню ловилось.
-      const COLS = 120, ROWS = 40;
+      const COLS = 120, ROWS = 50;
       try { session.xterm.resize(COLS, ROWS); } catch { /* */ }
       session.lastCols = COLS; session.lastRows = ROWS; session.lastResizeSent = Date.now();
       try { ws.send(JSON.stringify({ type: 'resize', rows: ROWS, cols: COLS })); } catch { /* */ }
@@ -649,9 +661,11 @@ async function connectWs(instanceId: string): Promise<void> {
       session.resizeLocked = false;
       try {
         session.fitAddon.fit();
-        const dims = session.fitAddon.proposeDimensions();
-        if (dims && dims.cols >= 1 && dims.rows >= 1) {
+        const proposed = session.fitAddon.proposeDimensions();
+        if (proposed && proposed.cols >= 1 && proposed.rows >= 1) {
+          const dims = scrapeForcedSize(instanceId, proposed.cols, proposed.rows);
           if (Math.abs(dims.cols - session.lastCols) > 1 || Math.abs(dims.rows - session.lastRows) > 1) {
+            try { session.xterm.resize(dims.cols, dims.rows); } catch { /* */ }
             session.lastCols = dims.cols;
             session.lastRows = dims.rows;
             session.lastResizeSent = Date.now();
@@ -1000,9 +1014,11 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
     if (s.resizeLocked) return;
     try {
       s.fitAddon.fit();
-      const dims = s.fitAddon.proposeDimensions();
-      if (!dims || dims.cols < 1 || dims.rows < 1) return;
+      const proposed = s.fitAddon.proposeDimensions();
+      if (!proposed || proposed.cols < 1 || proposed.rows < 1) return;
+      const dims = scrapeForcedSize(instanceId, proposed.cols, proposed.rows); // claude-чат/мобиль → ≥120×50
       if (Math.abs(dims.cols - s.lastCols) > 1 || Math.abs(dims.rows - s.lastRows) > 1) {
+        try { s.xterm.resize(dims.cols, dims.rows); } catch { /* */ }
         s.lastCols = dims.cols;
         s.lastRows = dims.rows;
         // Rate-limit: max 1 resize per RESIZE_COOLDOWN ms
