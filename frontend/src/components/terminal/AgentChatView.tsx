@@ -257,10 +257,13 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
   // Полный текст плана из ФАЙЛА (claude пишет его в ~/.claude/plans/<slug>.md при ExitPlanMode) — надёжнее
   // и полнее, чем скрейп грида (тот обрезан/переносится). Кросс-ОС путь резолвит бэкенд (claudeBaseDir).
   const [planFile, setPlanFile] = useState<string | null>(null);
-  // Когда появляется план-карточка — тянем план-файл claude из ~/.claude/plans. ПРИВЯЗКА к ЭТОЙ сессии:
-  // папка планов ОБЩАЯ (HOME=/root в проде), поэтому «новейший» может быть ЧУЖИМ. Берём из нескольких
-  // свежих тот, чьё СОДЕРЖИМОЕ совпадает с тем, что реально на экране (скрейп-сниппет perm.detail) —
-  // это гарантирует «именно наш план». Если совпадения нет — остаёмся на скрейпе detail.
+  // Когда появляется план-карточка — берём ПОЛНЫЙ план из файла claude (~/.claude/plans), а СКРЕЙП грида
+  // служит ДОПОЛНЕНИЕМ-перепроверкой. Папка планов ОБЩАЯ (HOME=/root в проде) → «новейший» может быть
+  // ЧУЖИМ, поэтому берём файл только при СОВПАДЕНИИ нескольких сигналов:
+  //   1) ПАПКА — корректный per-OS ~/.claude/plans (резолвит бэкенд claudeBaseDir);
+  //   2) ВРЕМЯ — файл свежий (≤3 мин: план-карточка только что появилась);
+  //   3) СЛОВА — содержимое файла СОДЕРЖИТ то, что реально на экране (скрейп-сниппет perm.detail).
+  // Нет совпадения → остаёмся на скрейпе detail (он самодостаточен).
   useEffect(() => {
     if (!perm?.isPlan) { setPlanFile(null); return; }
     const snippet = (perm.detail || '').replace(/\s+/g, ' ').trim().slice(0, 50);
@@ -268,12 +271,15 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
     (async () => {
       try {
         const { data } = await listClaudePlans();
-        for (const pl of (data.plans || []).slice(0, 5)) {
+        for (const pl of (data.plans || []).slice(0, 6)) {
           const age = Date.now() - new Date(pl.updated_at).getTime();
-          if (!(age >= 0) || age > 5 * 60 * 1000) break; // дальше только старые — стоп
+          if (!(age >= 0)) continue;
+          if (age > 5 * 60 * 1000) break;       // сортировка по mtime убыв. → дальше только старые
+          if (age > 3 * 60 * 1000) continue;     // ВРЕМЯ: не свежий — это не наш только что созданный план
           const { data: full } = await readClaudePlan(pl.slug);
           const norm = (full?.content || '').replace(/\s+/g, ' ');
-          if (snippet ? norm.includes(snippet) : age < 30000) { if (!cancelled) setPlanFile(full.content); return; }
+          const wordsMatch = snippet.length > 12 && norm.includes(snippet); // СЛОВА: подтверждение с экрана
+          if (wordsMatch || (!snippet && age < 25000)) { if (!cancelled) setPlanFile(full.content); return; }
         }
       } catch { /* фолбэк на скрейп detail */ }
     })();
