@@ -4,6 +4,7 @@ import toast from 'react-hot-toast';
 import { resolveLiveSession, tailClaudeSession, listClaudePlans, readClaudePlan } from '../../api/claudeSessions';
 import type { RichMessage } from '../../api/claudeSessions';
 import { sendToTerminal, submitPromptToTerminal, getTerminalScreenState } from './Terminal';
+import { monsterMode, type UsageInfo } from './claudeScreen';
 import { onActivity } from '../../utils/activityBus';
 import { getSessionHint } from '../../utils/terminalViewMode';
 import { listFiles } from '../../api/files';
@@ -190,6 +191,7 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
   const [fsHint, setFsHint] = useState(false); // показать подсказку «отключить: /tui default» после включения
   const [effort, setEffortCur] = useState(''); // текущий effort claude (low/medium/high/xhigh/max)
   const [effortOpen, setEffortOpen] = useState(false); // открыто меню выбора effort
+  const [usage, setUsage] = useState<UsageInfo | null>(null); // недельный usage (% + сброс) из /usage — для индикатора monster
   const [progress, setProgress] = useState<number | null>(null); // прогресс длинной операции (compact/hooks) 0..100, иначе null
   const [resumeMenu, setResumeMenu] = useState<{ info: string } | null>(null); // блокирующее меню "как восстановить"
   const [resumePicker, setResumePicker] = useState<{ sessions: { name: string; meta: string }[]; selectedIndex: number; total: number } | null>(null); // /resume — список сессий
@@ -457,7 +459,7 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
   // ── Частый опрос ТЕКУЩЕГО состояния экрана claude (250мс). Надёжно — НЕ теряется при
   //    ремоунте/смене вида. Источник правды для стоп-кнопки, индикатора, resume/perm-меню. ──
   useEffect(() => {
-    const la = { busy: undefined as boolean | undefined, ws: '', err: '', resume: false, permSig: '', mode: '', rp: '', compactActive: false, flashUntil: 0, fs: undefined as boolean | undefined, effort: '' };
+    const la = { busy: undefined as boolean | undefined, ws: '', err: '', resume: false, permSig: '', mode: '', rp: '', compactActive: false, flashUntil: 0, fs: undefined as boolean | undefined, effort: '', usage: '' };
     const tick = () => {
       const st = getTerminalScreenState(instanceId);
       if (!st) return;
@@ -474,6 +476,8 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
       if ((st.errorMsg || '') !== la.err) { la.err = st.errorMsg || ''; setError(st.errorMsg || ''); }
       if (st.fullscreen !== la.fs) { la.fs = st.fullscreen; setFsOn(!!st.fullscreen); if (!st.fullscreen) setFsHint(false); }
       if ((st.effort || '') !== la.effort) { la.effort = st.effort || ''; if (st.effort) setEffortCur(st.effort); }
+      const uSig = st.usage ? st.usage.weeklyPercent + ':' + st.usage.resetAt : '';
+      if (uSig !== la.usage) { la.usage = uSig; if (st.usage) setUsage(st.usage); }
       // Прогресс компакта: claude отдаёт estimate, который доходит лишь до ~30% и операция
       // завершается — бар «обрывался» на 30% и пропадал (выглядело сломано). Поэтому при ЗАВЕРШЕНИИ
       // (был прогресс, busy спал) доводим бар до 100% и держим ~800мс, затем гасим.
@@ -502,6 +506,22 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
     const iv = setInterval(tick, 250);
     return () => clearInterval(iv);
   }, [instanceId, poll]);
+
+  // ── Авто-скрейп НЕДЕЛЬНОГО usage: недельный лимит claude НЕ отдаёт машиночитаемо — единственный
+  //    источник это экран /usage. Раз в ~25 мин (и через ~25с после открытия) шлём /usage, КОГДА
+  //    claude idle, через 1.8с закрываем экран (Escape). 250мс-скан между этим поймает /usage →
+  //    usageCur → индикатор monster. Не шлём при busy/меню (иначе уйдёт в очередь). ──
+  useEffect(() => {
+    const scrapeUsage = () => {
+      const s = getTerminalScreenState(instanceId);
+      if (!s || !s.alive || s.busy || s.permMenu || s.resumePicker || s.resumeMenu) return; // только idle
+      submitPromptToTerminal(instanceId, '/usage');
+      setTimeout(() => sendToTerminal(instanceId, '\x1b'), 1800); // закрыть /usage-экран
+    };
+    const first = window.setTimeout(scrapeUsage, 25000);
+    const iv = window.setInterval(scrapeUsage, 25 * 60 * 1000);
+    return () => { clearTimeout(first); clearInterval(iv); };
+  }, [instanceId]);
 
   useEffect(() => {
     const sc = scrollRef.current;
@@ -1345,6 +1365,20 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
           )}
         </div>
         <span style={{ flex: 1, minWidth: 0 }} />
+        {/* Красный индикатор «monster mode»: недельный usage НИЖЕ дневного порога (остаток лимита
+            сгорит) → можно жечь Opus + /effort max. Ховер — англ. текст + недельный %. Клик → /effort max. */}
+        {(() => {
+          if (!usage) return null;
+          const daysUntilReset = Math.max(0, (usage.resetAt - Date.now()) / 86400000);
+          if (!monsterMode(usage.weeklyPercent, daysUntilReset)) return null;
+          const dleft = Math.max(0, Math.ceil(daysUntilReset));
+          return (
+            <button type="button" onClick={() => setEffortLevel('max')}
+              title={`Monster mode can be enabled — weekly usage ${usage.weeklyPercent}%, resets in ${dleft} day${dleft === 1 ? '' : 's'}. You're under your weekly pace: go hard (Opus + /effort max).`}
+              style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 5, height: 30, padding: '0 10px', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: 11.5, fontWeight: 700,
+                background: 'rgba(var(--danger-rgb),0.16)', border: '1px solid rgba(var(--danger-rgb),0.55)', color: 'var(--danger)' }}>🔥 monster</button>
+          );
+        })()}
         {/* Предупреждение после включения flicker-free: как отключить. */}
         {fsHint && fsOn && (
           <span style={{ flexShrink: 1, minWidth: 0, fontSize: 10.5, color: 'var(--text-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>отключить: <code style={{ color: 'var(--accent-bright)' }}>/tui default</code></span>

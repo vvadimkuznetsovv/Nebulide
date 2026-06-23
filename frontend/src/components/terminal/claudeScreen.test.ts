@@ -5,7 +5,7 @@ import { describe, it, expect } from 'vitest';
 import { readFileSync } from 'fs';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
-import { scrapeMenu, analyzeScreen, scrapeResumePicker, extractWorkStatus, extractProgress, extractError } from './claudeScreen';
+import { scrapeMenu, analyzeScreen, scrapeResumePicker, extractWorkStatus, extractProgress, extractError, scrapeUsage, monsterMode } from './claudeScreen';
 
 const FX_DIR = join(dirname(fileURLToPath(import.meta.url)), 'claudeScreen.fixtures');
 const fx = (name: string) => readFileSync(join(FX_DIR, name), 'utf8');
@@ -247,6 +247,31 @@ describe('analyzeScreen — busy / idle / режим / сжатие', () => {
     expect(analyzeScreen('❯ \n  Opus 4.8 (1M context)              ● high · /effort\n  ← for agents', 'default').effort).toBe('high');
     expect(analyzeScreen('❯ \n  ● max · /effort\n  ← for agents', 'default').effort).toBe('max');
     expect(analyzeScreen('❯ \n  ← for agents', 'default').effort).toBe(''); // нет футера effort → пусто
+  });
+
+  it('scrapeUsage — недельный % «Current week (all models)» из реального /usage-экрана', () => {
+    // Снято с живого claude 2.1.186: берём НЕДЕЛЬНЫЙ (all models), НЕ session и НЕ Sonnet-only.
+    const buf = [
+      '   Current session', '   ██████████        20% used', '   Resets 12:20am (Europe/Moscow)', '',
+      '   Current week (all models)', '   █████████████████████████████▌     59% used', '   Resets Jun 27, 8am (Europe/Moscow)', '',
+      '   Current week (Sonnet only)', '                  0% used', '   Resets Jun 27, 7:59am (Europe/Moscow)', '',
+      '   Esc to cancel',
+    ].join('\n');
+    const u = scrapeUsage(buf)!;
+    expect(u).not.toBeNull();
+    expect(u.weeklyPercent).toBe(59); // именно недельный all-models, а не 20 (session) и не 0 (Sonnet)
+    expect(u.resetAt).toBeGreaterThan(0);
+    expect(scrapeUsage('обычный экран без /usage')).toBeNull();
+  });
+
+  it('monsterMode — таблица порогов по дням (день1<10, день2<20, день5≤60, последний≤100)', () => {
+    expect(monsterMode(9, 6)).toBe(true);   // день1 (6 дней до сброса), 9% → монстр
+    expect(monsterMode(11, 6)).toBe(false); // день1, 11% → нет
+    expect(monsterMode(19, 5)).toBe(true);  // день2, 19% → монстр
+    expect(monsterMode(21, 5)).toBe(false); // день2, 21% → нет
+    expect(monsterMode(59, 2)).toBe(true);  // ~2 дня до сброса (день5), 59% → монстр
+    expect(monsterMode(61, 2)).toBe(false); // день5, 61% → нет
+    expect(monsterMode(99, 0)).toBe(true);  // последний день, 99% → монстр (жги до 100%)
   });
 
   it('завершённый индикатор «✻ Brewed for 18s» (без «…») над футером → НЕ busy', () => {

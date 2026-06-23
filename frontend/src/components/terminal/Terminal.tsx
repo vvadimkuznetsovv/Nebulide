@@ -9,7 +9,7 @@ import { useLongPress } from '../../hooks/useLongPress';
 import { ensureFreshToken, refreshTokenOnce } from '../../api/tokenRefresh';
 import { useWorkspaceSessionStore } from '../../store/workspaceSessionStore';
 import { emitActivity } from '../../utils/activityBus';
-import { analyzeScreen, type MenuOption, type QuestionTab, type ResumeSession } from './claudeScreen';
+import { analyzeScreen, type MenuOption, type QuestionTab, type ResumeSession, type UsageInfo } from './claudeScreen';
 import { registerTerminal, unregisterTerminal, getTerminalNumber, useTerminalRegistryVersion, markTerminalClosed } from '../../utils/terminalRegistry';
 import { usePetStore } from '../../store/petStore';
 import api from '../../api/client';
@@ -98,6 +98,7 @@ interface TermSession {
   workStatusCur: string;
   errorMsgCur: string; // ошибка/сетевая проблема claude (API Error / network) — в чат красным
   effortCur: string; // текущий effort (low/medium/high/xhigh/max) из футера claude
+  usageCur: UsageInfo | null; // недельный usage (% + сброс) — sticky, обновляется при скрейпе /usage
   workProgressCur: number | null;
   /** claude TUI присутствует на экране (загрузился) — для гейта отложенной отправки. */
   claudeAlive: boolean;
@@ -188,6 +189,10 @@ function detectClaudeScreen(session: TermSession, instanceId: string) {
   if (!buf) return;
   const a = analyzeScreen(buf, session.claudeMode);
 
+  // usage — ВНЕ блока hasMarkers: /usage-экран не имеет idle-маркеров («← for agents»), там «Esc to
+  // cancel» → hasMarkers=false. Применяем недельный usage всегда, когда он виден (sticky — держим последний).
+  if (a.usage) session.usageCur = a.usage;
+
   session.resumeMenuShown = a.resumeMenu;
   if (a.resumeMenu) session.resumeInfo = a.resumeInfo;
   session.resumePicker = a.resumePicker;
@@ -254,6 +259,7 @@ export function getTerminalScreenState(instanceId: string) {
     workStatus: s.workStatusCur,
     errorMsg: s.errorMsgCur,
     effort: s.effortCur,
+    usage: s.usageCur,
     progress: s.workProgressCur,
     // fullscreen/flicker-free claude рисует в АЛЬТЕРНАТИВНОМ буфере xterm (как vim) → определяем по нему.
     fullscreen: (() => { try { return s.xterm?.buffer?.active?.type === 'alternate'; } catch { return false; } })(),
@@ -460,6 +466,7 @@ function createXterm(instanceId: string): TermSession {
     workStatusCur: '',
     errorMsgCur: '',
     effortCur: '',
+    usageCur: null,
     workProgressCur: null,
     claudeAlive: false,
     claudeMode: 'default',

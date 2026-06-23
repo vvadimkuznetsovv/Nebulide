@@ -255,6 +255,7 @@ export interface ScreenAnalysis {
   alive: boolean;          // claude TUI присутствует (маркеры ИЛИ любое меню)
   errorMsg: string;        // ошибка/сетевая проблема claude (API Error / Waiting for API · network) — в чат КРАСНЫМ
   effort: string;          // текущий уровень усилий из футера («● high · /effort») — low/medium/high/xhigh/max, иначе ''
+  usage: UsageInfo | null; // недельный usage (% + дата сброса) — только когда виден /usage-экран, иначе null
 }
 
 /** Ошибка/сетевая проблема claude для показа КРАСНЫМ в чате (одной карточкой, не плодим). Ловим
@@ -269,6 +270,60 @@ export function extractError(buf: string): string {
   const net = tail.match(/Waiting for API response[^\n│]*?check your network/);
   if (net) return cleanStatus(net[0], 180);
   return '';
+}
+
+export interface UsageInfo { weeklyPercent: number; resetAt: number }
+
+const MONTHS: Record<string, number> = { jan: 0, feb: 1, mar: 2, apr: 3, may: 4, jun: 5, jul: 6, aug: 7, sep: 8, oct: 9, nov: 10, dec: 11 };
+
+/** «Resets Jun 27, 8am (Europe/Moscow)» → epoch-ms (локальное время; для дневной гранулярности TZ не
+ *  критична — порог считается в ОКРУГЛЁННЫХ днях). Год не указан → текущий, с откатом на следующий. */
+function parseResetDate(monDay: string, hh: string, mm: string, ampm: string): number {
+  const md = monDay.match(/([A-Za-z]{3})[a-z]*\s+(\d{1,2})/);
+  if (!md) return 0;
+  const mon = MONTHS[md[1].toLowerCase()];
+  if (mon === undefined) return 0;
+  const day = parseInt(md[2], 10);
+  let hour = parseInt(hh, 10) % 12;
+  if (/pm/i.test(ampm)) hour += 12;
+  const min = mm ? parseInt(mm, 10) : 0;
+  const now = new Date();
+  let year = now.getFullYear();
+  if (new Date(year, mon, day, hour, min).getTime() < now.getTime() - 86400000) year += 1; // дата прошла → следующий год
+  return new Date(year, mon, day, hour, min).getTime();
+}
+
+/** Скрейп экрана `/usage`: НЕДЕЛЬНЫЙ usage % («Current week (all models)») + дата сброса. Возвращает
+ *  null, если /usage-экран не виден. Формат (claude 2.1.186):
+ *    Current week (all models)
+ *    █████…    59% used
+ *    Resets Jun 27, 8am (Europe/Moscow)                                                        */
+export function scrapeUsage(buf: string): UsageInfo | null {
+  if (!/Current week/.test(buf) || !/%\s*used/.test(buf)) return null; // не /usage-экран
+  // Берём СЕГМЕНТ от заголовка «Current week (all models)» до СЛЕДУЮЩЕГО недельного блока. Работаем по
+  // подстроке, а НЕ построчно: xterm-перерисовка иногда «слипает» заголовок, бар и «NN% used» в одну
+  // строку (видно в живом кадре: «…Current week (all models)███▉  57% used»). % и Resets берём из сегмента.
+  const head = buf.search(/Current week \(all models\)/i);
+  const idx = head >= 0 ? head : buf.search(/Current week/i);
+  if (idx < 0) return null;
+  const after = buf.slice(idx + 'Current week (all models)'.length);
+  const next = after.search(/Current week \(/i); // начало следующего блока (Sonnet only / др.)
+  const seg = next >= 0 ? after.slice(0, next) : after.slice(0, 260);
+  const pm = seg.match(/(\d{1,3})%\s*used/i);
+  if (!pm) return null;
+  const weeklyPercent = parseInt(pm[1], 10);
+  const rm = seg.match(/Resets\s+([A-Za-z]{3,}\s+\d{1,2}),?\s*(\d{1,2})(?::(\d{2}))?\s*([ap]m)/i);
+  const resetAt = rm ? parseResetDate(rm[1], rm[2], rm[3], rm[4]) : 0;
+  return { weeklyPercent, resetAt };
+}
+
+/** «Режим монстра доступен»: usage НИЖЕ дневного порога (недо-использование → остаток лимита сгорит).
+ *  Таблица по daysElapsed = 7 − round(daysUntilReset): чем больше дней прошло, тем выше допустимый %.
+ *  Анкеры пользователя: день1<10, день2<20, «~2 дня до сброса»=день5≤60, последний день→100. */
+export function monsterMode(weeklyPercent: number, daysUntilReset: number): boolean {
+  const daysElapsed = Math.min(7, Math.max(1, 7 - Math.round(daysUntilReset)));
+  const THRESH: Record<number, number> = { 1: 10, 2: 20, 3: 30, 4: 45, 5: 60, 6: 80, 7: 100 };
+  return weeklyPercent <= THRESH[daysElapsed];
 }
 
 /** ЧИСТЫЙ анализ экрана → состояние. Terminal.tsx применяет его к сессии и эмитит события;
@@ -326,5 +381,6 @@ export function analyzeScreen(buf: string, prevMode: string): ScreenAnalysis {
     errorMsg: extractError(buf),
     // Текущий effort из футера claude: «● high · /effort» / «high · /effort».
     effort: (buf.match(/\b(low|medium|high|xhigh|max)\b[^\n]{0,10}\/effort/i)?.[1] || '').toLowerCase(),
+    usage: scrapeUsage(buf), // недельный usage — не null только на /usage-экране
   };
 }
