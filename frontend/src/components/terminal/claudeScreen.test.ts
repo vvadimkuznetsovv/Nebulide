@@ -187,6 +187,13 @@ describe('analyzeScreen — busy / idle / режим / сжатие', () => {
     expect(a.errorMsg).toContain('check your network');
   });
 
+  it('старая ошибка УШЛА из хвоста (новый вывод снизу) → НЕ показываем (не «залипает»)', () => {
+    // Разовая «API Error» в начале, потом claude дал много нового вывода → ошибка вне хвоста → гаснет.
+    const lines = ['API Error: 500 server error'];
+    for (let i = 0; i < 30; i++) lines.push(`строка ответа claude номер ${i} — всё хорошо, работаем дальше`);
+    expect(extractError(lines.join('\n'))).toBe('');
+  });
+
   it('голый спиннер «✶ Shenaniganing…» (plan-режим, без скобок/esc) → busy + workStatus', () => {
     // Реальный кадр из plan-flow: claude думает, показывая только глиф+слово+«…». Раньше busy=false.
     const buf = '❯ составь план\n\n✶ Shenaniganing…\n\n  ⏸ plan mode on (shift+tab to cycle)';

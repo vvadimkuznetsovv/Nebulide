@@ -260,9 +260,12 @@ export interface ScreenAnalysis {
  *  «API Error: …» (последнюю) и ретрай «Waiting for API response · … · check your network». Из РФ
  *  API часто недоступен → claude висит на ретраях; пользователь должен видеть это явно. */
 export function extractError(buf: string): string {
-  const apiErr = buf.match(/API Error:[^\n│]*/g);
+  // ТОЛЬКО в ХВОСТЕ кадра (последние ~12 непустых строк у инпута). Иначе разовая ошибка из scrollback
+  // «залипала» бы навсегда в карточке. Новая активность claude выталкивает её из хвоста → карточка гаснет.
+  const tail = buf.split('\n').filter((l) => l.trim()).slice(-12).join('\n');
+  const apiErr = tail.match(/API Error:[^\n│]*/g);
   if (apiErr && apiErr.length) return cleanStatus(apiErr[apiErr.length - 1], 180);
-  const net = buf.match(/Waiting for API response[^\n│]*?check your network/);
+  const net = tail.match(/Waiting for API response[^\n│]*?check your network/);
   if (net) return cleanStatus(net[0], 180);
   return '';
 }
