@@ -248,6 +248,12 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
   // claude в ТЕКСТОВОМ режиме, но план/меню ещё на экране → гейт menuUp заблокировал бы отправку.
   // Флаг говорит submit: следующий текст слать НЕСМОТРЯ на видимое меню (мы сами в него вошли).
   const freeTextRef = useRef(false);
+  // Инлайн-фидбэк по плану: клик «Tell Claude what to change» НЕ закрывает карточку и НЕ лезет в
+  // нижний композер — раскрывает поле ПОД кнопками прямо в карточке плана (план остаётся виден).
+  // null = закрыто; строка = открыто (текущий текст). Ref — чтобы 250мс-опрос «пиннил» карточку.
+  const [planFb, setPlanFbState] = useState<string | null>(null);
+  const planFbRef = useRef<string | null>(null);
+  const setPlanFb = useCallback((v: string | null) => { planFbRef.current = v; setPlanFbState(v); }, []);
   // Анти-дубль: setInput('') асинхронен, поэтому быстрый повтор Enter (автоповтор/двойное
   // нажатие) брал бы один и тот же input из замыкания → два сабмита. Гасим повтор того же
   // текста в окне 1.5с.
@@ -452,7 +458,8 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
         if (st.permMenu) {
           const d = permDetailsRef.current;
           setPerm({ kind: st.permKind, multi: st.permMulti, question: st.permQuestion, detail: st.permDetail, options: st.permOptions || [], tool: d?.tool, input: d?.input, tabs: st.permTabs || [], isPlan: st.permIsPlan });
-        } else { setPerm(null); permDetailsRef.current = null; }
+        } else if (planFbRef.current === null) { setPerm(null); permDetailsRef.current = null; } // открытый инлайн-фидбэк плана пиннит карточку
+      }
       }
     };
     tick();
@@ -687,18 +694,36 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
   // в меню плана/вопроса лишь ПЕРЕМЕЩАЕТ курсор на пункт (❯), а АКТИВИРУЕТ его Enter — без него
   // claude не входит в текстовый ввод (проверено логом plan-flow: ❯ 4 висит, текст не уходит).
   // Поэтому: цифра → Enter (активировать) → закрыть карточку → раскрыть нижнее поле (фокус композера).
-  const chooseOption = useCallback((o: PermOption) => {
-    if (/type something|chat about|tell claude|свой ответ|ввести|написать/i.test(o.label)) {
+  const chooseOption = useCallback((o: PermOption, isPlan?: boolean) => {
+    const free = /type something|chat about|tell claude|свой ответ|ввести|написать/i.test(o.label);
+    if (free && isPlan) {
+      // ПЛАН: активируем пункт у claude (цифра+Enter → он ждёт текст-правку), но карточку НЕ закрываем
+      // и композер НЕ трогаем — раскрываем инлайн-поле ПОД кнопками. План остаётся на экране.
+      sendKey(o.digit);
+      setTimeout(() => sendKey('\r'), 90);
+      setPlanFb(''); // открыть инлайн-поле (карточка пиннится опросом, см. setPerm-гейт)
+    } else if (free) {
       sendKey(o.digit);
       setTimeout(() => sendKey('\r'), 90); // Enter активирует выбранный пункт → claude ждёт текст
-      freeTextRef.current = true; // следующий текст из композера слать, игнорируя видимое план-меню
+      freeTextRef.current = true; // следующий текст из композера слать, игнорируя видимое меню
       setPerm(null);
       applyRaw(1); // РАСКРЫТЬ композер — поле ввода «выдвигается» (футер+textarea на полную)
       setTimeout(() => { applyRaw(1); taRef.current?.focus(); }, 200);
     } else {
       decide(o.digit);
     }
-  }, [sendKey, decide, applyRaw]);
+  }, [sendKey, decide, applyRaw, setPlanFb]);
+
+  // Отправить инлайн-правку плана: текст уходит в claude (он в режиме «Tell Claude what to change»),
+  // затем закрываем поле и карточку — claude перепланирует с учётом правки.
+  const submitPlanFb = useCallback(() => {
+    const text = (planFbRef.current || '').trim();
+    if (!text) return;
+    submitPromptToTerminal(instanceId, text);
+    setPlanFb(null);
+    setPerm(null);
+    setTimeout(() => poll(), 500);
+  }, [instanceId, poll, setPlanFb]);
 
   // Мульти-селект: цифра ТОГЛИТ чекбокс — карточку НЕ закрываем, опрос перечитает новое
   // состояние (✔). Калибровано на claude 2.1.175.
@@ -943,7 +968,19 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
               })()}
             </div>
             <div style={{ display: 'flex', flexDirection: perm.kind === 'question' ? 'column' : 'row', gap: 8, flexWrap: 'wrap', padding: '10px 12px', borderTop: '1px solid var(--glass-border)' }}>
-              {perm.multi ? (
+              {perm.isPlan && planFb !== null ? (
+                // ИНЛАЙН-ПОЛЕ правки плана — раскрылось ПОД кнопкой; план-карточка выше остаётся.
+                <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                  <textarea autoFocus value={planFb} onChange={e => setPlanFb(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); submitPlanFb(); } }}
+                    placeholder="Что Claude изменить в плане? (Ctrl+Enter — отправить)"
+                    style={{ width: '100%', minHeight: 70, resize: 'vertical', padding: '10px 12px', borderRadius: 8, fontFamily: 'inherit', fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-primary)', background: 'rgba(0,0,0,0.28)', border: '1px solid rgba(var(--accent-rgb),0.45)', outline: 'none', boxSizing: 'border-box' }} />
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button type="button" onClick={submitPlanFb} disabled={!planFb.trim()} style={{ ...pbtn('rgba(var(--accent-rgb),0.22)', 'rgba(var(--accent-rgb),0.5)', 'var(--accent-bright)'), opacity: planFb.trim() ? 1 : 0.5, cursor: planFb.trim() ? 'pointer' : 'default' }}>Отправить правку →</button>
+                    <button type="button" onClick={() => { setPlanFb(null); sendKey('\x1b'); setTimeout(() => poll(), 300); }} style={pbtn('rgba(255,255,255,0.05)', 'var(--glass-border)', 'var(--text-secondary)')}>Отмена</button>
+                  </div>
+                </div>
+              ) : perm.multi ? (
                 <>
                   {perm.options.map((o) => (
                     <button key={o.digit} type="button" title={o.raw} onClick={() => o.checked === undefined ? decide(o.digit) : toggleOption(o.digit)}
@@ -965,12 +1002,12 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
                 ? perm.options.map((o) => {
                     const free = /type something|chat about|tell claude/i.test(o.label);
                     return (
-                    <button key={o.digit} type="button" title={o.raw} onClick={() => chooseOption(o)}
+                    <button key={o.digit} type="button" title={o.raw} onClick={() => chooseOption(o, perm.isPlan)}
                       style={{ display: 'flex', alignItems: 'flex-start', gap: 9, width: '100%', textAlign: 'left', padding: '8px 11px', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', background: free ? 'rgba(255,255,255,0.04)' : 'rgba(var(--accent-rgb),0.1)', border: `1px solid ${free ? 'var(--glass-border)' : 'rgba(var(--accent-rgb),0.3)'}`, color: 'var(--text-primary)' }}>
                       <span style={{ flexShrink: 0, minWidth: 18, height: 18, lineHeight: '18px', textAlign: 'center', borderRadius: 5, fontSize: 11, fontWeight: 700, background: 'rgba(var(--accent-rgb),0.25)', color: 'var(--accent-bright)' }}>{free ? '✎' : o.digit}</span>
                       <span style={{ flex: 1, minWidth: 0 }}>
                         <span style={{ display: 'block', fontSize: 12.5, fontWeight: 600 }}>{o.label}</span>
-                        {(free || o.desc) && <span style={{ display: 'block', fontSize: 11, lineHeight: 1.4, color: 'var(--text-muted)', marginTop: 2 }}>{free ? 'Откроется поле — напишите свой ответ' : o.desc}</span>}
+                        {(free || o.desc) && <span style={{ display: 'block', fontSize: 11, lineHeight: 1.4, color: 'var(--text-muted)', marginTop: 2 }}>{free ? 'Поле для правки раскроется ниже' : o.desc}</span>}
                       </span>
                     </button>
                   ); })
@@ -984,7 +1021,7 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
                         : pbtn('rgba(var(--accent-rgb),0.18)', 'rgba(var(--accent-rgb),0.4)', 'var(--accent-bright)');
                     return <button key={o.digit} type="button" title={o.raw} onClick={() => decide(o.digit)} style={style}>{o.label}</button>;
                   })}
-              {onRequestTerminal && (
+              {onRequestTerminal && !(perm.isPlan && planFb !== null) && (
                 <button type="button" onClick={() => { setPerm(null); onRequestTerminal(); }} style={pbtn('rgba(255,255,255,0.05)', 'var(--glass-border)', 'var(--text-secondary)')}>⌨ Терминал</button>
               )}
             </div>
