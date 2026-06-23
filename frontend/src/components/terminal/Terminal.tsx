@@ -252,6 +252,8 @@ export function getTerminalScreenState(instanceId: string) {
     workStatus: s.workStatusCur,
     errorMsg: s.errorMsgCur,
     progress: s.workProgressCur,
+    // fullscreen/flicker-free claude рисует в АЛЬТЕРНАТИВНОМ буфере xterm (как vim) → определяем по нему.
+    fullscreen: (() => { try { return s.xterm?.buffer?.active?.type === 'alternate'; } catch { return false; } })(),
   };
 }
 

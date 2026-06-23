@@ -186,6 +186,7 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
   const [status, setStatus] = useState<'connecting' | 'ready' | 'working' | 'error' | 'closed'>('connecting');
   const [workStatus, setWorkStatus] = useState(''); // живой статус из экрана: "Caramelizing… (5s · ↑ 87 tokens)"
   const [error, setError] = useState(''); // ошибка/сетевая проблема claude (API Error / network) — красная карточка
+  const [fsOn, setFsOn] = useState(false); // claude в fullscreen (flicker-free, alt-буфер) — стабильнее интерфейс
   const [progress, setProgress] = useState<number | null>(null); // прогресс длинной операции (compact/hooks) 0..100, иначе null
   const [resumeMenu, setResumeMenu] = useState<{ info: string } | null>(null); // блокирующее меню "как восстановить"
   const [resumePicker, setResumePicker] = useState<{ sessions: { name: string; meta: string }[]; selectedIndex: number; total: number } | null>(null); // /resume — список сессий
@@ -453,7 +454,7 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
   // ── Частый опрос ТЕКУЩЕГО состояния экрана claude (250мс). Надёжно — НЕ теряется при
   //    ремоунте/смене вида. Источник правды для стоп-кнопки, индикатора, resume/perm-меню. ──
   useEffect(() => {
-    const la = { busy: undefined as boolean | undefined, ws: '', err: '', resume: false, permSig: '', mode: '', rp: '', compactActive: false, flashUntil: 0 };
+    const la = { busy: undefined as boolean | undefined, ws: '', err: '', resume: false, permSig: '', mode: '', rp: '', compactActive: false, flashUntil: 0, fs: undefined as boolean | undefined };
     const tick = () => {
       const st = getTerminalScreenState(instanceId);
       if (!st) return;
@@ -468,6 +469,7 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
       const ws = st.busy ? st.workStatus : '';
       if (ws !== la.ws) { la.ws = ws; setWorkStatus(ws); }
       if ((st.errorMsg || '') !== la.err) { la.err = st.errorMsg || ''; setError(st.errorMsg || ''); }
+      if (st.fullscreen !== la.fs) { la.fs = st.fullscreen; setFsOn(!!st.fullscreen); }
       // Прогресс компакта: claude отдаёт estimate, который доходит лишь до ~30% и операция
       // завершается — бар «обрывался» на 30% и пропадал (выглядело сломано). Поэтому при ЗАВЕРШЕНИИ
       // (был прогресс, busy спал) доводим бар до 100% и держим ~800мс, затем гасим.
@@ -809,6 +811,13 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
     const i = MODE_CYCLE.indexOf(mode);
     setMode(MODE_CYCLE[(i + 1) % MODE_CYCLE.length]);
   }, [sendKey, mode]);
+
+  // Включить flicker-free (fullscreen) рендер claude одной кнопкой — стабильнее отрисовка/скрейп
+  // (мышление 15/15, нет мерцания/переноса). Шлём команду /tui fullscreen в реальный claude.
+  const enableFullscreen = useCallback(() => {
+    submitPromptToTerminal(instanceId, '/tui fullscreen');
+    setTimeout(() => poll(), 900);
+  }, [instanceId, poll]);
 
   const changeFont = useCallback((delta: number) => {
     setFontPx(prev => {
@@ -1302,6 +1311,14 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
           <span style={{ color: modeInfo.color }}>{modeInfo.label}</span>
         </button>
         <span style={{ flex: 1, minWidth: 0 }} />
+        {/* flicker-free (fullscreen) индикатор/кнопка: вкл = стабильнее интерфейс (alt-буфер claude). */}
+        {fsOn ? (
+          <span title="Claude в режиме flicker-free (fullscreen) — стабильный интерфейс" style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 5, height: 30, padding: '0 9px', borderRadius: 8, fontSize: 11.5, fontWeight: 600, background: 'rgba(var(--success-rgb),0.12)', border: '1px solid rgba(var(--success-rgb),0.4)', color: 'var(--success)' }}>✨ flicker-free</span>
+        ) : (
+          <button type="button" onClick={enableFullscreen} title="Включить flicker-free режим claude (/tui fullscreen) — стабильнее отрисовка и скрейп интерфейса"
+            style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 5, height: 30, padding: '0 10px', borderRadius: 8, cursor: 'pointer', fontFamily: 'inherit', fontSize: 11.5, fontWeight: 600,
+              background: 'rgba(var(--accent-rgb),0.12)', border: '1px solid rgba(var(--accent-rgb),0.4)', color: 'var(--accent-bright)' }}>✨ Стабильнее</button>
+        )}
         {/* Сброс чата — пересвязать с папкой терминала, очистить ленту вида */}
         <button type="button" onClick={resetChat} title="Сбросить чат (пересвязать с папкой терминала)"
           style={{ flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', width: 30, height: 30, borderRadius: 8, cursor: 'pointer',
