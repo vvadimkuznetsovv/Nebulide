@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import toast from 'react-hot-toast';
-import { resolveLiveSession, tailClaudeSession } from '../../api/claudeSessions';
+import { resolveLiveSession, tailClaudeSession, listClaudePlans, readClaudePlan } from '../../api/claudeSessions';
 import type { RichMessage } from '../../api/claudeSessions';
 import { sendToTerminal, submitPromptToTerminal, getTerminalScreenState } from './Terminal';
 import { onActivity } from '../../utils/activityBus';
@@ -254,6 +254,27 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
   const [planFb, setPlanFbState] = useState<string | null>(null);
   const planFbRef = useRef<string | null>(null);
   const setPlanFb = useCallback((v: string | null) => { planFbRef.current = v; setPlanFbState(v); }, []);
+  // Полный текст плана из ФАЙЛА (claude пишет его в ~/.claude/plans/<slug>.md при ExitPlanMode) — надёжнее
+  // и полнее, чем скрейп грида (тот обрезан/переносится). Кросс-ОС путь резолвит бэкенд (claudeBaseDir).
+  const [planFile, setPlanFile] = useState<string | null>(null);
+  // Когда появляется план-карточка — тянем НОВЕЙШИЙ план-файл (его claude только что записал). Берём,
+  // только если он СВЕЖИЙ (этой сессии, обновлён ≤10 мин назад), иначе остаёмся на скрейпе detail.
+  useEffect(() => {
+    if (!perm?.isPlan) { setPlanFile(null); return; }
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await listClaudePlans();
+        const newest = data.plans?.[0];
+        if (!newest) return;
+        const age = Date.now() - new Date(newest.updated_at).getTime();
+        if (!(age >= 0) || age > 10 * 60 * 1000) return; // не свежий → оставляем скрейп
+        const { data: full } = await readClaudePlan(newest.slug);
+        if (!cancelled && full?.content) setPlanFile(full.content);
+      } catch { /* фолбэк на скрейп detail */ }
+    })();
+    return () => { cancelled = true; };
+  }, [perm?.isPlan]);
   // Анти-дубль: setInput('') асинхронен, поэтому быстрый повтор Enter (автоповтор/двойное
   // нажатие) брал бы один и тот же input из замыкания → два сабмита. Гасим повтор того же
   // текста в окне 1.5с.
@@ -897,13 +918,14 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
               <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>Возобновить сессию</span>
               <span style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{resumePicker.sessions.length} из {Math.max(resumePicker.total, resumePicker.sessions.length)}</span>
               {resumePicker.total > resumePicker.sessions.length && (
-                <span style={{ fontSize: 10.5, color: 'var(--text-tertiary)', whiteSpace: 'nowrap', marginLeft: 'auto' }}>листай ↓↑ старее</span>
+                <span style={{ fontSize: 10.5, color: 'var(--text-tertiary)', whiteSpace: 'nowrap', marginLeft: 'auto' }}>листай ↑↓ список</span>
               )}
             </div>
-            {/* Листание: ↑ новее / ↓ старее — двигают окно списка в claude (видно не все разом). */}
+            {/* Листание окна списка claude. ВАЖНО: у claude в /resume новые сессии ВНИЗУ списка, старые
+                ВВЕРХУ → стрелка ВНИЗ открывает НОВЕЕ, ВВЕРХ — СТАРЕЕ (проверено: «↑» показывал 3h, «↓» 40min). */}
             <div style={{ display: 'flex', gap: 6, padding: '0 12px 8px' }}>
-              <button type="button" onClick={() => scrollResume(-1)} style={{ ...pbtn('rgba(var(--accent-rgb),0.1)', 'rgba(var(--accent-rgb),0.3)', 'var(--accent-bright)'), flex: 1, padding: '5px 0', fontSize: 11.5 }}>↑ новее</button>
-              <button type="button" onClick={() => scrollResume(1)} style={{ ...pbtn('rgba(var(--accent-rgb),0.1)', 'rgba(var(--accent-rgb),0.3)', 'var(--accent-bright)'), flex: 1, padding: '5px 0', fontSize: 11.5 }}>↓ старее</button>
+              <button type="button" onClick={() => scrollResume(-1)} style={{ ...pbtn('rgba(var(--accent-rgb),0.1)', 'rgba(var(--accent-rgb),0.3)', 'var(--accent-bright)'), flex: 1, padding: '5px 0', fontSize: 11.5 }}>↑ старее</button>
+              <button type="button" onClick={() => scrollResume(1)} style={{ ...pbtn('rgba(var(--accent-rgb),0.1)', 'rgba(var(--accent-rgb),0.3)', 'var(--accent-bright)'), flex: 1, padding: '5px 0', fontSize: 11.5 }}>↓ новее</button>
             </div>
             <div style={{ maxHeight: 480, overflowY: 'auto', borderTop: '1px solid var(--glass-border)' }}>
               {resumePicker.sessions.map((s, i) => (
@@ -954,7 +976,8 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
               {(() => {
                 // Полную команду берём из хука (точная), иначе — скрейп экрана.
                 const hookCmd = permInputText(perm.input);
-                const detailText = hookCmd || perm.detail || '';
+                // План: предпочитаем ПОЛНЫЙ текст из файла (planFile), иначе — скрейп грида (detail).
+                const detailText = (perm.isPlan && planFile) ? planFile : (hookCmd || perm.detail || '');
                 return (
                   <>
                     <div style={{ fontSize: perm.isPlan ? 16 : 12.5, fontWeight: 700, color: 'var(--text-primary)', marginBottom: detailText ? (perm.isPlan ? 12 : 6) : 0, display: 'flex', alignItems: 'center', gap: 8 }}>
