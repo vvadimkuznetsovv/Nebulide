@@ -175,6 +175,13 @@ describe('analyzeScreen — busy / idle / режим / сжатие', () => {
     expect(extractProgress('Compacting conversation… (3m 41s · ↑ 16.3k tokens)')).toBeNull();
   });
 
+  it('РЕАЛЬНЫЙ формат /compact (claude v2.1.185): бар на отдельной строке с пробелом перед %', () => {
+    // Снято из живого лога: спиннер + лейбл, БАР отдельной строкой «▰▱…▱ 3%» (пробел перед %).
+    const buf = '❯ /compact\n✽ Compacting conversation…\n  ▰▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱▱ 3%';
+    expect(extractProgress(buf)).toBe(3);
+    expect(extractWorkStatus('✶ Compacting conversation…')).toBe('Compacting conversation…');
+  });
+
   it('меню НЕ ложно-срабатывает на нумерованном списке в ответе', () => {
     const a = analyzeScreen('● Вот ответ:\n  1. первый пункт\n  2. второй пункт\n\n  ? for shortcuts', 'default');
     expect(a.menu).toBeNull();
