@@ -22,8 +22,18 @@ export function makeHarness(p, { dir }) {
 
   const log = (s) => { LOG += s + '\n'; console.log(s); };
 
+  // __nebScreen(inst) с авто-резолвом: если сессии по inst нет (вернулся {error,sessions}),
+  // переключаемся на первый живой claude-* инстанс из списка (id мог смениться при реконсиле).
+  const probe = async () => {
+    let r = await p.evaluate((id) => window.__nebScreen && window.__nebScreen(id), inst);
+    if (r && r.error && Array.isArray(r.sessions)) {
+      const alt = r.sessions.find((s) => /claude-/.test(s)) || r.sessions.find((s) => s !== 'default') || r.sessions[0];
+      if (alt && alt !== inst) { inst = alt; r = await p.evaluate((id) => window.__nebScreen && window.__nebScreen(id), inst); }
+    }
+    return r || {};
+  };
   // Состояние ИНТЕРФЕЙСА (то, что видит чат-вью).
-  const st = async () => (await p.evaluate((id) => window.__nebScreen && window.__nebScreen(id), inst))?.state || {};
+  const st = async () => (await probe())?.state || {};
   // Сырой вывод ТЕРМИНАЛА claude (ровный xterm-грид) — последние n непустых строк.
   const xterm = async (n = 16) => {
     const raw = await p.evaluate((id) => (window.__nebScreen && window.__nebScreen(id)?.xtermScreen) || '', inst);

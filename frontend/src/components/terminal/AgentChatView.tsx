@@ -836,7 +836,7 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
               <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>Возобновить сессию</span>
               <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{resumePicker.sessions.length} сессий</span>
             </div>
-            <div style={{ maxHeight: 320, overflowY: 'auto', borderTop: '1px solid var(--glass-border)' }}>
+            <div style={{ maxHeight: 480, overflowY: 'auto', borderTop: '1px solid var(--glass-border)' }}>
               {resumePicker.sessions.map((s, i) => (
                 <button key={i} type="button" onClick={() => resumePickerChoose(i, resumePicker.selectedIndex)}
                   style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 2, width: '100%', textAlign: 'left', padding: '8px 12px', cursor: 'pointer', fontFamily: 'inherit',

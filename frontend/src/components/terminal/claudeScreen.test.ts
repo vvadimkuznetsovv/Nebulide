@@ -101,6 +101,33 @@ describe('scrapeResumePicker — /resume список сессий', () => {
   it('обычное меню НЕ принимается за resume-пикер', () => {
     expect(scrapeResumePicker(fx('question-gitpull.txt'))).toBeNull();
   });
+  it('заголовок «Resume session» уехал за верх грида — пикер всё равно распознан по футеру', () => {
+    // При многих сессиях шапка выдавливается из вьюпорта; детект должен держаться на футере.
+    const noHeader = fx('resume-picker.txt').split('\n').filter((l) => !/Resume session/i.test(l)).join('\n');
+    const r = scrapeResumePicker(noHeader)!;
+    expect(r).not.toBeNull();
+    expect(r.sessions.length).toBeGreaterThanOrEqual(5);
+    expect(r.sessions[0].name).toBe('Ответ одним словом');
+  });
+  it('футер ПЕРЕНЕСЁН на 3 строки (узкий терминал) — пикер распознан, ❯/↓-маркеры сняты с имени', () => {
+    // Реальный claude v2.1.185 в узком окне переносит футер: «Type to search» и «Esc to cancel»
+    // оказываются на РАЗНЫХ строках. Раньше это давало null. Имена идут с ❯ (выбран) и ↓ (скролл).
+    const buf = [
+      '  Resume session (1 of 41)', '  ╭────────────╮', '  │ ⌕ Search…  │', '  ╰────────────╯', '',
+      '  ❯ Написать рассказ об осени в лесу', '    1 minute ago · main · 41.7KB', '',
+      '    Добавить счётчик кликов с localStorage', '    13 hours ago · main · 71.1KB', '',
+      '  ↓ План добавления кнопки-счётчика на HTML', '    14 hours ago · main · 48.5KB', '',
+      '    Ctrl+A to show all projects · Ctrl+B to only show current',
+      '    branch · Space to preview · Ctrl+R to rename · Type to search',
+      '    · Esc to cancel', '', '', '',
+    ].join('\n');
+    const r = scrapeResumePicker(buf)!;
+    expect(r).not.toBeNull();
+    expect(r.sessions.length).toBe(3);
+    expect(r.sessions[0].name).toBe('Написать рассказ об осени в лесу');
+    expect(r.sessions[0].selected).toBe(true);
+    expect(r.sessions[2].name).toBe('План добавления кнопки-счётчика на HTML'); // ↓ снят
+  });
   it('analyzeScreen: resumePicker распознан, menu не ложно-срабатывает', () => {
     const a = analyzeScreen(fx('resume-picker.txt'), 'default');
     expect(a.resumePicker).not.toBeNull();

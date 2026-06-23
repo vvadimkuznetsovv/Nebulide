@@ -197,24 +197,24 @@ export interface ResumeSession { name: string; meta: string; selected: boolean }
  *  строка-ИМЯ (❯ на выбранной) + строка-МЕТА «58 seconds ago · HEAD · 62.2KB». Возвращает сессии
  *  по порядку + индекс выбранной — карточка по клику навигирует стрелками от выбранной к цели. */
 export function scrapeResumePicker(buf: string): { sessions: ResumeSession[]; selectedIndex: number } | null {
-  if (!/Resume session/i.test(buf)) return null;
   const lines = buf.split('\n');
-  let footerIdx = -1;
-  for (let i = lines.length - 1; i >= 0 && lines.length - i <= 10; i--) {
-    if (/Esc to cancel/.test(lines[i]) && /(Type to search|to rename|show all projects)/.test(lines[i])) { footerIdx = i; break; }
-  }
-  if (footerIdx < 0) return null;
+  // Детект — по УНИКАЛЬНОМУ футеру, НЕ по заголовку «Resume session» (при многих сессиях он
+  // выдавливается за верх вьюпорта). ВАЖНО: футер в узком терминале ПЕРЕНОСИТСЯ на 2–3 строки
+  // («…Type to search» и «· Esc to cancel» оказываются на РАЗНЫХ строках), поэтому маркеры ищем в
+  // СКЛЕЕННОМ хвосте (последние непустые строки), а не на одной строке.
+  const tail = lines.filter((l) => l.trim()).slice(-14).join(' ');
+  if (!/Esc to cancel/.test(tail) || !/(Type to search|to rename|show all projects|to preview)/.test(tail)) return null;
   const META = /\d+\s+(second|minute|hour|day|week|month)s?\s+ago/i;
   const sessions: ResumeSession[] = [];
-  for (let i = 0; i < footerIdx; i++) {
-    if (!META.test(lines[i])) continue;
+  for (let i = 0; i < lines.length; i++) {
+    if (!META.test(lines[i])) continue; // META-строка = «X ago · branch · size» под именем сессии
     const meta = lines[i].replace(/\s+/g, ' ').trim();
     let j = i - 1;
     while (j >= 0 && !lines[j].trim()) j--;
     const nameLine = lines[j] || '';
     if (/Resume session|Search/i.test(nameLine)) continue;
     const selected = nameLine.indexOf('❯') >= 0;
-    const name = nameLine.replace(/^[\s❯>]+/, '').trim();
+    const name = nameLine.replace(/^[\s❯>↓↑]+/, '').trim(); // снять маркер выбора/скролла (❯ ↓ ↑)
     if (name) sessions.push({ name, meta, selected });
   }
   if (sessions.length < 1) return null;
