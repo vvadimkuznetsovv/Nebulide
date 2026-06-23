@@ -441,7 +441,9 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
       if (st.resumeMenu !== la.resume) { la.resume = st.resumeMenu; setResumeMenu(st.resumeMenu ? { info: st.resumeInfo } : null); }
       // /resume-пикер — список сессий; сигнатура = кол-во + выбранная, чтобы перерисовывать при навигации.
       const rpSig = st.resumePicker ? st.resumePicker.sessions.length + ':' + st.resumePicker.selectedIndex + ':' + st.resumePicker.total : '';
-      if (rpSig !== la.rp) { la.rp = rpSig; setResumePicker(st.resumePicker ? { sessions: st.resumePicker.sessions.map((x) => ({ name: x.name, meta: x.meta })), selectedIndex: st.resumePicker.selectedIndex, total: st.resumePicker.total } : null); }
+      // total делаем «липким» (только растёт): заголовок «Resume session (X of Y)» сначала за верхом
+      // вьюпорта (total=видимые ~10), при листании появляется (Y=48) — иначе «N из Y» дёргался 10↔48.
+      if (rpSig !== la.rp) { la.rp = rpSig; setResumePicker(prev => st.resumePicker ? { sessions: st.resumePicker.sessions.map((x) => ({ name: x.name, meta: x.meta })), selectedIndex: st.resumePicker.selectedIndex, total: Math.max(st.resumePicker.total, prev?.total || 0) } : null); }
       // permission — варианты СКРЕЙПЛЕНЫ с экрана (2 или 3); сигнатура = вопрос+цифры.
       // Сигнатура включает состояние чекбоксов (✔/ ) — чтобы тогл в мульти-селекте перерисовывал карточку.
       const permSig = st.permMenu ? st.permKind + '|' + st.permQuestion + '|' + (st.permOptions || []).map(o => o.digit + (o.checked ? '1' : o.checked === false ? '0' : '')).join('') + '|' + (st.permTabs || []).map(t => t.label + (t.done ? '1' : '0')).join(',') : '';
@@ -732,7 +734,7 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
   // ↓/↑ двигает курсор за край окна → claude прокручивает → опрос (250мс) ре-скрейпит новую порцию.
   const scrollResume = useCallback((dir: 1 | -1) => {
     const key = dir > 0 ? '\x1b[B' : '\x1b[A';
-    for (let i = 0; i < 6; i++) sendKey(key);
+    for (let i = 0; i < 3; i++) sendKey(key); // 3 шага за клик — плавнее (было 6, «прыгало»)
     setTimeout(() => poll(), 300);
   }, [sendKey, poll]);
 
