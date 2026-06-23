@@ -283,26 +283,19 @@ export function analyzeScreen(buf: string, prevMode: string): ScreenAnalysis {
   // Ловим спиннер по «Слово… (… tokens …)» ИЛИ по «Слово… (Ns …)» — первые секунды claude
   // показывает «Contemplating… (3s)» БЕЗ счётчика токенов (токены ещё не потекли), и старый
   // паттерн (только tokens) пропускал ~7с работы → индикатор «думает» появлялся с задержкой.
-  const workRe = /[A-Za-z]+(?: [a-z]+)*(?:…|\.\.\.)\s*\([^)]*(?:tokens|\d+s)[^)]*\)/g;
-  let workIdx = -1;
-  for (let m = workRe.exec(buf); m; m = workRe.exec(buf)) workIdx = m.index;
-  // Спиннер «мышления» БЕЗ скобок/счётчика/«esc to interrupt»: в plan-режиме и первые секунды
-  // claude показывает только «✶ Shenaniganing…» (глиф-звезда + одно слово + «…»). Старый детект это
-  // пропускал → индикатор «думает» не зажигался вовсе. Ловим busy и по такому спиннеру (глиф
-  // якорим к началу строки + одно Заглавное слово + «…», чтобы не путать с обычным текстом).
-  const spinRe = /(?:^|\n)\s*[✻✶✳✽✺✷✦✧✢✸✹*]\s+[A-Z][a-z]+(?:…|\.\.\.)/g;
-  let spinIdx = -1;
-  for (let m = spinRe.exec(buf); m; m = spinRe.exec(buf)) spinIdx = m.index;
-  const bi = Math.max(buf.lastIndexOf('esc to interrupt'), buf.lastIndexOf('Compacting conversation'), workIdx, spinIdx);
-  // idle-присутствие: позиция последнего ЛЮБОГО idle-хинта (claude жив) — для alive/idleVisible/режима.
+  // ── busy: по ПРИСУТСТВИЮ активного маркера работы в ХВОСТЕ кадра (живой статус всегда у инпута внизу),
+  // НЕ по позиции относительно idle-футера. В claude 2.1.18x футер «← for agents» висит ВНИЗУ ВСЕГДА
+  // (ниже спиннера) → прежняя логика «bi > idleIdx» давала busy=false почти всегда («мышление с трудом»).
+  // Маркеры (есть только пока claude РАБОТАЕТ): «esc to interrupt», «Compacting conversation»,
+  // таймер-спиннер «Word… (Ns · tokens)», голый спиннер-звезда «✶ Word…». Завершённые индикаторы
+  // («✻ Brewed for 18s» — БЕЗ «…») НЕ матчатся. Хвост (≈22 строки) — чтобы scrollback не давал ложняк.
+  const tail = buf.split('\n').slice(-22).join('\n');
+  const busy = /esc to interrupt|Compacting conversation/.test(tail)
+    || /[A-Za-z]+(?: [a-z]+)*(?:…|\.\.\.)\s*\([^)]*(?:tokens|\d+s)[^)]*\)/.test(tail)
+    || /(?:^|\n)\s*[✻✶✳✽✺✷✦✧✢✸✹⣾⣽⣻⢿⡿⣟⣯⣷]\s+[A-Z][a-z]+(?:…|\.\.\.)/.test(tail);
+  // idle-присутствие: позиция последнего idle-хинта (для alive/idleVisible/режима).
   let idleIdx = -1;
   for (const m of IDLE_MARKS) { const idx = buf.lastIndexOf(m.s); if (idx > idleIdx) idleIdx = idx; }
-  // ВАЖНО для busy: режимные маркеры (plan/accept/auto mode on) ПОСТОЯННЫ — футер виден и во время
-  // работы, ниже спиннера. Поэтому для решения «занят» учитываем ТОЛЬКО генерик-ready («? for
-  // shortcuts»/«for agents»), который показывается лишь когда claude реально ждёт ввода. Иначе в
-  // plan-режиме спиннер над футером всегда проигрывал по позиции → «думает» не зажигалось.
-  let genIdleIdx = -1;
-  for (const m of ['? for shortcuts', 'for agents']) { const idx = buf.lastIndexOf(m); if (idx > genIdleIdx) genIdleIdx = idx; }
   // Режим — ТОЛЬКО из специфичных маркеров (plan/acceptEdits/auto). "← for agents" / "? for
   // shortcuts" — общий хинт, есть во ВСЕХ режимах (в т.ч. рядом с "plan mode on"), режим не задаёт.
   let mode = prevMode;
@@ -313,10 +306,7 @@ export function analyzeScreen(buf: string, prevMode: string): ScreenAnalysis {
     if (idx > modeIdx) { modeIdx = idx; mode = m.mode; }
   }
   if (idleIdx >= 0 && modeIdx < 0) mode = 'default'; // idle есть, спец-маркера режима нет → default
-  const hasMarkers = bi >= 0 || idleIdx >= 0;
-  // Занят, если есть живой индикатор работы И он не перекрыт генерик-ready приглашением (его в
-  // активной работе нет; в plan/accept/auto его заменяет постоянный режим-футер, который мы игнорим).
-  const busy = bi >= 0 && (genIdleIdx < 0 || bi > genIdleIdx);
+  const hasMarkers = busy || idleIdx >= 0;
   return {
     resumeMenu,
     resumeInfo,

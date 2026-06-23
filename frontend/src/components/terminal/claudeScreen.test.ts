@@ -222,4 +222,26 @@ describe('analyzeScreen — busy / idle / режим / сжатие', () => {
     expect(a.busy).toBe(true);        // РАНЬШЕ было false → «думает» не показывалось
     expect(a.workStatus).toContain('Billowing');
   });
+
+  it('спиннер ВЫШЕ постоянного футера «← for agents» (claude 2.1.186) → busy (НЕ по позиции!)', () => {
+    // Точный кейс «мышления с трудом»: таймер-спиннер у инпута, а idle-футер ВСЕГДА ниже него.
+    // Прежняя логика «bi > idleIdx» давала busy=false. Теперь — по присутствию маркера в хвосте.
+    const buf = [
+      '❯ Напиши рассказ про осень', '✶ Skedaddling… (11s · ↓ 342 tokens)', '',
+      '────────────', '❯ ', '────────────',
+      '  Opus 4.8 (1M context) · ctx 5% (46k / 1000k)', '  ← for agents',
+    ].join('\n');
+    const a = analyzeScreen(buf, 'default');
+    expect(a.busy).toBe(true);
+    expect(a.workStatus).toContain('Skedaddling');
+  });
+
+  it('завершённый индикатор «✻ Brewed for 18s» (без «…») над футером → НЕ busy', () => {
+    const buf = [
+      '  текст ответа claude…', '✻ Brewed for 18s', '',
+      '────────────', '❯ ', '────────────', '  ← for agents',
+    ].join('\n');
+    const a = analyzeScreen(buf, 'default');
+    expect(a.busy).toBe(false); // «Brewed for 18s» без «…»/скобок-таймера — работа ЗАВЕРШЕНА
+  });
 });
