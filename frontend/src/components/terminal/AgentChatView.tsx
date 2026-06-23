@@ -695,7 +695,16 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
   // Поэтому: цифра → Enter (активировать) → закрыть карточку → раскрыть нижнее поле (фокус композера).
   const chooseOption = useCallback((o: PermOption, isPlan?: boolean) => {
     const free = /type something|chat about|tell claude|свой ответ|ввести|написать/i.test(o.label);
+    // ПЕРЕДУМАЛ: инлайн-поле правки открыто, но кликнули ДРУГОЙ вариант → выходим из текст-режима
+    // claude (Escape), закрываем поле, затем выбираем этот вариант. Кнопки не пропадали — выбор доступен.
+    if (planFbRef.current !== null && !free) {
+      setPlanFb(null);
+      sendKey('\x1b');
+      setTimeout(() => decide(o.digit), 260);
+      return;
+    }
     if (free && isPlan) {
+      if (planFbRef.current !== null) return; // поле уже открыто — повторный клик ничего не меняет
       // ПЛАН: активируем пункт у claude (цифра+Enter → он ждёт текст-правку), но карточку НЕ закрываем
       // и композер НЕ трогаем — раскрываем инлайн-поле ПОД кнопками. План остаётся на экране.
       sendKey(o.digit);
@@ -883,11 +892,12 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
         {/* /resume — список сессий, обёрнут картой (клик навигирует курсор в claude + Enter) */}
         {!query && resumePicker && (
           <div style={{ margin: '10px 0', borderRadius: 12, overflow: 'hidden', border: '1px solid rgba(var(--accent-rgb),0.45)', background: 'rgba(var(--accent-rgb),0.1)' }}>
-            <div style={{ padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)' }}>Возобновить сессию</span>
-              <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>{resumePicker.sessions.length} из {Math.max(resumePicker.total, resumePicker.sessions.length)}</span>
+            {/* Шапка: на узком экране (моб.) переносим, числа и подсказку НЕ ломаем посередине (nowrap). */}
+            <div style={{ padding: '10px 12px', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap' }}>Возобновить сессию</span>
+              <span style={{ fontSize: 11, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>{resumePicker.sessions.length} из {Math.max(resumePicker.total, resumePicker.sessions.length)}</span>
               {resumePicker.total > resumePicker.sessions.length && (
-                <span style={{ fontSize: 10.5, color: 'var(--text-tertiary)', marginLeft: 'auto' }}>листай ↓↑ чтобы видеть старее</span>
+                <span style={{ fontSize: 10.5, color: 'var(--text-tertiary)', whiteSpace: 'nowrap', marginLeft: 'auto' }}>листай ↓↑ старее</span>
               )}
             </div>
             {/* Листание: ↑ новее / ↓ старее — двигают окно списка в claude (видно не все разом). */}
@@ -967,19 +977,7 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
               })()}
             </div>
             <div style={{ display: 'flex', flexDirection: perm.kind === 'question' ? 'column' : 'row', gap: 8, flexWrap: 'wrap', padding: '10px 12px', borderTop: '1px solid var(--glass-border)' }}>
-              {perm.isPlan && planFb !== null ? (
-                // ИНЛАЙН-ПОЛЕ правки плана — раскрылось ПОД кнопкой; план-карточка выше остаётся.
-                <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <textarea autoFocus value={planFb} onChange={e => setPlanFb(e.target.value)}
-                    onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); submitPlanFb(); } }}
-                    placeholder="Что Claude изменить в плане? (Ctrl+Enter — отправить)"
-                    style={{ width: '100%', minHeight: 70, resize: 'vertical', padding: '10px 12px', borderRadius: 8, fontFamily: 'inherit', fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-primary)', background: 'rgba(0,0,0,0.28)', border: '1px solid rgba(var(--accent-rgb),0.45)', outline: 'none', boxSizing: 'border-box' }} />
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <button type="button" onClick={submitPlanFb} disabled={!planFb.trim()} style={{ ...pbtn('rgba(var(--accent-rgb),0.22)', 'rgba(var(--accent-rgb),0.5)', 'var(--accent-bright)'), opacity: planFb.trim() ? 1 : 0.5, cursor: planFb.trim() ? 'pointer' : 'default' }}>Отправить правку →</button>
-                    <button type="button" onClick={() => { setPlanFb(null); sendKey('\x1b'); setTimeout(() => poll(), 300); }} style={pbtn('rgba(255,255,255,0.05)', 'var(--glass-border)', 'var(--text-secondary)')}>Отмена</button>
-                  </div>
-                </div>
-              ) : perm.multi ? (
+              {perm.multi ? (
                 <>
                   {perm.options.map((o) => (
                     <button key={o.digit} type="button" title={o.raw} onClick={() => o.checked === undefined ? decide(o.digit) : toggleOption(o.digit)}
@@ -1020,7 +1018,20 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
                         : pbtn('rgba(var(--accent-rgb),0.18)', 'rgba(var(--accent-rgb),0.4)', 'var(--accent-bright)');
                     return <button key={o.digit} type="button" title={o.raw} onClick={() => decide(o.digit)} style={style}>{o.label}</button>;
                   })}
-              {onRequestTerminal && !(perm.isPlan && planFb !== null) && (
+              {/* ИНЛАЙН-поле правки плана — ПОД кнопками; кнопки НЕ исчезают (можно передумать). */}
+              {perm.isPlan && planFb !== null && (
+                <div style={{ width: '100%', display: 'flex', flexDirection: 'column', gap: 8, marginTop: 2 }}>
+                  <textarea autoFocus value={planFb} onChange={e => setPlanFb(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); submitPlanFb(); } }}
+                    placeholder="Что Claude изменить в плане? (Ctrl+Enter — отправить)"
+                    style={{ width: '100%', minHeight: 70, resize: 'vertical', padding: '10px 12px', borderRadius: 8, fontFamily: 'inherit', fontSize: 12.5, lineHeight: 1.5, color: 'var(--text-primary)', background: 'rgba(0,0,0,0.28)', border: '1px solid rgba(var(--accent-rgb),0.45)', outline: 'none', boxSizing: 'border-box' }} />
+                  <div style={{ display: 'flex', gap: 8 }}>
+                    <button type="button" onClick={submitPlanFb} disabled={!planFb.trim()} style={{ ...pbtn('rgba(var(--accent-rgb),0.22)', 'rgba(var(--accent-rgb),0.5)', 'var(--accent-bright)'), opacity: planFb.trim() ? 1 : 0.5, cursor: planFb.trim() ? 'pointer' : 'default' }}>Отправить правку →</button>
+                    <button type="button" onClick={() => { setPlanFb(null); sendKey('\x1b'); setTimeout(() => poll(), 300); }} style={pbtn('rgba(255,255,255,0.05)', 'var(--glass-border)', 'var(--text-secondary)')}>Скрыть поле</button>
+                  </div>
+                </div>
+              )}
+              {onRequestTerminal && (
                 <button type="button" onClick={() => { setPerm(null); onRequestTerminal(); }} style={pbtn('rgba(255,255,255,0.05)', 'var(--glass-border)', 'var(--text-secondary)')}>⌨ Терминал</button>
               )}
             </div>
