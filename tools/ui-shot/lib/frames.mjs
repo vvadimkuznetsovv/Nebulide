@@ -86,6 +86,9 @@ export function makeHarness(p, { dir }) {
     const planMd = document.querySelector('.plan-md');
     const sheen = document.querySelector('.compact-progress-sheen');
     const ta = document.querySelector('textarea[placeholder*="Сообщение для Claude"]');
+    const pulse = document.querySelector('.claude-chat-pulse'); // ✻ индикатор «думает»
+    // Текст рядом с ✻ (workStatus) — берём родителя пульса.
+    const pulseTxt = pulse && pulse.parentElement ? (pulse.parentElement.innerText || '').trim() : '';
     const txt = document.body.innerText || '';
     return {
       planMd: planMd ? getComputedStyle(planMd).fontSize : null,
@@ -94,6 +97,9 @@ export function makeHarness(p, { dir }) {
       resumeCard: /Возобновить сессию/i.test(txt),
       active: document.activeElement ? document.activeElement.tagName : null,
       taH: ta ? Math.round(ta.getBoundingClientRect().height) : null, // высота поля ввода (раскрылось ли)
+      pulse: !!pulse, // виден ли ✻ «думает» (status==='working')
+      pulseTxt, // workStatus-текст возле ✻
+      composer: ta ? (ta.value || '') : null, // что напечатано в поле ввода
     };
   }).catch(() => ({}));
 
@@ -112,7 +118,7 @@ export function makeHarness(p, { dir }) {
     const dt = ((Date.now() - t0) / 1000).toFixed(1);
     log(`\n===== [t=${dt}s][${phase}] ${label} =====`);
     log(`  STATE: ${fmtState(s)}`);
-    log(`  DOM: planMd=${d.planMd} tags=[${(d.planTags || []).join(',')}] sheen=${d.sheen} resumeCard=${d.resumeCard} active=${d.active} footerH=${d.footerH}`);
+    log(`  DOM: planMd=${d.planMd} tags=[${(d.planTags || []).join(',')}] sheen=${d.sheen} pulse=${d.pulse}${d.pulse ? ' «' + d.pulseTxt + '»' : ''} active=${d.active} taH=${d.taH} composer=${JSON.stringify((d.composer || '').slice(0, 50))}`);
     log(`  --- ТЕРМИНАЛ (хвост 16) ---\n${xt}`);
     return s;
   };

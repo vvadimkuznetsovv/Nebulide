@@ -66,9 +66,9 @@ try {
     await sleep(1500);
     await h.snap('resume-card-hold');
 
-    // (2) ЛИСТАНИЕ ВНИЗ — «↓ старее». Жмём 3 раза, сравниваем ОКНО списка (все имена) до/после.
+    // (2) ЛИСТАНИЕ ВНИЗ — «↓ старее». Жмём 5 раз (плавный 3-шаговый скролл) — видно прогрессию.
     let beforeSig = winSig(pickerState);
-    for (let r = 0; r < 3; r++) {
+    for (let r = 0; r < 5; r++) {
       h.setPhase('scroll-down');
       h.log(`\n⬇ клик «↓ старее» (попытка ${r + 1}); верх: [${firstNames(pickerState).join(' | ')}]`);
       const dn = p.getByText('↓ старее').first();
@@ -85,8 +85,8 @@ try {
       await sleep(800);
     }
 
-    // (3) ЛИСТАНИЕ ВВЕРХ — «↑ новее». Жмём 2 раза, чтобы откат окна был виден.
-    for (let r = 0; r < 2; r++) {
+    // (3) ЛИСТАНИЕ ВВЕРХ — «↑ новее». Жмём 4 раза, чтобы откат окна вверх был хорошо виден.
+    for (let r = 0; r < 4; r++) {
       h.setPhase('scroll-up');
       h.log(`\n⬆ клик «↑ новее» (попытка ${r + 1}); верх: [${firstNames(pickerState).join(' | ')}]`);
       const up = p.getByText('↑ новее').first();
@@ -104,13 +104,15 @@ try {
     }
     await sleep(800);
 
-    // (4) ВЫБОР сессии — кликаем по КОНКРЕТНОМУ имени (2-я в текущем списке, иначе 1-я).
+    // (4) ВЫБОР сессии — наводим на конкретную, ДЕРЖИМ (видно подсветку), затем кликаем.
     h.setPhase('select');
     const sNow = await h.st();
     const sess = sNow.resumePicker?.sessions || pickerState.resumePicker.sessions;
-    const target = Math.min(1, sess.length - 1);
+    const target = Math.min(2, sess.length - 1); // 3-я сессия в текущем окне (или последняя)
     const name = sess[target].name.slice(0, 24);
-    h.log(`\n🖱 ВЫБОР: кликаю сессию #${target} «${name}»`);
+    h.log(`\n🖱 ВЫБОР: навожу на сессию #${target} «${name}», держу, кликаю`);
+    const hover = p.getByText(name, { exact: false }).first();
+    if (await hover.count()) { await hover.hover().catch(() => {}); await sleep(1200); await h.snap('session-hover'); }
     const byName = p.getByText(name, { exact: false }).first();
     if (await byName.count()) {
       await byName.click({ timeout: 3000 }).catch((e) => h.log('  клик по имени не удался: ' + e.message));

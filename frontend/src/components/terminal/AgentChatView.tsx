@@ -460,7 +460,6 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
           setPerm({ kind: st.permKind, multi: st.permMulti, question: st.permQuestion, detail: st.permDetail, options: st.permOptions || [], tool: d?.tool, input: d?.input, tabs: st.permTabs || [], isPlan: st.permIsPlan });
         } else if (planFbRef.current === null) { setPerm(null); permDetailsRef.current = null; } // открытый инлайн-фидбэк плана пиннит карточку
       }
-      }
     };
     tick();
     const iv = setInterval(tick, 250);
