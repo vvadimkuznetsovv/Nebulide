@@ -257,24 +257,28 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
   // Полный текст плана из ФАЙЛА (claude пишет его в ~/.claude/plans/<slug>.md при ExitPlanMode) — надёжнее
   // и полнее, чем скрейп грида (тот обрезан/переносится). Кросс-ОС путь резолвит бэкенд (claudeBaseDir).
   const [planFile, setPlanFile] = useState<string | null>(null);
-  // Когда появляется план-карточка — тянем НОВЕЙШИЙ план-файл (его claude только что записал). Берём,
-  // только если он СВЕЖИЙ (этой сессии, обновлён ≤10 мин назад), иначе остаёмся на скрейпе detail.
+  // Когда появляется план-карточка — тянем план-файл claude из ~/.claude/plans. ПРИВЯЗКА к ЭТОЙ сессии:
+  // папка планов ОБЩАЯ (HOME=/root в проде), поэтому «новейший» может быть ЧУЖИМ. Берём из нескольких
+  // свежих тот, чьё СОДЕРЖИМОЕ совпадает с тем, что реально на экране (скрейп-сниппет perm.detail) —
+  // это гарантирует «именно наш план». Если совпадения нет — остаёмся на скрейпе detail.
   useEffect(() => {
     if (!perm?.isPlan) { setPlanFile(null); return; }
+    const snippet = (perm.detail || '').replace(/\s+/g, ' ').trim().slice(0, 50);
     let cancelled = false;
     (async () => {
       try {
         const { data } = await listClaudePlans();
-        const newest = data.plans?.[0];
-        if (!newest) return;
-        const age = Date.now() - new Date(newest.updated_at).getTime();
-        if (!(age >= 0) || age > 10 * 60 * 1000) return; // не свежий → оставляем скрейп
-        const { data: full } = await readClaudePlan(newest.slug);
-        if (!cancelled && full?.content) setPlanFile(full.content);
+        for (const pl of (data.plans || []).slice(0, 5)) {
+          const age = Date.now() - new Date(pl.updated_at).getTime();
+          if (!(age >= 0) || age > 5 * 60 * 1000) break; // дальше только старые — стоп
+          const { data: full } = await readClaudePlan(pl.slug);
+          const norm = (full?.content || '').replace(/\s+/g, ' ');
+          if (snippet ? norm.includes(snippet) : age < 30000) { if (!cancelled) setPlanFile(full.content); return; }
+        }
       } catch { /* фолбэк на скрейп detail */ }
     })();
     return () => { cancelled = true; };
-  }, [perm?.isPlan]);
+  }, [perm?.isPlan, perm?.detail]);
   // Анти-дубль: setInput('') асинхронен, поэтому быстрый повтор Enter (автоповтор/двойное
   // нажатие) брал бы один и тот же input из замыкания → два сабмита. Гасим повтор того же
   // текста в окне 1.5с.
