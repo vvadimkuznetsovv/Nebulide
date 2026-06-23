@@ -97,6 +97,7 @@ interface TermSession {
   permIsPlan: boolean;
   workStatusCur: string;
   errorMsgCur: string; // ошибка/сетевая проблема claude (API Error / network) — в чат красным
+  effortCur: string; // текущий effort (low/medium/high/xhigh/max) из футера claude
   workProgressCur: number | null;
   /** claude TUI присутствует на экране (загрузился) — для гейта отложенной отправки. */
   claudeAlive: boolean;
@@ -222,6 +223,7 @@ function detectClaudeScreen(session: TermSession, instanceId: string) {
     else if (!a.busy && session.claudeBusy) { session.claudeBusy = false; emitActivity({ type: 'terminal_idle', instanceId }); }
     session.workStatusCur = a.busy ? a.workStatus : '';
     session.errorMsgCur = a.errorMsg;
+    if (a.effort) session.effortCur = a.effort; // effort виден не всегда — держим последний известный
     session.workProgressCur = a.busy ? a.progress : null;
     if (!a.busy && a.idleVisible) session.claudeMode = a.mode; // режим виден только на prompt
   } else if (a.resumeMenu || a.menu) {
@@ -251,6 +253,7 @@ export function getTerminalScreenState(instanceId: string) {
     permIsPlan: s.permIsPlan,
     workStatus: s.workStatusCur,
     errorMsg: s.errorMsgCur,
+    effort: s.effortCur,
     progress: s.workProgressCur,
     // fullscreen/flicker-free claude рисует в АЛЬТЕРНАТИВНОМ буфере xterm (как vim) → определяем по нему.
     fullscreen: (() => { try { return s.xterm?.buffer?.active?.type === 'alternate'; } catch { return false; } })(),
@@ -456,6 +459,7 @@ function createXterm(instanceId: string): TermSession {
     permIsPlan: false,
     workStatusCur: '',
     errorMsgCur: '',
+    effortCur: '',
     workProgressCur: null,
     claudeAlive: false,
     claudeMode: 'default',

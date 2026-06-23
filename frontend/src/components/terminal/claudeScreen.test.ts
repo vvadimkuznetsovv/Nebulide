@@ -243,6 +243,12 @@ describe('analyzeScreen — busy / idle / режим / сжатие', () => {
     expect(a.workStatus).toContain('Skedaddling');
   });
 
+  it('effort из футера «● high · /effort» → state.effort', () => {
+    expect(analyzeScreen('❯ \n  Opus 4.8 (1M context)              ● high · /effort\n  ← for agents', 'default').effort).toBe('high');
+    expect(analyzeScreen('❯ \n  ● max · /effort\n  ← for agents', 'default').effort).toBe('max');
+    expect(analyzeScreen('❯ \n  ← for agents', 'default').effort).toBe(''); // нет футера effort → пусто
+  });
+
   it('завершённый индикатор «✻ Brewed for 18s» (без «…») над футером → НЕ busy', () => {
     const buf = [
       '  текст ответа claude…', '✻ Brewed for 18s', '',

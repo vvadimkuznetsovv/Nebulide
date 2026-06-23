@@ -254,6 +254,7 @@ export interface ScreenAnalysis {
   progress: number | null; // прогресс длинной операции (compact/hooks) 0..100, иначе null
   alive: boolean;          // claude TUI присутствует (маркеры ИЛИ любое меню)
   errorMsg: string;        // ошибка/сетевая проблема claude (API Error / Waiting for API · network) — в чат КРАСНЫМ
+  effort: string;          // текущий уровень усилий из футера («● high · /effort») — low/medium/high/xhigh/max, иначе ''
 }
 
 /** Ошибка/сетевая проблема claude для показа КРАСНЫМ в чате (одной карточкой, не плодим). Ловим
@@ -323,5 +324,7 @@ export function analyzeScreen(buf: string, prevMode: string): ScreenAnalysis {
     progress: busy ? extractProgress(buf) : null,
     alive: hasMarkers || resumeMenu || !!menu || !!resumePicker,
     errorMsg: extractError(buf),
+    // Текущий effort из футера claude: «● high · /effort» / «high · /effort».
+    effort: (buf.match(/\b(low|medium|high|xhigh|max)\b[^\n]{0,10}\/effort/i)?.[1] || '').toLowerCase(),
   };
 }
