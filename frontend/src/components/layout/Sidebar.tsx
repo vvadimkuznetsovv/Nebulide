@@ -663,8 +663,9 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
           </div>
         </div>
 
-        {/* Panel toggles */}
-        <div className="px-3 py-2 flex items-center gap-1.5 overflow-x-auto" style={{ scrollbarWidth: 'none' }}>
+        {/* Panel toggles — flex-wrap: при большом числе панелей кнопки ПЕРЕНОСЯТСЯ на следующую
+            строку (а не сплющиваются/уезжают в горизонтальный скролл). */}
+        <div className="px-3 py-2 flex flex-wrap items-center gap-1.5">
           {allPanels.map((panel) => {
             const isTerminal = panel === 'terminal';
             const anyTerminalVisible = isTerminal
@@ -676,7 +677,7 @@ export default function Sidebar({ isOpen, onClose }: SidebarProps) {
                 type="button"
                 onClick={() => isTerminal ? openNewTerminal() : toggleVisibility(panel)}
                 title={isTerminal ? 'Open new terminal' : `${visibility[panel] ? 'Hide' : 'Show'} ${panelTitles[panel]}`}
-                className="w-8 h-8 rounded-xl flex items-center justify-center transition-all duration-200"
+                className="w-8 h-8 flex-shrink-0 rounded-xl flex items-center justify-center transition-all duration-200"
                 style={{
                   background: anyTerminalVisible ? 'rgba(var(--accent-rgb), 0.15)' : 'rgba(255, 255, 255, 0.04)',
                   border: `1px solid ${anyTerminalVisible ? 'rgba(var(--accent-rgb), 0.3)' : 'rgba(255, 255, 255, 0.06)'}`,

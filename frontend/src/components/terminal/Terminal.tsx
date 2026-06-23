@@ -93,6 +93,8 @@ interface TermSession {
   permDetail: string;
   /** Заголовки/прогресс мульти-вопроса AskUserQuestion (табы «← ☐ H1 ✔️ H2 →»). */
   permTabs: QuestionTab[];
+  /** Меню — это план (ExitPlanMode): detail = текст плана, рендерим крупным markdown. */
+  permIsPlan: boolean;
   workStatusCur: string;
   workProgressCur: number | null;
   /** claude TUI присутствует на экране (загрузился) — для гейта отложенной отправки. */
@@ -186,6 +188,7 @@ function detectClaudeScreen(session: TermSession, instanceId: string) {
     session.permOptions = a.menu.options;
     session.permDetail = a.menu.detail;
     session.permTabs = a.menu.tabs;
+    session.permIsPlan = a.menu.isPlan;
     session.permMenuLastSeen = Date.now();
   } else if (session.permMenuShown && (a.busy || Date.now() - session.permMenuLastSeen < 5000)) {
     // STICKY: AskUserQuestion/permission ЖДЁТ ответа, но claude показывает busy-статус «Actioning…»
@@ -199,6 +202,7 @@ function detectClaudeScreen(session: TermSession, instanceId: string) {
     session.permOptions = [];
     session.permDetail = '';
     session.permTabs = [];
+    session.permIsPlan = false;
   }
 
   if (a.hasMarkers) {
@@ -232,6 +236,7 @@ export function getTerminalScreenState(instanceId: string) {
     permOptions: s.permOptions,
     permDetail: s.permDetail,
     permTabs: s.permTabs,
+    permIsPlan: s.permIsPlan,
     workStatus: s.workStatusCur,
     progress: s.workProgressCur,
   };
@@ -433,6 +438,7 @@ function createXterm(instanceId: string): TermSession {
     permOptions: [],
     permDetail: '',
     permTabs: [],
+    permIsPlan: false,
     workStatusCur: '',
     workProgressCur: null,
     claudeAlive: false,

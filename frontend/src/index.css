@@ -2181,3 +2181,23 @@
   filter: drop-shadow(0 0 6px rgba(var(--accent-rgb), 0.4));
 }
 
+/* ── План Claude (ExitPlanMode) в карточке чата — крупный читаемый markdown ── */
+.plan-md > *:first-child { margin-top: 0; }
+.plan-md > *:last-child { margin-bottom: 0; }
+.plan-md p { margin: 0 0 8px; }
+.plan-md h1, .plan-md h2, .plan-md h3, .plan-md h4 { margin: 13px 0 6px; font-weight: 700; line-height: 1.3; color: var(--text-primary); }
+.plan-md h1 { font-size: 18px; }
+.plan-md h2 { font-size: 16.5px; }
+.plan-md h3 { font-size: 15px; }
+.plan-md h4 { font-size: 14px; }
+.plan-md ul, .plan-md ol { margin: 5px 0 12px; padding-left: 22px; }
+.plan-md li { margin: 4px 0; }
+.plan-md li::marker { color: var(--accent-bright); }
+.plan-md code { font-family: monospace; font-size: 13px; background: rgba(255, 255, 255, 0.08); padding: 1px 5px; border-radius: 4px; }
+.plan-md pre { background: rgba(0, 0, 0, 0.32); padding: 10px 12px; border-radius: 8px; overflow: auto; margin: 6px 0 10px; }
+.plan-md pre code { background: none; padding: 0; }
+.plan-md strong { color: var(--text-primary); font-weight: 700; }
+.plan-md a { color: var(--accent-bright); }
+.plan-md hr { border: none; border-top: 1px solid var(--glass-border); margin: 10px 0; }
+.plan-md blockquote { margin: 6px 0; padding-left: 12px; border-left: 2px solid rgba(var(--accent-rgb), 0.5); color: var(--text-secondary); }
+

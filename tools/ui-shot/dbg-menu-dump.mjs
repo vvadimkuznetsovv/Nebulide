@@ -25,10 +25,19 @@ try {
   const o = await openClaudeViaChatWindow(p); inst = o.instanceId;
   log('opened: ' + JSON.stringify(o));
 
+  // CTX-ХОД как в tri-suite (ключ + ждём ответ) — РЕПЛИКА флоу, где вопрос таймаутит
   await box().click();
-  await box().fill('Задай мне РОВНО 3 уточняющих вопроса по одному, КАЖДЫЙ с 3-4 вариантами на выбор (используй интерактивный выбор вариантов AskUserQuestion): 1) фреймворк, 2) стилизация, 3) сборщик. НЕ пиши их текстом — используй интерактивное меню.');
+  await box().fill('Запомни кодовое слово этого чата: BRAVO-2. Повтори его в ответе и подтверди, что запомнил.');
   await box().press('Enter');
-  log('триггер отправлен, дампим грид каждые 2с (90с)…\n');
+  log('ctx-ход отправлен (ключ), ждём 20с ответ claude…');
+  await sleep(20000);
+  log('grid после ctx (хвост 12):\n  ' + (await dump()).xterm.split('\n').filter((l) => l.trim()).slice(-12).join('\n  ') + '\n');
+
+  await box().click();
+  // ТОЧНЫЙ промпт tri-suite (чтобы воспроизвести именно его поведение)
+  await box().fill('Прежде чем что-то делать, задай мне РОВНО 3 уточняющих вопроса по одному, КАЖДЫЙ с 3-4 вариантами на выбор (интерактивный выбор вариантов): 1) фреймворк, 2) стилизация, 3) сборщик.');
+  await box().press('Enter');
+  log('триггер вопроса отправлен, дампим грид каждые 2с (90с)…\n');
 
   let menuSeenInGrid = 0;
   for (let i = 0; i < 45; i++) {
@@ -42,11 +51,13 @@ try {
     const hasFooter = /Enter to select|Tab to amend|Esc to cancel|Submit/.test(d.xterm);
     const hasQword = /фреймворк|стилизац|сборщик|React|Vue|Vite|использовать\?/i.test(d.xterm);
     if (hasOptions || hasFooter) menuSeenInGrid++;
-    log(`[t=${(i + 1) * 2}s] state: busy=${st.busy} permMenu=${st.permMenu} kind=${st.permKind} opts=${(st.permOptions || []).length} || ГРИД: опции=${hasOptions} курсор=${hasCursor} футер=${hasFooter} q-слова=${hasQword}`);
+    log(`[t=${(i + 1) * 2}s] state: busy=${st.busy} permMenu=${st.permMenu} kind=${st.permKind} opts=${(st.permOptions || []).length} TABS=${(st.permTabs || []).length}[${(st.permTabs || []).map((x) => x.label + (x.done ? '✔' : '')).join(',')}] || ГРИД: опции=${hasOptions} курсор=${hasCursor} футер=${hasFooter} q-слова=${hasQword}`);
     // ПОЛНЫЙ дамп грида при расхождении (грид показывает меню, а state — нет)
     if ((hasOptions || hasFooter) && !st.permMenu) {
       log('  ⚠ РАСХОЖДЕНИЕ: грид показывает меню, а state.permMenu=false! Грид (хвост 22):\n  ' + xtail.replace(/\n/g, '\n  '));
     }
+    // периодический дамп грида (каждые 10с) — увидеть, рисует ли claude меню или пишет текст
+    if (i % 5 === 4) log('  · грид@' + ((i + 1) * 2) + 'с (хвост 10):\n  ' + d.xterm.split('\n').filter((l) => l.trim()).slice(-10).join('\n  '));
     if (st.permMenu) { log('  ✓ state видит меню: ' + JSON.stringify((st.permOptions || []).map((o) => o.digit + '=' + o.label))); break; }
   }
   log('\n=== ИТОГ: меню в гриде видели ' + menuSeenInGrid + ' раз; state.permMenu сработал=' + ((await dump()).state?.permMenu) + ' ===');

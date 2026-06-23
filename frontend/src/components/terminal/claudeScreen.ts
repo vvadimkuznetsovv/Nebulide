@@ -55,7 +55,7 @@ export function cleanPermLabel(raw: string): string {
 
 export interface MenuOption { digit: string; label: string; raw: string; desc: string; checked?: boolean }
 export interface QuestionTab { label: string; done: boolean }
-export interface ScrapedMenu { kind: 'permission' | 'question'; multi: boolean; question: string; options: MenuOption[]; detail: string; tabs: QuestionTab[] }
+export interface ScrapedMenu { kind: 'permission' | 'question'; multi: boolean; question: string; options: MenuOption[]; detail: string; tabs: QuestionTab[]; isPlan: boolean }
 
 /** Табы мульти-вопроса AskUserQuestion: верхняя строка «←  ☐ Заголовок1  ✔️ Заголовок2  →».
  *  Даёт ЗАГОЛОВКИ вопросов и какие уже отвечены (✔️) → прогресс «вопрос N из M». */
@@ -187,7 +187,7 @@ export function scrapeMenu(buf: string): ScrapedMenu | null {
   }
   // Заголовки/прогресс мульти-вопроса — только для AskUserQuestion (не план/permission).
   const tabs = kind === 'question' && !isPlan ? scrapeQuestionTabs(lines) : [];
-  return { kind, multi, question, options, detail, tabs };
+  return { kind, multi, question, options, detail, tabs, isPlan };
 }
 
 export interface ResumeSession { name: string; meta: string; selected: boolean }
@@ -262,7 +262,10 @@ export function analyzeScreen(buf: string, prevMode: string): ScreenAnalysis {
   // Новые версии claude (2.1.18x) УБРАЛИ "esc to interrupt" из части busy-состояний — теперь
   // живая строка статуса выглядит как "✻ Billowing… (… · ↓ 3 tokens)". Поэтому busy ловим и по
   // строке статуса со счётчиком токенов (тот же паттерн, что extractWorkStatus).
-  const workRe = /[A-Za-z]+(?: [a-z]+)*(?:…|\.\.\.)\s*\([^)]*tokens[^)]*\)/g;
+  // Ловим спиннер по «Слово… (… tokens …)» ИЛИ по «Слово… (Ns …)» — первые секунды claude
+  // показывает «Contemplating… (3s)» БЕЗ счётчика токенов (токены ещё не потекли), и старый
+  // паттерн (только tokens) пропускал ~7с работы → индикатор «думает» появлялся с задержкой.
+  const workRe = /[A-Za-z]+(?: [a-z]+)*(?:…|\.\.\.)\s*\([^)]*(?:tokens|\d+s)[^)]*\)/g;
   let workIdx = -1;
   for (let m = workRe.exec(buf); m; m = workRe.exec(buf)) workIdx = m.index;
   const bi = Math.max(buf.lastIndexOf('esc to interrupt'), buf.lastIndexOf('Compacting conversation'), workIdx);

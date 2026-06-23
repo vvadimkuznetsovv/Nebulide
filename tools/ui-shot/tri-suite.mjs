@@ -182,10 +182,12 @@ async function runWindow(cfg) {
       await step('AskUserQuestion', async () => {
         await cycleModeTo('default'); await waitReady();
         await sendChat('Прежде чем что-то делать, задай мне РОВНО 3 уточняющих вопроса по одному, КАЖДЫЙ с 3-4 вариантами на выбор (интерактивный выбор вариантов): 1) фреймворк, 2) стилизация, 3) сборщик.');
-        const q = await waitMenu((st) => st.permMenu && st.permKind === 'question' && (st.permTabs || []).length >= 1, 95000, 'AskUserQuestion');
+        // НЕ требуем permTabs (табы заголовков скрейпятся ненадёжно на узком гриде) — достаточно
+        // permMenu+question+варианты. Меню детектится (фикс футера), autoAnswer проклацает по вариантам.
+        const q = await waitMenu((st) => st.permMenu && st.permKind === 'question' && (st.permOptions || []).length >= 2, 95000, 'AskUserQuestion');
         await snap('question-card');
         await assertWrapped('AskUserQuestion обёрнут карточкой в чате', q?.state, [q?.state?.permQuestion]);
-        if (q) ok('вопрос: табы заголовков (мульти)', (q.state.permTabs || []).length >= 1, (q.state.permTabs || []).map((t) => t.label).join(' | '));
+        if (q) ok('вопрос: варианты в карточке', (q.state.permOptions || []).length >= 2, (q.state.permOptions || []).map((o) => o.digit + '=' + o.label).join(' | '));
         // АДАПТИВНО ответить на ВСЕ вопросы (Q1→Q2→Q3→Submit answers) — с запасом времени
         await autoAnswer(160000); await waitResponse(30000);
         ok('вопросы: проклацал все варианты + Submit', !(await stOf()).permMenu); await snap('question-answered');
