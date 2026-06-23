@@ -179,6 +179,8 @@ func extractCustomTitles(fullPath string, fileSize int64) map[string]string {
 var cmdNameRe = regexp.MustCompile(`(?s)<command-name>\s*(.*?)\s*</command-name>`)
 var cmdArgsRe = regexp.MustCompile(`(?s)<command-args>\s*(.*?)\s*</command-args>`)
 var cmdStdoutRe = regexp.MustCompile(`(?s)<local-command-stdout>\s*(.*?)\s*</local-command-stdout>`)
+var ansiRe = regexp.MustCompile(`\x1b\[[0-9;]*m`)                  // ANSI SGR-коды (цвет/яркость) — в чате не нужны
+var compactNoticeRe = regexp.MustCompile(`(?i)^compacted\b.*summary`) // эхо /compact «Compacted (ctrl+o to see full summary)» — шум
 
 // normalizeSlashCommand сворачивает обёртку слэш-команды из JSONL в человекочитаемый вид.
 // Claude пишет команду как <command-name>/x</command-name>…<command-args>y</command-args>,
@@ -209,7 +211,10 @@ func normalizeSlashCommand(s string) string {
 	}
 	out := ""
 	if m := cmdStdoutRe.FindStringSubmatch(s); m != nil {
-		out = strings.TrimSpace(m[1])
+		out = strings.TrimSpace(ansiRe.ReplaceAllString(m[1], "")) // снять ANSI, иначе в чате «…[2m…[22m»
+		if compactNoticeRe.MatchString(out) {
+			out = "" // «Compacted (ctrl+o to see full summary)» — служебное эхо /compact, скрываем
+		}
 	}
 	switch {
 	case cmd != "" && out != "":

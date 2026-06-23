@@ -415,7 +415,7 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
   // ── Частый опрос ТЕКУЩЕГО состояния экрана claude (250мс). Надёжно — НЕ теряется при
   //    ремоунте/смене вида. Источник правды для стоп-кнопки, индикатора, resume/perm-меню. ──
   useEffect(() => {
-    const la = { busy: undefined as boolean | undefined, ws: '', resume: false, permSig: '', mode: '', rp: '' };
+    const la = { busy: undefined as boolean | undefined, ws: '', resume: false, permSig: '', mode: '', rp: '', compactActive: false, flashUntil: 0 };
     const tick = () => {
       const st = getTerminalScreenState(instanceId);
       if (!st) return;
@@ -429,7 +429,13 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
       if (st.busy !== la.busy) { la.busy = st.busy; setStatus(st.busy ? 'working' : 'ready'); }
       const ws = st.busy ? st.workStatus : '';
       if (ws !== la.ws) { la.ws = ws; setWorkStatus(ws); }
-      setProgress(st.busy ? (st.progress ?? null) : null); // React пропустит ре-рендер при том же значении
+      // Прогресс компакта: claude отдаёт estimate, который доходит лишь до ~30% и операция
+      // завершается — бар «обрывался» на 30% и пропадал (выглядело сломано). Поэтому при ЗАВЕРШЕНИИ
+      // (был прогресс, busy спал) доводим бар до 100% и держим ~800мс, затем гасим.
+      if (st.busy && st.progress != null) { la.compactActive = true; la.flashUntil = 0; setProgress(st.progress); }
+      else if (!st.busy && la.compactActive) { la.compactActive = false; la.flashUntil = Date.now() + 800; setProgress(100); }
+      else if (la.flashUntil && Date.now() < la.flashUntil) { /* держим 100% завершения */ }
+      else { la.flashUntil = 0; setProgress(st.busy ? (st.progress ?? null) : null); }
       if (st.resumeMenu !== la.resume) { la.resume = st.resumeMenu; setResumeMenu(st.resumeMenu ? { info: st.resumeInfo } : null); }
       // /resume-пикер — список сессий; сигнатура = кол-во + выбранная, чтобы перерисовывать при навигации.
       const rpSig = st.resumePicker ? st.resumePicker.sessions.length + ':' + st.resumePicker.selectedIndex + ':' + st.resumePicker.total : '';

@@ -6,7 +6,7 @@ import { pathToFileURL } from 'url';
 import { existsSync } from 'fs';
 import { resolve } from 'path';
 
-const tests = ['plan', 'compact', 'resume'];
+const tests = ['plan', 'compact', 'resume', 'resume-mobile'];
 const b = await chromium.launch({ headless: true });
 const p = await (await b.newContext({ viewport: { width: 1280, height: 1000 } })).newPage();
 const errs = [];

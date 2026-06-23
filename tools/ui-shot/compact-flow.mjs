@@ -31,6 +31,7 @@ try {
   if (!o.instanceId) throw new Error('claude не открылся');
   h.setInst(o.instanceId);
   h.log('✅ claude открыт: ' + o.instanceId + ' alive=' + o.alive);
+  await h.startRecording();
 
   h.startFrames(1500);
 
@@ -59,14 +60,32 @@ try {
     if (/compacted|сжат|summary|Compacted/i.test(xt) && !s.busy) { h.log('  ✓ компакт завершён'); break; }
     await sleep(1500);
   }
-  h.setPhase('after');
-  await h.snap('after-compact');
-  h.log(`\n=== ИТОГ: progress ловился=${sawProgress}; бар(sheen) показан=${sawBar} ===`);
+  h.setPhase('compact-done');
+  await sleep(1500);
+  await h.snap('compact-done');
+  h.log('  компакт завершён — отправляю НОВОЕ сообщение, чтобы показать, что чат продолжается');
+
+  // 3. ЧАТ ПРОДОЛЖАЕТСЯ после компакта: новый вопрос на сжатом контексте → claude отвечает.
+  h.setPhase('after-compact');
+  await h.box().click();
+  await h.box().fill('Сколько всего фактов о грибах ты привёл выше? Ответь одним числом.');
+  await h.box().press('Enter');
+  h.log('▶ новый вопрос отправлен после компакта');
+  let answered = false;
+  for (let i = 0; i < 40; i++) { // ~60с: ждём начало (busy) и завершение ответа
+    await sleep(1500);
+    const s = await h.snap('after-poll');
+    if (s.busy) answered = true; // claude начал отвечать
+    if (answered && !s.busy && s.alive) { h.log('  ✓ claude ОТВЕТИЛ после компакта — чат продолжается'); break; }
+  }
+  await h.snap('after-answer');
+  h.log(`\n=== ИТОГ: progress=${sawProgress}; бар=${sawBar}; чат продолжился после компакта=${answered} ===`);
 } catch (e) {
   h.log('FATAL: ' + e.message);
   await h.snap('fatal').catch(() => {});
 } finally {
   await h.stopFrames();
+  await h.saveRecording();
   await h.closeClaude();
   h.flush();
   await sleep(1000);
