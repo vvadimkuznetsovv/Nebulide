@@ -119,8 +119,10 @@ export const resolveLiveSession = (instanceId: string, cwd?: string, sessionId?:
   api.get<LiveSessionInfo>('/claude-sessions/live', { params: { instanceId, cwd, sessionId } });
 
 // Read messages appended after `offset` (append-only → stable incremental updates).
-export const tailClaudeSession = (project: string, sessionFile: string, offset: number) =>
+// tail=true: первичная загрузка ОТ КОНЦА файла (последнее окно) — для огромных сессий, чтобы сразу
+// видеть АКТУАЛЬНЫЕ сообщения, а не грузить с начала и «прыгать» по кускам. Инкремент — offset как есть.
+export const tailClaudeSession = (project: string, sessionFile: string, offset: number, tail = false) =>
   api.get<TailResponse>(
     `/claude-sessions/${encodeURIComponent(project)}/${encodeURIComponent(sessionFile)}/tail`,
-    { params: { offset } }
+    { params: tail ? { offset, tail: 1 } : { offset } }
   );

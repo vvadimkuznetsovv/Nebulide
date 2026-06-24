@@ -59,6 +59,14 @@ func recordLiveSession(instanceID, sessionID, cwd, transcriptPath, event string)
 	}
 	liveSess[instanceID] = liveClaudeSession{SessionID: sessionID, CWD: cwd, TranscriptPath: transcriptPath, Event: event, UpdatedAt: time.Now()}
 	liveSessMu.Unlock()
+	// ДИАГНОСТИКА «войны сессий»: логируем КАЖДУЮ смену привязки instance→session (кто кого
+	// перезатирает и каким событием). Сменился sid у инстанса = потенциальный источник скачка вида.
+	if prev.SessionID != "" && prev.SessionID != sessionID {
+		log.Printf("[LiveSess] instance=%s СМЕНА sid %s→%s event=%s prevEnded=%v prevEvent=%s cwd=%q",
+			instanceID, prev.SessionID, sessionID, event, prev.Ended, prev.Event, cwd)
+	} else {
+		log.Printf("[LiveSess] instance=%s set sid=%s event=%s cwd=%q", instanceID, sessionID, event, cwd)
+	}
 }
 
 // clearLiveSession drops the instance→session entry when claude exits (SessionEnd).
@@ -75,12 +83,15 @@ func clearLiveSession(instanceID string) {
 	// продолжит отдавать ЭТУ сессию (её JSONL ещё валиден), а не падать на «новейший-на-диске» —
 	// убирает мигание в зазоре /resume (SessionEnd→SessionStart). recordLiveSession (любое НЕ-end
 	// событие) воскрешает запись (Ended=false). По истечении грейса GetLiveSession её игнорирует.
+	endedSid := ""
 	if s, ok := liveSess[instanceID]; ok {
 		s.Ended = true
 		s.UpdatedAt = time.Now()
 		liveSess[instanceID] = s
+		endedSid = s.SessionID
 	}
 	liveSessMu.Unlock()
+	log.Printf("[LiveSess] instance=%s SessionEnd (мягкий конец, грейс %s) sid=%s", instanceID, liveEndGrace, endedSid)
 }
 
 // GetLiveSession returns the latest hook-tracked session for a terminal instance.

@@ -329,7 +329,9 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
     }
     pollingRef.current = true;
     try {
-      const { data } = await tailClaudeSession(t.project, t.sessionFile, full ? 0 : t.offset);
+      // full → грузим ХВОСТ файла (свежие сообщения), а не с начала: огромные сессии (много `claude
+      // -c` в один файл) иначе грузились с самого старого разговора и «прыгали» по кускам.
+      const { data } = await tailClaudeSession(t.project, t.sessionFile, full ? 0 : t.offset, full);
       t.offset = data.offset;
       if (data.session_id) t.sessionId = data.session_id;
       if (!data.messages.length) return;

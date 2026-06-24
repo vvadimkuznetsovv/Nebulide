@@ -1460,7 +1460,24 @@ func (h *ClaudeSessionsHandler) TailSession(c *gin.Context) {
 	if offset > size {
 		offset = 0
 	}
-	if offset == size {
+
+	// tail=1: ПЕРВИЧНАЯ загрузка ОТ КОНЦА файла (последнее окно), а не с offset 0. Огромные
+	// сессии (десятки/сотни МБ — пользователь долго гонял `claude -c` в один файл) иначе грузились
+	// с НАЧАЛА (самый старый разговор), а инкремент/перемотка шагали по 24МБ → вид «прыгал» между
+	// древними и свежими кусками одного файла (псевдо-«война двух чатов»). Хвост сразу даёт АКТУАЛЬНЫЕ
+	// сообщения (как в терминале) и не гоняет весь файл. fullLoad-реконструкция активной ветки ниже
+	// применяется и к хвостовому окну.
+	const tailWindow = 2 * 1024 * 1024 // 2MB — хватает на десятки последних сообщений активной ветки
+	tail := c.Query("tail") == "1"
+	fullLoad := offset == 0 || tail
+	readStart := offset
+	skipPartial := false
+	if tail && offset == 0 && size > tailWindow {
+		readStart = size - tailWindow
+		skipPartial = true // стартуем В СЕРЕДИНЕ строки — первую неполную строку отбросим
+	}
+
+	if !tail && offset == size {
 		c.JSON(http.StatusOK, gin.H{"messages": []richMessage{}, "offset": size, "size": size, "eof": true})
 		return
 	}
@@ -1471,7 +1488,7 @@ func (h *ClaudeSessionsHandler) TailSession(c *gin.Context) {
 		return
 	}
 	defer f.Close()
-	if _, err := f.Seek(offset, io.SeekStart); err != nil {
+	if _, err := f.Seek(readStart, io.SeekStart); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Seek failed"})
 		return
 	}
@@ -1479,14 +1496,22 @@ func (h *ClaudeSessionsHandler) TailSession(c *gin.Context) {
 	const maxRead = 24 * 1024 * 1024 // 24MB per call
 	data, _ := io.ReadAll(io.LimitReader(f, maxRead))
 
+	// Хвостовой старт попал в середину строки — отбрасываем первую неполную строку.
+	if skipPartial {
+		if k := bytes.IndexByte(data, '\n'); k >= 0 {
+			readStart += int64(k + 1)
+			data = data[k+1:]
+		}
+	}
+
 	// Only consume up to the last complete line (newline-terminated).
 	nl := bytes.LastIndexByte(data, '\n')
 	if nl < 0 {
-		c.JSON(http.StatusOK, gin.H{"messages": []richMessage{}, "offset": offset, "size": size, "eof": offset >= size})
+		c.JSON(http.StatusOK, gin.H{"messages": []richMessage{}, "offset": readStart, "size": size, "eof": readStart >= size})
 		return
 	}
 	complete := data[:nl+1]
-	newOffset := offset + int64(nl+1)
+	newOffset := readStart + int64(nl+1)
 
 	msgs := make([]richMessage, 0, 32)
 	sessionID := ""
@@ -1498,10 +1523,12 @@ func (h *ClaudeSessionsHandler) TailSession(c *gin.Context) {
 		return s
 	}
 
-	if offset == 0 {
-		// Full load → reconstruct the ACTIVE branch: path from the newest
+	if fullLoad {
+		// Full load (offset 0 ИЛИ tail-окно) → reconstruct the ACTIVE branch: path from the newest
 		// non-sidechain message up to the root via parentUuid. This drops
 		// abandoned branches (rewind) and Task subagent threads (sidechains).
+		// В tail-режиме окно частичное: цепочка обрывается на UUID вне окна → показываем последние
+		// сообщения активной ветки (этого достаточно; древняя история не нужна для огромного файла).
 		parentByUUID := make(map[string]string)
 		sidechainByUUID := make(map[string]bool)
 		msgByUUID := make(map[string]richMessage)
