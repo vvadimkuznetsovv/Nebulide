@@ -245,6 +245,12 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
     cInit ? { project: cInit.project, sessionFile: cInit.sessionFile, offset: cInit.messages?.length ? cInit.offset : 0, sessionId: cInit.sessionId, cwd: cInit.cwd } : null
   );
   const pollingRef = useRef(false);
+  // Гистерезис смены сессии: переключаемся на ДРУГУЮ авторитетную сессию только если резолвер
+  // вернул её 2 тика ПОДРЯД. Бэкенд при промахе hook-lookup на тик отдаёт устаревший sessionHint
+  // как «авторитетный» → reconcile иначе скакал бы A↔B каждую секунду (стейл-ветка ↔ живой чат).
+  // Чередующиеся A,B,A,B не наберут подтверждения → тряска гаснет; реальный форк (hook стабилен) —
+  // подтвердится 2 раза и переключит. { sid, n } — кандидат и сколько раз подряд он встретился.
+  const switchCandRef = useRef<{ sid: string; n: number }>({ sid: '', n: 0 });
   const emptyReloadRef = useRef(false); // один форс full-reload на сессию при offset>0 без сообщений
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
@@ -393,13 +399,24 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
       // открытии вида в другой папке (cur уже из кэша другой папки).
       const folderChanged = !!cur && !!data.cwd && !sameFolder(cur.cwd, data.cwd);
       if (folderChanged) {
+        // Смена папки — переключаемся СРАЗУ (это не тряска, а явная новая папка).
+        switchCandRef.current = { sid: '', n: 0 };
         rebind(null);
         bindSession(data);
       } else if (!cur) {
+        switchCandRef.current = { sid: '', n: 0 };
         bindSession(data);
       } else if (authoritative && data.session_id !== cur.sessionId) {
-        // tier-1 указал другую сессию (чужой фолбэк / перезапуск) → переключаемся.
-        bindSession(data);
+        // Другая авторитетная сессия (форк / перезапуск / стейл-hint при промахе hook).
+        // ГИСТЕРЕЗИС: переключаемся ТОЛЬКО если этот же sid пришёл 2 тика подряд — иначе
+        // чередование «живой чат ↔ старая ветка» дёргало бы вид каждую секунду.
+        const cand = switchCandRef.current;
+        const n = cand.sid === data.session_id ? cand.n + 1 : 1;
+        switchCandRef.current = { sid: data.session_id, n };
+        if (n >= 2) { switchCandRef.current = { sid: '', n: 0 }; bindSession(data); }
+      } else {
+        // Резолвер подтвердил текущую сессию → сбрасываем любого недо-подтверждённого кандидата.
+        if (switchCandRef.current.n) switchCandRef.current = { sid: '', n: 0 };
       }
     } catch { /* claude ещё не стартовал — ретраим */ }
   }, [instanceId, cwd, rebind, bindSession]);
