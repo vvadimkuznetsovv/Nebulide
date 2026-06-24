@@ -143,16 +143,6 @@ const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '').rep
 
 
 
-/** Форс БОЛЬШОГО грида (≥120×50) для claude-чат-инстансов (их экран скрейпится в чат-виде) И на
- *  узком вьюпорте (мобиль): иначе PTY рендерит ~50 колонок → футеры меню/плана/resume ПЕРЕНОСЯТСЯ,
- *  а план/список сессий обрезаются по высоте. В чат-виде xterm визуально не показан, так что
- *  большой грид «бесплатен» и нужен лишь для корректного скрейпа. Десктоп-терминал не-claude — без форса. */
-function scrapeForcedSize(instanceId: string, cols: number, rows: number): { cols: number; rows: number } {
-  const force = instanceId.startsWith('claude-') || (typeof window !== 'undefined' && window.innerWidth < 640);
-  if (!force) return { cols, rows };
-  return { cols: Math.max(cols || 0, 120), rows: Math.max(rows || 0, 50) };
-}
-
 /** Чистый рендер-грид xterm (ровные строки, как tmux capture-pane) — в отличие от сырого
  *  rawTail, где TUI-перерисовки курсором после strip-ANSI СЛИПАЮТСЯ в одну строку. Нужен для
  *  ПОСТРОЧНОГО скрейпа меню. Буфер xterm наполняется и без смонтированного DOM (createXterm
@@ -653,7 +643,7 @@ async function connectWs(instanceId: string): Promise<void> {
       session.fitAddon.fit();
       const proposed = session.fitAddon.proposeDimensions();
       if (proposed && proposed.cols >= 1 && proposed.rows >= 1) {
-        const dims = scrapeForcedSize(instanceId, proposed.cols, proposed.rows); // форс ≥120×50 для скрейпа
+        const dims = { cols: proposed.cols, rows: proposed.rows }; // СМОНТИРОВАННЫЙ терминал — реальный fit (форс 120×50 только в headless-fallback ниже, иначе инпут уезжает за кадр)
         try { session.xterm.resize(dims.cols, dims.rows); } catch { /* headless-xterm подгоняем под PTY */ }
         session.lastCols = dims.cols;
         session.lastRows = dims.rows;
@@ -680,7 +670,7 @@ async function connectWs(instanceId: string): Promise<void> {
         session.fitAddon.fit();
         const proposed = session.fitAddon.proposeDimensions();
         if (proposed && proposed.cols >= 1 && proposed.rows >= 1) {
-          const dims = scrapeForcedSize(instanceId, proposed.cols, proposed.rows);
+          const dims = { cols: proposed.cols, rows: proposed.rows };
           if (Math.abs(dims.cols - session.lastCols) > 1 || Math.abs(dims.rows - session.lastRows) > 1) {
             try { session.xterm.resize(dims.cols, dims.rows); } catch { /* */ }
             session.lastCols = dims.cols;
@@ -1033,7 +1023,7 @@ export default function TerminalComponent({ instanceId, active, persistent }: Te
       s.fitAddon.fit();
       const proposed = s.fitAddon.proposeDimensions();
       if (!proposed || proposed.cols < 1 || proposed.rows < 1) return;
-      const dims = scrapeForcedSize(instanceId, proposed.cols, proposed.rows); // claude-чат/мобиль → ≥120×50
+      const dims = { cols: proposed.cols, rows: proposed.rows }; // смонтированный терминал — реальный fit под контейнер
       if (Math.abs(dims.cols - s.lastCols) > 1 || Math.abs(dims.rows - s.lastRows) > 1) {
         try { s.xterm.resize(dims.cols, dims.rows); } catch { /* */ }
         s.lastCols = dims.cols;
