@@ -1317,23 +1317,33 @@ func (h *ClaudeSessionsHandler) ResolveLive(c *gin.Context) {
 	// 0) ТОЧНЫЙ путь к JSONL из хука (transcript_path) — самый надёжный источник: claude сам
 	// сообщил, ГДЕ файл сессии. Не угадываем слаг из cwd (ломалось на git-руте, регистре буквы
 	// диска на Windows, смене версий claude). Авторитетно (инстанс совпал), кроме staleHook.
-	if hookTranscript != "" && !staleHook {
-		if st, err := os.Stat(hookTranscript); err == nil && !st.IsDir() &&
-			strings.HasPrefix(filepath.Clean(hookTranscript), filepath.Clean(projectsDir)) {
-			project := filepath.Base(filepath.Dir(hookTranscript))
-			sessionFile := strings.TrimSuffix(filepath.Base(hookTranscript), ".jsonl")
-			respond("tier0-transcript", project, sessionFile, hookSid, hookCwd)
-			return
-		}
+	// ВАЖНО: файла может ЕЩЁ НЕ БЫТЬ на диске. claude только что создал НОВУЮ сессию (SessionStart
+	// уже выстрелил хуком), а юзер ещё ничего не написал → JSONL пуст/не сброшен. Раньше tier0/tier1
+	// ТРЕБОВАЛИ существующий файл и при промахе падали в «новейший JSONL папки» → воскрешали СТАРУЮ
+	// сессию (баг: «открыл новый чат, а показывается старый монстр»; вид скакал пусто↔старьё). Живой
+	// хук — самый авторитетный источник: claude САМ сообщил свою сессию для ЭТОГО инстанса. Отдаём её
+	// БЕЗ проверки наличия файла; TailSession на отсутствующий файл вернёт пустой чат (новый чат).
+	if hookTranscript != "" && !staleHook &&
+		strings.HasSuffix(hookTranscript, ".jsonl") &&
+		strings.HasPrefix(filepath.Clean(hookTranscript), filepath.Clean(projectsDir)) {
+		project := filepath.Base(filepath.Dir(hookTranscript))
+		sessionFile := strings.TrimSuffix(filepath.Base(hookTranscript), ".jsonl")
+		respond("tier0-transcript", project, sessionFile, hookSid, hookCwd)
+		return
 	}
 
 	if hookOk && hookSid != "" && hookCwd != "" && !staleHook {
 		slug := workspaceSlug(hookCwd)
-		if file := sessionFileBySessionID(filepath.Join(projectsDir, slug), hookSid); file != "" {
-			respond("tier1-hook", slug, file, hookSid, hookCwd)
-			return
+		// Нашли файл по sid — отлично (учитывает sid≠имя файла). Не нашли (новая сессия ещё не
+		// записана) — отдаём КАНОНИЧЕСКИЙ путь по sid: <slug>/<sid>.jsonl. В любом случае это ЖИВАЯ
+		// сессия терминала из хука, а НЕ старый JSONL из фолбэка.
+		file := sessionFileBySessionID(filepath.Join(projectsDir, slug), hookSid)
+		if file == "" {
+			file = hookSid
+			log.Printf("[ResolveLive] tier1: sid=%s файла ещё нет — отдаём новую (пустую) сессию по sid", hookSid)
 		}
-		log.Printf("[ResolveLive] tier1 miss: dir=%s sid=%s not found on disk", slug, hookSid)
+		respond("tier1-hook", slug, file, hookSid, hookCwd)
+		return
 	} else if staleHook {
 		log.Printf("[ResolveLive] tier1 SKIP (stale hook for другой папки): hookSid=%s hookCwd=%q hint=%s cwd=%q",
 			hookSid, hookCwd, sessionHint, cwdHint)
@@ -1435,6 +1445,12 @@ func (h *ClaudeSessionsHandler) TailSession(c *gin.Context) {
 
 	fi, err := os.Stat(fullPath)
 	if err != nil {
+		// Файла ещё нет: резолвер привязал НОВУЮ сессию из хука (claude её создал, юзер ещё не писал).
+		// Это НЕ ошибка — отдаём ПУСТОЙ чат (200), фронт покажет «новый пустой чат», а не ошибку/retry.
+		if os.IsNotExist(err) {
+			c.JSON(http.StatusOK, gin.H{"messages": []richMessage{}, "offset": 0, "size": 0, "eof": true})
+			return
+		}
 		c.JSON(http.StatusNotFound, gin.H{"error": "Session not found"})
 		return
 	}
