@@ -506,7 +506,12 @@ function createXterm(instanceId: string): TermSession {
   // AFTER xterm.open(), because xterm.textarea doesn't exist until then.
 
   // onData closes over session.ws (mutable field on the session object)
-  xterm.onData((data) => {
+  xterm.onData((rawData) => {
+    // ЖЁСТКАЯ ЗАЩИТА ОТ MOUSE-СПАМА: claude в fullscreen/flicker-free включает mouse-tracking → xterm
+    // шлёт в PTY коды мыши («\x1b[<35;col;rowM» SGR / «\x1b[M…» X10), шелл их ЭХАЕТ → терминал залит
+    // спамом и неюзабелен. Мышь в веб-обёртке не нужна — ВЫРЕЗАЕМ мышиные коды, в PTY они не уходят.
+    const data = rawData.replace(/\x1b\[<\d+;\d+;\d+[Mm]/g, '').replace(/\x1b\[M[\s\S]{3}/g, '');
+    if (!data) return; // был только мышиный код — ничего не шлём
     // Debug: log escape sequences going to PTY (DA responses, focus reports, etc.)
     if (data.includes('\x1b')) {
       const escaped = JSON.stringify(data).slice(1, -1);
