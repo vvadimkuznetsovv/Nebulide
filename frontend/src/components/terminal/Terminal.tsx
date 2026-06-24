@@ -143,6 +143,22 @@ const stripAnsi = (s: string) => s.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '').rep
 
 
 
+// Коды ВКЛЮЧЕНИЯ мыши/фокуса от приложения (claude в fullscreen/flicker-free шлёт «\x1b[?1003h» и пр.):
+// из-за них xterm уходит в режим «мышь-для-приложения» → пропадает локальное ВЫДЕЛЕНИЕ/КОПИРОВАНИЕ
+// текста мышью, и движения мыши флудят PTY. Мышь в веб-обёртке не нужна — ВЫРЕЗАЕМ эти коды из
+// ВХОДЯЩЕГО потока (PTY→xterm), чтобы xterm всегда оставался в обычном режиме (выделение работает).
+const MOUSE_ENABLE_RE = /\x1b\[\?(1000|1001|1002|1003|1004|1005|1006|1015|1016)h/g;
+function stripMouseEnableBytes(u8: Uint8Array): Uint8Array {
+  let has = false;
+  for (let i = 0; i + 2 < u8.length; i++) { if (u8[i] === 0x1b && u8[i + 1] === 0x5b && u8[i + 2] === 0x3f) { has = true; break; } }
+  if (!has) return u8; // нет «\x1b[?» — быстрый путь
+  let s = ''; for (let i = 0; i < u8.length; i++) s += String.fromCharCode(u8[i]); // latin1: байты не корёжатся
+  const c = s.replace(MOUSE_ENABLE_RE, '');
+  if (c.length === s.length) return u8;
+  const out = new Uint8Array(c.length); for (let i = 0; i < c.length; i++) out[i] = c.charCodeAt(i) & 0xff;
+  return out;
+}
+
 /** Чистый рендер-грид xterm (ровные строки, как tmux capture-pane) — в отличие от сырого
  *  rawTail, где TUI-перерисовки курсором после strip-ANSI СЛИПАЮТСЯ в одну строку. Нужен для
  *  ПОСТРОЧНОГО скрейпа меню. Буфер xterm наполняется и без смонтированного DOM (createXterm
@@ -632,6 +648,9 @@ async function connectWs(instanceId: string): Promise<void> {
     opened = true;
     log(`[Terminal] ws.onopen id=${instanceId} url=${url.replace(/token=[^&]+/, 'token=***')}`);
     session.xterm.write(_green('[WS] Connected!') + '\r\n');
+    // СБРОС mouse-режима на коннекте: если claude ранее включил мышь (xterm в «мышь-для-приложения» →
+    // нет выделения текста), принудительно выключаем все mouse/focus-режимы — выделение снова работает.
+    session.xterm.write('\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1004l\x1b[?1006l\x1b[?1015l\x1b[?1016l');
     session.reconnectAttempts = 0;
     // Reset streaming detection — stale streamActive/streamEndTimer from the
     // previous connection would keep the pet stuck in "working"
@@ -699,14 +718,14 @@ async function connectWs(instanceId: string): Promise<void> {
           log(`[Terminal] ws.onmessage id=${instanceId} bytes=${event.data.byteLength} contains_escape_or_1;2c raw=${JSON.stringify(txt).slice(0, 300)}`);
         }
       }
-      session.xterm.write(new Uint8Array(event.data));
+      session.xterm.write(stripMouseEnableBytes(new Uint8Array(event.data))); // режем коды включения мыши
       session.rawTail = (session.rawTail + stripAnsi(new TextDecoder().decode(event.data))).slice(-16384);
       emitActivity({ type: 'terminal_data', instanceId, byteCount: event.data.byteLength });
     } else {
       if (event.data.length < 200 && (event.data.includes('\x1b[') || event.data.includes('1;2c'))) {
         log(`[Terminal] ws.onmessage id=${instanceId} bytes=${event.data.length} contains_escape_or_1;2c raw=${JSON.stringify(event.data).slice(0, 300)}`);
       }
-      session.xterm.write(event.data);
+      session.xterm.write(event.data.replace(MOUSE_ENABLE_RE, '')); // режем коды включения мыши
       session.rawTail = (session.rawTail + stripAnsi(event.data)).slice(-16384);
       emitActivity({ type: 'terminal_data', instanceId, byteCount: event.data.length });
     }
