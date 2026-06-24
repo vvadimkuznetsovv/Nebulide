@@ -1467,7 +1467,7 @@ func (h *ClaudeSessionsHandler) TailSession(c *gin.Context) {
 	// древними и свежими кусками одного файла (псевдо-«война двух чатов»). Хвост сразу даёт АКТУАЛЬНЫЕ
 	// сообщения (как в терминале) и не гоняет весь файл. fullLoad-реконструкция активной ветки ниже
 	// применяется и к хвостовому окну.
-	const tailWindow = 2 * 1024 * 1024 // 2MB — хватает на десятки последних сообщений активной ветки
+	// tailWindow — package-var (hooks.go): окно больше самой длинной строки JSONL (base64-блобы 9-10МБ).
 	tail := c.Query("tail") == "1"
 	fullLoad := offset == 0 || tail
 	readStart := offset

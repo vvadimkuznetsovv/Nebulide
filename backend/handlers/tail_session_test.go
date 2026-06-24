@@ -30,6 +30,10 @@ func msgLine(uuid, parent, role, text string) string {
 // свежие сообщения видны сразу, древнее начало (вне окна) НЕ показывается.
 func TestTailSession_TailLoadsRecentNotAncient(t *testing.T) {
 	gin.SetMode(gin.TestMode)
+	// Ужимаем хвостовое окно, чтобы небольшой тест-файл (~2.7МБ) триггерил tail-режим (в проде 12МБ).
+	origWindow := tailWindow
+	tailWindow = 512 * 1024
+	defer func() { tailWindow = origWindow }()
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)

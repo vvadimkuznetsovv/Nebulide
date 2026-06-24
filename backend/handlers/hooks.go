@@ -44,6 +44,12 @@ var (
 	liveEndGrace = 30 * time.Second
 )
 
+// tailWindow — размер хвостового окна для tail=1 (см. TailSession). ДОЛЖЕН быть больше самой
+// длинной строки JSONL (в сессиях claude встречаются строки по 9–10МБ: вкрученные base64-картинки/
+// rrweb-записи). Иначе окно может целиком попасть ВНУТРЬ одной гигантской строки → ни одной целой
+// строки → пустой хвост → вид показывает старое из кэша. var (не const) — тест ужимает для маленьких файлов.
+var tailWindow int64 = 12 * 1024 * 1024
+
 // recordLiveSession is called on every hook event to keep the instance→session map fresh.
 func recordLiveSession(instanceID, sessionID, cwd, transcriptPath, event string) {
 	if instanceID == "" || sessionID == "" {

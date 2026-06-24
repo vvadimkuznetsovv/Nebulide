@@ -245,6 +245,11 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
     cInit ? { project: cInit.project, sessionFile: cInit.sessionFile, offset: cInit.messages?.length ? cInit.offset : 0, sessionId: cInit.sessionId, cwd: cInit.cwd } : null
   );
   const pollingRef = useRef(false);
+  // Первичная загрузка вида ДОЛЖНА тянуть ХВОСТ (свежие сообщения), а не инкремент со старого
+  // кэш-offset: иначе при открытии огромной сессии (126МБ, много `claude -c`) вид показывает
+  // ДРЕВНИЙ кусок из tailCache и крутит инкремент со старого места, а tail-загрузка (bindSession)
+  // не срабатывает, если сессия не «сменилась». Один форс хвоста на монтирование.
+  const initialTailRef = useRef(false);
   // Гистерезис смены сессии: переключаемся на ДРУГУЮ авторитетную сессию только если резолвер
   // вернул её 2 тика ПОДРЯД. Бэкенд при промахе hook-lookup на тик отдаёт устаревший sessionHint
   // как «авторитетный» → reconcile иначе скакал бы A↔B каждую секунду (стейл-ветка ↔ живой чат).
@@ -449,7 +454,10 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
   }, [reconcile, cwd, rebind]);
 
   useEffect(() => {
-    poll();
+    // Первый poll на монтировании — ХВОСТ (full=true → tail), чтобы сразу показать актуальный
+    // конец, а не древний кусок из кэша. Дальше — обычный инкремент.
+    if (!initialTailRef.current) { initialTailRef.current = true; poll(true); }
+    else poll();
     const id = setInterval(() => poll(), POLL_MS);
     return () => clearInterval(id);
   }, [status, poll]);
