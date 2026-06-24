@@ -128,6 +128,14 @@ export function scrapeMenu(buf: string): ScrapedMenu | null {
     if (/^\s*[❯>]?\s*1\.\s/.test(lines[i])) { firstOptIdx = i; break; }
   }
   if (firstOptIdx < 0) return null;
+  // КУРСОР ОБЯЗАТЕЛЕН: реальное select-меню claude ВСЕГДА рисует ❯ на активном пункте
+  // (проверено на всех фикстурах: permission/question/plan/multiselect/effort — ровно один ❯).
+  // Свободный нумерованный текст, который ЮЗЕР сам напечатал (ответ в «Other»/обычный ввод
+  // вида «1. …\n2. …»), курсора НЕ имеет. Без этой проверки footer-путь ловил такой текст как
+  // меню: «hardest tasks.» как вопрос + строки ответа юзера как опции (баг — данные юзера в меню).
+  let hasCursor = false;
+  for (let i = firstOptIdx; i < footerIdx; i++) { if (lines[i].indexOf('❯') >= 0) { hasCursor = true; break; } }
+  if (!hasCursor) return null;
   // Все пункты 1..N (многоцифровые) + их описания (отступ-строки под пунктом).
   const options: MenuOption[] = [];
   let cur: MenuOption | null = null;

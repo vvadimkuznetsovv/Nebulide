@@ -87,6 +87,16 @@ describe('scrapeMenu — question / plan / multiselect', () => {
     expect(m.question).toBe('Change effort level?');
     expect(m.detail).toContain('cached');
   });
+
+  it('НЕ принимает свободный нумерованный текст ЮЗЕРА за меню (нет курсора ❯ → не опции)', () => {
+    // Регресс: юзер напечатал ответ «1. …\n2. …» (текст, НЕ select-меню). Footer «Enter to select»
+    // присутствует, но курсора ❯ НЕТ ни на одном пункте → это НЕ живое меню claude.
+    // Раньше footer-путь ловил это как question: «hardest tasks.» как вопрос, строки юзера как опции.
+    const m = scrapeMenu(fx('freetext-numbered-not-menu.txt'));
+    expect(m).toBeNull();
+    // и весь анализ экрана не должен показывать меню
+    expect(analyzeScreen(fx('freetext-numbered-not-menu.txt'), 'default').menu).toBeNull();
+  });
 });
 
 describe('scrapeResumePicker — /resume список сессий', () => {
