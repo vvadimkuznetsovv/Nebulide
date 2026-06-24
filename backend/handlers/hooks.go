@@ -30,11 +30,18 @@ type liveClaudeSession struct {
 	TranscriptPath string // точный путь к JSONL от claude — резолв берёт его напрямую
 	Event          string
 	UpdatedAt      time.Time
+	Ended          bool // SessionEnd пришёл, но держим запись короткий грейс (см. liveEndGrace)
 }
 
 var (
 	liveSessMu sync.RWMutex
 	liveSess   = map[string]liveClaudeSession{} // instanceID → latest session info
+	// Грейс после SessionEnd: НЕ забываем сессию мгновенно. /resume = SessionEnd старой →
+	// SessionStart новой; в зазоре между ними карта иначе пуста → резолвер падает на
+	// «новейший-на-диске» (чужая старая сессия) → мигание после /resume. Держим только-что-
+	// закрытую сессию, пока новый SessionStart её не перезапишет; по истечении грейса — забываем
+	// (терминал реально мёртв). var (не const) — тест ужимает грейс для проверки истечения.
+	liveEndGrace = 30 * time.Second
 )
 
 // recordLiveSession is called on every hook event to keep the instance→session map fresh.
@@ -64,15 +71,29 @@ func clearLiveSession(instanceID string) {
 		return
 	}
 	liveSessMu.Lock()
-	delete(liveSess, instanceID)
+	// Мягкий конец: НЕ удаляем запись, а помечаем Ended + ставим время. Резолв в течение грейса
+	// продолжит отдавать ЭТУ сессию (её JSONL ещё валиден), а не падать на «новейший-на-диске» —
+	// убирает мигание в зазоре /resume (SessionEnd→SessionStart). recordLiveSession (любое НЕ-end
+	// событие) воскрешает запись (Ended=false). По истечении грейса GetLiveSession её игнорирует.
+	if s, ok := liveSess[instanceID]; ok {
+		s.Ended = true
+		s.UpdatedAt = time.Now()
+		liveSess[instanceID] = s
+	}
 	liveSessMu.Unlock()
 }
 
 // GetLiveSession returns the latest hook-tracked session for a terminal instance.
+// Ended-сессию отдаём только в течение liveEndGrace (см. clearLiveSession): во время /resume
+// держим только-что-закрытую сессию, но «мёртвый» терминал (грейс истёк) забываем → резолв уходит
+// в cwd/hint-фолбэк, а не показывает древний закрытый чат вечно.
 func GetLiveSession(instanceID string) (sessionID, cwd, transcriptPath string, ok bool) {
 	liveSessMu.RLock()
 	defer liveSessMu.RUnlock()
 	if s, found := liveSess[instanceID]; found {
+		if s.Ended && time.Since(s.UpdatedAt) > liveEndGrace {
+			return "", "", "", false
+		}
 		return s.SessionID, s.CWD, s.TranscriptPath, true
 	}
 	return "", "", "", false
