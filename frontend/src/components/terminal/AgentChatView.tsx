@@ -509,21 +509,9 @@ export default function ClaudeChatView({ instanceId, cwd, onRequestTerminal, tog
     return () => clearInterval(iv);
   }, [instanceId, poll]);
 
-  // ── Авто-скрейп НЕДЕЛЬНОГО usage: недельный лимит claude НЕ отдаёт машиночитаемо — единственный
-  //    источник это экран /usage. Раз в ~25 мин (и через ~25с после открытия) шлём /usage, КОГДА
-  //    claude idle, через 1.8с закрываем экран (Escape). 250мс-скан между этим поймает /usage →
-  //    usageCur → индикатор monster. Не шлём при busy/меню (иначе уйдёт в очередь). ──
-  useEffect(() => {
-    const scrapeUsage = () => {
-      const s = getTerminalScreenState(instanceId);
-      if (!s || !s.alive || s.busy || s.permMenu || s.resumePicker || s.resumeMenu) return; // только idle
-      submitPromptToTerminal(instanceId, '/usage');
-      setTimeout(() => sendToTerminal(instanceId, '\x1b'), 1800); // закрыть /usage-экран
-    };
-    const first = window.setTimeout(scrapeUsage, 25000);
-    const iv = window.setInterval(scrapeUsage, 25 * 60 * 1000);
-    return () => { clearTimeout(first); clearInterval(iv); };
-  }, [instanceId]);
+  // ── Недельный usage для индикатора monster ловим ОППОРТУНИСТИЧЕСКИ: 250мс-скан поймает /usage-экран,
+  //    когда пользователь САМ откроет /usage (usageCur обновится). Авто-отправка /usage УБРАНА: она
+  //    слала команду за спиной и оставляла терминал в режиме mouse-tracking → флуд escape-кодов мыши. ──
 
   useEffect(() => {
     const sc = scrollRef.current;
