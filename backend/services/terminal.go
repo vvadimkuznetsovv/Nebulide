@@ -534,6 +534,10 @@ func (s *TerminalService) createLocked(sessionKey string, workingDir string, san
 		env = append(env, "PROMPT_COMMAND=history -a; history -r")
 	}
 	env = append(env, "TERM=xterm-256color", "COLORTERM=truecolor")
+	// Claude в fullscreen/flicker-free включает ЗАХВАТ МЫШИ → в обёрнутом xterm движения мыши флудят
+	// терминал escape-кодами (\x1b[<35;col;rowM). Мышь в веб-обёртке всё равно не нужна — выключаем
+	// захват, чтобы спама не было ни при каком режиме рендера. (CLAUDE_CODE_DISABLE_MOUSE — офиц. флаг.)
+	env = append(env, "CLAUDE_CODE_DISABLE_MOUSE=1")
 
 	for k, v := range extraEnv {
 		env = append(env, k+"="+v)

@@ -158,6 +158,27 @@ export function makeHarness(p, { dir }) {
     } catch (e) { log('\n[closeClaude] kill не удался: ' + e.message); }
   };
 
+  // ОТСЛЕЖИВАНИЕ АНОМАЛИЙ ТЕРМИНАЛА — ловит класс багов «терминал загажен»: mouse-tracking-флуд
+  // (\x1b[<col;rowM или стрипнутые координаты «35;60;M»), включение мыши, флуд control-кодов.
+  // Возвращает { clean, anomalies[] }. Тест вызывает в конце → падает, если терминал грязный.
+  const checkHygiene = async () => {
+    const raw = await p.evaluate((id) => (window.__nebScreen && window.__nebScreen(id)?.rawTailTail) || '', inst);
+    const xt = await p.evaluate((id) => (window.__nebScreen && window.__nebScreen(id)?.xtermScreen) || '', inst);
+    const anomalies = [];
+    const sgrMouse = (raw.match(/\x1b\[<\d+;\d+;\d+[Mm]/g) || []).length;        // SGR mouse (сырой)
+    const x10Mouse = (raw.match(/\x1b\[M[\s\S]{3}/g) || []).length;              // X10 mouse
+    const coordFlood = (xt.match(/\b\d{1,3};\d{1,3};\d{0,3}M\d/g) || []).length  // стрипнутый mouse-флуд
+      + (xt.match(/(?:\d{1,3};){3,}\d{1,3}M/g) || []).length;
+    const mouseEnable = (raw.match(/\x1b\[\?100[0356]h/g) || []).length;         // включение мыши
+    if (sgrMouse > 3) anomalies.push(`SGR-mouse-трекинг ×${sgrMouse}`);
+    if (x10Mouse > 3) anomalies.push(`X10-mouse ×${x10Mouse}`);
+    if (coordFlood > 5) anomalies.push(`mouse-координаты-флуд ×${coordFlood}`);
+    if (mouseEnable > 0) anomalies.push(`включение mouse-tracking (\\x1b[?1000/1003/1006h ×${mouseEnable})`);
+    const clean = anomalies.length === 0;
+    log(`\n🧪 HYGIENE: ${clean ? '✓ ЧИСТО' : '✗ ГРЯЗНО: ' + anomalies.join(' ; ')} (sgrMouse=${sgrMouse} coordFlood=${coordFlood} mouseEnable=${mouseEnable})`);
+    return { clean, anomalies, sgrMouse, coordFlood, mouseEnable };
+  };
+
   const flush = () => { writeFileSync(`${dir}/log.txt`, LOG); console.log(`\n📝 лог → ${dir}/log.txt`); };
 
   // rrweb: инжектим рекордер в страницу (после openClaude — SPA стабилен, без перезагрузок), копим
@@ -191,5 +212,5 @@ export function makeHarness(p, { dir }) {
     } catch (e) { log('[rrweb] сохранение не удалось: ' + e.message); }
   };
 
-  return { setInst, setPhase, log, st, xterm, dom, logFrame, snap, startFrames, stopFrames, box, closeClaude, flush, startRecording, saveRecording };
+  return { setInst, setPhase, log, st, xterm, dom, logFrame, snap, startFrames, stopFrames, box, closeClaude, flush, startRecording, saveRecording, checkHygiene };
 }
