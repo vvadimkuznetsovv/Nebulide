@@ -38,6 +38,13 @@ type Config struct {
 	TelegramAPIURL   string
 
 	NvidiaAPIKey string
+
+	// GLM (Z.ai) provider — Anthropic-совместимый эндпоинт для запуска claude на GLM.
+	// Ключ глобальный (общий для всех юзеров), в БД не светим. Пустой ZaiAPIKey => режим
+	// GLM тихо недоступен (фолбэк на Anthropic).
+	ZaiAPIKey  string
+	ZaiBaseURL string
+	ZaiModel   string
 }
 
 func Load() *Config {
@@ -72,6 +79,10 @@ func Load() *Config {
 		TelegramAPIURL:   getEnv("TELEGRAM_API_URL", ""),
 
 		NvidiaAPIKey: getEnv("NVIDIA_API_KEY", ""),
+
+		ZaiAPIKey:  getEnv("ZAI_API_KEY", ""),
+		ZaiBaseURL: getEnv("ZAI_BASE_URL", "https://api.z.ai/api/anthropic"),
+		ZaiModel:   getEnv("ZAI_MODEL", "glm-5.2"),
 	}
 }
 

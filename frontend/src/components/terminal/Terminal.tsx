@@ -15,6 +15,8 @@ import { usePetStore } from '../../store/petStore';
 import api from '../../api/client';
 import toast from 'react-hot-toast';
 import { log } from '../../utils/logger';
+import { getTerminalProvider, setTerminalProvider, getTerminalCwdHint, type ClaudeProvider } from '../../utils/terminalViewMode';
+import { buildCdClaudeCmd, fetchServerOs } from '../../utils/serverOs';
 
 // ── Clipboard helper: first readText() on mobile may fail (permission not yet initialized) ──
 
@@ -281,6 +283,14 @@ if (typeof window !== 'undefined') {
     if (!s) return { error: 'no session for ' + id, sessions: ids };
     return { sessions: ids, state: getTerminalScreenState(id), xtermScreen: xtermScreenText(s), rawTailTail: s.rawTail.slice(-1000) };
   };
+}
+
+/** Сырой ВИДИМЫЙ текст терминала (грид xterm + хвост скроллбэка) — для скрейп-матча: «найти
+ *  ЭТОТ текст в сессии» (кнопка обновления чата). Источник истины = то, что юзер реально видит. */
+export function getTerminalText(instanceId: string): string {
+  const s = sessions.get(instanceId);
+  if (!s) return '';
+  return xtermScreenText(s) || s.rawTail || '';
 }
 
 // Частый скан экрана всех сессий (каждые 250мс) — обновляет ТЕКУЩЕЕ состояние сессий.
@@ -635,7 +645,11 @@ async function connectWs(instanceId: string): Promise<void> {
     wsId = 'default';
   }
   const wsInstanceId = `${instanceId}@ws:${wsId}`;
-  const url = `${protocol}//${window.location.host}/ws/terminal?token=${token}&instanceId=${encodeURIComponent(wsInstanceId)}`;
+  // Провайдер модели: GLM (Z.ai) прокидываем в бэк (?provider=glm) → он вольёт ANTHROPIC_* в env PTY.
+  // Anthropic (дефолт) param не шлём — обычный claude.
+  const provider = getTerminalProvider(instanceId);
+  const providerParam = provider !== 'anthropic' ? `&provider=${provider}` : '';
+  const url = `${protocol}//${window.location.host}/ws/terminal?token=${token}&instanceId=${encodeURIComponent(wsInstanceId)}${providerParam}`;
   log(`[Terminal] connectWs id=${instanceId} attempt=${session.reconnectAttempts}`);
 
   const ws = new WebSocket(url);
@@ -909,6 +923,58 @@ export function destroyTerminalSession(instanceId: string): void {
 
   // Kill backend PTY session (fire-and-forget)
   api.delete(`/terminals/${encodeURIComponent(instanceId)}`).catch(() => {});
+}
+
+/** Перезапустить терминал под другим провайдером модели (Anthropic ⇄ GLM).
+ *  env провайдера применяется ТОЛЬКО на свежем PTY (GetOrCreate переиспользует живой shell),
+ *  поэтому: убиваем backend-PTY → переподнимаем WS с новым ?provider= → заново шлём `cd папка && claude`.
+ *  В отличие от destroyTerminalSession НЕ трогаем xterm/номер/pet — это та же панель, та же папка.
+ *  launchCmd по умолчанию = `cd "<cwd>" && claude` (модель ставится env'ом ДО старта claude). */
+const respawningInstances = new Set<string>();
+
+export async function respawnTerminalWithProvider(
+  instanceId: string,
+  provider: ClaudeProvider,
+  launchCmd?: string,
+): Promise<void> {
+  // Гард от гонки: быстрые повторные клики Z/Anthropic иначе запустят несколько respawn'ов
+  // параллельно (двойной connectWs / двойной `cd && claude`). Один respawn за раз на instance.
+  if (respawningInstances.has(instanceId)) return;
+  const session = sessions.get(instanceId);
+  if (!session) return;
+  respawningInstances.add(instanceId);
+  try {
+    await doRespawn(instanceId, session, provider, launchCmd);
+  } finally {
+    respawningInstances.delete(instanceId);
+  }
+}
+
+async function doRespawn(
+  instanceId: string,
+  session: TermSession,
+  provider: ClaudeProvider,
+  launchCmd?: string,
+): Promise<void> {
+  setTerminalProvider(instanceId, provider);
+
+  if (session.reconnectTimer) {
+    clearTimeout(session.reconnectTimer);
+    session.reconnectTimer = null;
+  }
+  if (session.ws) {
+    session.ws.close();
+    session.ws = null;
+  }
+  session.reconnectAttempts = 0;
+  // Убить живой PTY, чтобы GetOrCreate создал НОВЫЙ shell с провайдерским env.
+  await api.delete(`/terminals/${encodeURIComponent(instanceId)}`).catch(() => {});
+  session.xterm.clear();
+  await new Promise((r) => setTimeout(r, 400)); // дать бэку дотушить старую сессию
+  await connectWs(instanceId);                  // новый PTY: ?provider= уже в URL
+  await fetchServerOs();
+  const cmd = launchCmd ?? buildCdClaudeCmd(getTerminalCwdHint(instanceId), 'claude');
+  await sendCommandWhenReady(instanceId, cmd);
 }
 
 // ── React component ──

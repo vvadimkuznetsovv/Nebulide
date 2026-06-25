@@ -6,7 +6,12 @@ import { useSyncExternalStore } from 'react';
 
 export type TerminalViewMode = 'terminal' | 'chat';
 
+// Провайдер модели per-instance: Anthropic (дефолт) или GLM (Z.ai). Решает, какой ANTHROPIC_*
+// env уйдёт в PTY (см. бэк providerEnv). Фронт прокидывает его в WS-URL (?provider=glm).
+export type ClaudeProvider = 'anthropic' | 'glm';
+
 const modes = new Map<string, TerminalViewMode>();
+const providers = new Map<string, ClaudeProvider>();
 const cwdHints = new Map<string, string>();
 // Instances launched in a possibly-untrusted (new) folder. Claude shows a
 // "Is this a project you trust?" prompt as its FIRST screen there, which blocks
@@ -36,6 +41,16 @@ export function setTerminalViewMode(instanceId: string, mode: TerminalViewMode) 
 export function setInitialTerminalViewMode(instanceId: string, mode: TerminalViewMode) {
   if (modes.has(instanceId)) return;
   modes.set(instanceId, mode);
+  bump();
+}
+
+export function getTerminalProvider(instanceId: string): ClaudeProvider {
+  return providers.get(instanceId) ?? 'anthropic';
+}
+
+export function setTerminalProvider(instanceId: string, provider: ClaudeProvider) {
+  if (providers.get(instanceId) === provider) return;
+  providers.set(instanceId, provider);
   bump();
 }
 
@@ -74,6 +89,7 @@ export function consumeTrustPending(instanceId: string) {
 
 export function clearTerminalViewMode(instanceId: string) {
   modes.delete(instanceId);
+  providers.delete(instanceId);
   cwdHints.delete(instanceId);
   trustPending.delete(instanceId);
   sessionHints.delete(instanceId);
@@ -89,23 +105,46 @@ export function useTerminalViewModeVersion(): number {
   return useSyncExternalStore(subscribe, () => version, () => version);
 }
 
-// ── Default mode for newly launched Claude sessions (user preference) ──
+// ── Default launch mode for newly opened Claude sessions (user preference) ──
+//
+// Тройной выбор «Открывать как»: Anthropic (терминал + Anthropic), интерфейс (чат-лента),
+// Z (терминал + GLM). Собирает в одном переключателе ДВЕ оси — вид (терминал/чат) и провайдера.
 
-const OPEN_MODE_KEY = 'nebulide-claude-open-mode';
-let openMode: TerminalViewMode =
-  (localStorage.getItem(OPEN_MODE_KEY) as TerminalViewMode) === 'chat' ? 'chat' : 'terminal';
+export type ClaudeLaunchMode = 'anthropic' | 'interface' | 'z';
 
-export function getClaudeOpenMode(): TerminalViewMode {
-  return openMode;
+// Маппер launchMode → (вид, провайдер). Чистый — используется и в UI, и в тестах.
+export function launchModeToViewProvider(m: ClaudeLaunchMode): { view: TerminalViewMode; provider: ClaudeProvider } {
+  switch (m) {
+    case 'interface': return { view: 'chat', provider: 'anthropic' };
+    case 'z':         return { view: 'terminal', provider: 'glm' };
+    case 'anthropic':
+    default:          return { view: 'terminal', provider: 'anthropic' };
+  }
 }
 
-export function setClaudeOpenMode(mode: TerminalViewMode) {
-  openMode = mode;
-  localStorage.setItem(OPEN_MODE_KEY, mode);
+const LAUNCH_MODE_KEY = 'nebulide-claude-launch-mode';
+const OPEN_MODE_KEY = 'nebulide-claude-open-mode'; // старый ключ (terminal|chat) — мигрируем
+
+function readLaunchMode(): ClaudeLaunchMode {
+  const v = localStorage.getItem(LAUNCH_MODE_KEY);
+  if (v === 'anthropic' || v === 'interface' || v === 'z') return v;
+  // Миграция со старого openMode: chat → interface, terminal/прочее → anthropic.
+  return localStorage.getItem(OPEN_MODE_KEY) === 'chat' ? 'interface' : 'anthropic';
+}
+
+let launchMode: ClaudeLaunchMode = readLaunchMode();
+
+export function getClaudeLaunchMode(): ClaudeLaunchMode {
+  return launchMode;
+}
+
+export function setClaudeLaunchMode(mode: ClaudeLaunchMode) {
+  launchMode = mode;
+  localStorage.setItem(LAUNCH_MODE_KEY, mode);
   bump();
 }
 
-export function useClaudeOpenMode(): TerminalViewMode {
+export function useClaudeLaunchMode(): ClaudeLaunchMode {
   useTerminalViewModeVersion();
-  return openMode;
+  return launchMode;
 }

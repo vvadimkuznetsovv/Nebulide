@@ -1,9 +1,9 @@
 import { useState, useEffect, useCallback } from 'react';
-import TerminalComponent from './Terminal';
+import TerminalComponent, { respawnTerminalWithProvider } from './Terminal';
 import ClaudeChatView from './AgentChatView';
 import { resolveLiveSession } from '../../api/claudeSessions';
 import {
-  getTerminalViewMode, setTerminalViewMode, getTerminalCwdHint, useTerminalViewModeVersion,
+  getTerminalViewMode, setTerminalViewMode, getTerminalCwdHint, getTerminalProvider, useTerminalViewModeVersion,
   hasTrustPending, consumeTrustPending,
 } from '../../utils/terminalViewMode';
 
@@ -20,8 +20,9 @@ interface Props {
  * PTY живёт в module-level session — переключение видов его не рвёт.
  */
 export default function TerminalChatPanel({ instanceId, persistent, active }: Props) {
-  useTerminalViewModeVersion(); // re-render on mode change
+  useTerminalViewModeVersion(); // re-render on mode/provider change
   const mode = getTerminalViewMode(instanceId) === 'terminal' ? 'terminal' : 'chat';
+  const provider = getTerminalProvider(instanceId); // 'anthropic' | 'glm'
   const cwd = getTerminalCwdHint(instanceId);
   // Trust-gate: новая папка → claude показывает родной trust-промпт первым экраном.
   // Стартуем с настоящего терминала, чтобы юзер его увидел и подтвердил.
@@ -56,20 +57,40 @@ export default function TerminalChatPanel({ instanceId, persistent, active }: Pr
   // Иконочные переключатели вида (Терминал/Чат) — без подписей, но с title/aria
   // (тесты и читалки находят их по имени). В чистом чате они встраиваются ПЕРВЫМИ
   // в панель инструментов AgentChatView (одна строка); иначе живут в шапке-хосте.
+  // Переключить провайдера терминала. Смена модели = пересоздание PTY (env только на свежем shell),
+  // поэтому respawn (kill PTY → reconnect с ?provider= → заново `cd папка && claude`). Вид → терминал.
+  const switchProvider = (target: 'anthropic' | 'glm') => {
+    dropTrustGate();
+    setShowRawInChat(false);
+    setTerminalViewMode(instanceId, 'terminal');
+    if (getTerminalProvider(instanceId) !== target) {
+      respawnTerminalWithProvider(instanceId, target);
+    }
+  };
+
   const toggleButtons = (
     <>
-      <button type="button" aria-label="Терминал" title="Терминал"
-        onClick={() => { dropTrustGate(); setShowRawInChat(false); setTerminalViewMode(instanceId, 'terminal'); }}
-        style={modeBtnStyle(mode === 'terminal')}>
+      <button type="button" aria-label="Anthropic" title="Claude (Anthropic)"
+        onClick={() => switchProvider('anthropic')}
+        style={modeBtnStyle(mode === 'terminal' && provider === 'anthropic')}>
+        {/* искра-астериск (Anthropic) */}
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <polyline points="4 17 10 11 4 5" /><line x1="12" y1="19" x2="20" y2="19" />
+          <line x1="12" y1="3" x2="12" y2="21" /><line x1="4.5" y1="7" x2="19.5" y2="17" /><line x1="19.5" y1="7" x2="4.5" y2="17" />
         </svg>
       </button>
-      <button type="button" aria-label="Чат" title="Чат"
+      <button type="button" aria-label="интерфейс" title="Чат-лента над claude"
         onClick={() => { dropTrustGate(); setShowRawInChat(false); setTerminalViewMode(instanceId, 'chat'); }}
         style={modeBtnStyle(mode === 'chat')}>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+        </svg>
+      </button>
+      <button type="button" aria-label="Z" title="GLM 5.2 (Z.ai)"
+        onClick={() => switchProvider('glm')}
+        style={modeBtnStyle(mode === 'terminal' && provider === 'glm')}>
+        {/* глиф Z (GLM) */}
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M6 6h12L6 18h12" />
         </svg>
       </button>
     </>

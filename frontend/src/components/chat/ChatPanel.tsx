@@ -10,8 +10,9 @@ import LLMPanel from '../llm/LLMPanel';
 import FolderPicker from './FolderPicker';
 import ClaudeChatView from '../terminal/ClaudeChatView';
 import {
-  getClaudeOpenMode, setClaudeOpenMode, useClaudeOpenMode,
-  setInitialTerminalViewMode, setTerminalCwdHint, markTrustPending, setSessionHint,
+  getClaudeLaunchMode, setClaudeLaunchMode, useClaudeLaunchMode, launchModeToViewProvider,
+  type ClaudeLaunchMode,
+  setInitialTerminalViewMode, setTerminalCwdHint, setTerminalProvider, markTrustPending, setSessionHint,
 } from '../../utils/terminalViewMode';
 import { fetchServerOs, buildCdClaudeCmd } from '../../utils/serverOs';
 
@@ -206,7 +207,7 @@ export default function ChatPanel(_props: ChatPanelProps) {
 
   const openTerminalWithId = useLayoutStore((s) => s.openTerminalWithId);
   const user = useAuthStore((s) => s.user);
-  const openMode = useClaudeOpenMode();
+  const launchMode = useClaudeLaunchMode();
 
   // Dedicated per-user folder that holds "communication" chats (talking to Claude
   // outside of any project). Hidden from the file manager by the backend.
@@ -225,7 +226,9 @@ export default function ChatPanel(_props: ChatPanelProps) {
   const startNewChatInFolder = useCallback(async (absPath: string) => {
     const instanceId = `claude-${Date.now()}`;
     setTerminalCwdHint(instanceId, absPath);
-    setInitialTerminalViewMode(instanceId, getClaudeOpenMode() === 'chat' ? 'chat' : 'terminal');
+    const { view, provider } = launchModeToViewProvider(getClaudeLaunchMode());
+    setTerminalProvider(instanceId, provider); // GLM/Anthropic — до старта claude (env свежего PTY)
+    setInitialTerminalViewMode(instanceId, view);
     // Новая/недоверенная папка → claude покажет родной trust-промпт первым экраном.
     // Чат покажет настоящий терминал, пока сессия не стартует (см. TerminalChatPanel).
     markTrustPending(instanceId);
@@ -368,8 +371,10 @@ export default function ChatPanel(_props: ChatPanelProps) {
     const instanceId = `claude-${Date.now()}`;
     if (session.cwd) setTerminalCwdHint(instanceId, session.cwd);
     setSessionHint(instanceId, session.session_id); // детерминированный резолв именно этой сессии
-    // Resume the real claude in a PTY; initial view = Чат (обёртка) or Терминал.
-    setInitialTerminalViewMode(instanceId, getClaudeOpenMode() === 'chat' ? 'chat' : 'terminal');
+    // Resume the real claude in a PTY; вид + провайдер берём из launch-режима «Открывать как».
+    const { view, provider } = launchModeToViewProvider(getClaudeLaunchMode());
+    setTerminalProvider(instanceId, provider);
+    setInitialTerminalViewMode(instanceId, view);
     openTerminalWithId(instanceId);
 
     const resumeCmd = `claude --resume ${session.session_id}`;
@@ -698,23 +703,24 @@ export default function ChatPanel(_props: ChatPanelProps) {
         >💬 Чаты общения</button>
       </div>
 
-      {/* Open-as preference: launch sessions directly as terminal or chat interface */}
+      {/* Open-as preference: Anthropic (терминал+Claude) / интерфейс (чат-лента) / Z (терминал+GLM) */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '0 12px 6px', flexShrink: 0 }}>
         <span style={{ fontSize: 10, color: 'var(--text-muted)' }}>Открывать как:</span>
-        {(['terminal', 'chat'] as const).map((m) => (
+        {(['anthropic', 'interface', 'z'] as const).map((m) => (
           <button
             key={m}
             type="button"
-            onClick={() => setClaudeOpenMode(m)}
+            onClick={() => setClaudeLaunchMode(m as ClaudeLaunchMode)}
+            title={m === 'z' ? 'GLM 5.2 (Z.ai)' : m === 'interface' ? 'Чат-лента над claude' : 'Claude (Anthropic)'}
             style={{
               padding: '2px 10px', borderRadius: 10, fontSize: 10, fontFamily: 'inherit', cursor: 'pointer',
-              background: openMode === m ? 'rgba(var(--accent-rgb), 0.15)' : 'rgba(var(--accent-rgb), 0.04)',
-              border: `1px solid ${openMode === m ? 'rgba(var(--accent-rgb), 0.4)' : 'var(--glass-border)'}`,
-              color: openMode === m ? 'var(--accent)' : 'var(--text-muted)',
-              fontWeight: openMode === m ? 600 : 400,
+              background: launchMode === m ? 'rgba(var(--accent-rgb), 0.15)' : 'rgba(var(--accent-rgb), 0.04)',
+              border: `1px solid ${launchMode === m ? 'rgba(var(--accent-rgb), 0.4)' : 'var(--glass-border)'}`,
+              color: launchMode === m ? 'var(--accent)' : 'var(--text-muted)',
+              fontWeight: launchMode === m ? 600 : 400,
             }}
           >
-            {m === 'terminal' ? 'Терминал' : 'Чат'}
+            {m === 'anthropic' ? 'Anthropic' : m === 'interface' ? 'интерфейс' : 'Z'}
           </button>
         ))}
       </div>

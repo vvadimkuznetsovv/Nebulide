@@ -130,6 +130,12 @@ func (h *TerminalHandler) HandleWebSocket(c *gin.Context) {
 	extraEnv["NEBULIDE_INSTANCE_ID"] = instanceID
 	extraEnv["NEBULIDE_HOOK_URL"] = "http://localhost:" + h.cfg.Port + "/api/hooks/claude"
 
+	// Провайдер модели (?provider=glm) — вливаем ANTHROPIC_* для GLM (Z.ai). Пусто => Anthropic.
+	// claude наследует эти переменные из шелла и стартует под выбранной моделью.
+	for k, v := range providerEnv(c.Query("provider"), h.cfg) {
+		extraEnv[k] = v
+	}
+
 	// Reuse existing shell or create new one.
 	// Shell lives independently of WebSocket — survives reconnections.
 	log.Printf("[Terminal] calling GetOrCreate key=%s dir=%s sandboxed=%v user=%s", sessionKey, workDir, sandboxed, claims.Username)

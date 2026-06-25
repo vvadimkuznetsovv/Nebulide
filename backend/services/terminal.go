@@ -497,6 +497,10 @@ func (s *TerminalService) createLocked(sessionKey string, workingDir string, san
 	// ТЕРМИНАЛЬНЫЙ claude увидел бы их, счёл бы себя ВЛОЖЕННОЙ сессией и НЕ писал бы транскрипт
 	// (JSONL) → чат не подтягивает ответы (в терминале ответ есть). На проде этих переменных нет;
 	// фильтр делает поведение одинаковым в любом окружении.
+	// GLM-режим (provider=glm) задаёт ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN через extraEnv.
+	// Унаследованный ANTHROPIC_API_KEY (если сервер сам его держит) перебил бы AUTH_TOKEN и увёл
+	// claude обратно на Anthropic → гасим его, чтобы GLM реально применился.
+	glmMode := extraEnv["ANTHROPIC_BASE_URL"] != ""
 	raw := os.Environ()
 	env := make([]string, 0, len(raw))
 	has := make(map[string]bool)
@@ -506,6 +510,9 @@ func (s *TerminalService) createLocked(sessionKey string, workingDir string, san
 			k = e[:i]
 		}
 		if strings.HasPrefix(k, "CLAUDE_CODE") || k == "CLAUDECODE" || strings.HasPrefix(k, "CLAUDE_AGENT_SDK") {
+			continue
+		}
+		if glmMode && k == "ANTHROPIC_API_KEY" {
 			continue
 		}
 		env = append(env, e)
