@@ -235,7 +235,6 @@ func main() {
 		// Claude CLI sessions & plans
 		protected.GET("/claude-sessions", claudeSessionsHandler.List)
 		protected.GET("/claude-sessions/search", claudeSessionsHandler.SearchSessions)
-		protected.GET("/claude-sessions/locate", claudeSessionsHandler.LocateByText)
 		protected.GET("/claude-sessions/live", claudeSessionsHandler.ResolveLive)
 		protected.GET("/claude-sessions/:project/:sessionFile/tail", claudeSessionsHandler.TailSession)
 		protected.GET("/claude-sessions/:project/:sessionFile/branches", claudeSessionsHandler.ListBranches)
