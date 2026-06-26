@@ -6,6 +6,7 @@ import {
   getTerminalViewMode, setTerminalViewMode, getTerminalCwdHint, getTerminalProvider, useTerminalViewModeVersion,
   hasTrustPending, consumeTrustPending,
 } from '../../utils/terminalViewMode';
+import { useGlmStatus, glmDotColor } from '../../utils/glmStatus';
 
 interface Props {
   instanceId: string;
@@ -24,6 +25,15 @@ export default function TerminalChatPanel({ instanceId, persistent, active }: Pr
   const mode = getTerminalViewMode(instanceId) === 'terminal' ? 'terminal' : 'chat';
   const provider = getTerminalProvider(instanceId); // 'anthropic' | 'glm'
   const cwd = getTerminalCwdHint(instanceId);
+
+  // Индикатор доступности GLM на кнопке «Z» (зелёный/красный) — из бесплатного usage-эндпоинта.
+  const glm = useGlmStatus();
+  const glmDot = glmDotColor(glm);
+  const zTitle = glm && glm.enabled
+    ? `GLM ${glm.level ?? ''} · 5ч ${glm.cycle_percent ?? 0}%`
+      + (glm.cycle_reset_at ? ' · сброс ' + new Date(glm.cycle_reset_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '')
+      + (glm.week_percent != null ? ' · неделя ' + glm.week_percent + '%' : '')
+    : 'GLM 5.2 (Z.ai)';
   // Trust-gate: новая папка → claude показывает родной trust-промпт первым экраном.
   // Стартуем с настоящего терминала, чтобы юзер его увидел и подтвердил.
   const [trustGate, setTrustGate] = useState(() => hasTrustPending(instanceId));
@@ -85,14 +95,24 @@ export default function TerminalChatPanel({ instanceId, persistent, active }: Pr
           <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
         </svg>
       </button>
-      <button type="button" aria-label="Z" title="GLM 5.2 (Z.ai)"
-        onClick={() => switchProvider('glm')}
-        style={modeBtnStyle(mode === 'terminal' && provider === 'glm')}>
-        {/* глиф Z (GLM) */}
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M6 6h12L6 18h12" />
-        </svg>
-      </button>
+      <span style={{ position: 'relative', display: 'inline-flex' }}>
+        <button type="button" aria-label="Z" title={zTitle}
+          onClick={() => switchProvider('glm')}
+          style={modeBtnStyle(mode === 'terminal' && provider === 'glm')}>
+          {/* глиф Z (GLM) */}
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M6 6h12L6 18h12" />
+          </svg>
+        </button>
+        {/* Индикатор лимита GLM: зелёный = есть квота, красный = исчерпан (из бесплатного usage-эндпоинта) */}
+        {glmDot && (
+          <span aria-hidden style={{
+            position: 'absolute', top: -1, right: -1, width: 8, height: 8, borderRadius: '50%',
+            background: glmDot, boxShadow: `0 0 4px ${glmDot}`,
+            border: '1px solid rgba(0,0,0,0.4)', pointerEvents: 'none',
+          }} />
+        )}
+      </span>
     </>
   );
 

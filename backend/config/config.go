@@ -42,9 +42,10 @@ type Config struct {
 	// GLM (Z.ai) provider — Anthropic-совместимый эндпоинт для запуска claude на GLM.
 	// Ключ глобальный (общий для всех юзеров), в БД не светим. Пустой ZaiAPIKey => режим
 	// GLM тихо недоступен (фолбэк на Anthropic).
-	ZaiAPIKey  string
-	ZaiBaseURL string
-	ZaiModel   string
+	ZaiAPIKey   string
+	ZaiBaseURL  string
+	ZaiModel    string
+	ZaiUsageURL string
 }
 
 func Load() *Config {
@@ -80,9 +81,10 @@ func Load() *Config {
 
 		NvidiaAPIKey: getEnv("NVIDIA_API_KEY", ""),
 
-		ZaiAPIKey:  getEnv("ZAI_API_KEY", ""),
-		ZaiBaseURL: getEnv("ZAI_BASE_URL", "https://api.z.ai/api/anthropic"),
-		ZaiModel:   getEnv("ZAI_MODEL", "glm-5.2[1m]"),
+		ZaiAPIKey:   getEnv("ZAI_API_KEY", ""),
+		ZaiBaseURL:  getEnv("ZAI_BASE_URL", "https://api.z.ai/api/anthropic"),
+		ZaiModel:    getEnv("ZAI_MODEL", "glm-5.2[1m]"),
+		ZaiUsageURL: getEnv("ZAI_USAGE_URL", "https://api.z.ai/api/monitor/usage/quota/limit"),
 	}
 }
 
