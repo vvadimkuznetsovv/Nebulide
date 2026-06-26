@@ -82,7 +82,7 @@ func Load() *Config {
 
 		ZaiAPIKey:  getEnv("ZAI_API_KEY", ""),
 		ZaiBaseURL: getEnv("ZAI_BASE_URL", "https://api.z.ai/api/anthropic"),
-		ZaiModel:   getEnv("ZAI_MODEL", "glm-5.2"),
+		ZaiModel:   getEnv("ZAI_MODEL", "glm-5.2[1m]"),
 	}
 }
 

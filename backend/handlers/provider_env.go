@@ -1,6 +1,10 @@
 package handlers
 
-import "nebulide/config"
+import (
+	"strings"
+
+	"nebulide/config"
+)
 
 // providerEnv возвращает ANTHROPIC_* env для НЕ-дефолтного провайдера терминального claude.
 // Возвращает nil (= провайдер Anthropic по умолчанию), если:
@@ -15,9 +19,15 @@ func providerEnv(provider string, cfg *config.Config) map[string]string {
 	if provider != "glm" || cfg.ZaiAPIKey == "" {
 		return nil
 	}
-	return map[string]string{
+	env := map[string]string{
 		"ANTHROPIC_BASE_URL":   cfg.ZaiBaseURL,
 		"ANTHROPIC_AUTH_TOKEN": cfg.ZaiAPIKey,
 		"ANTHROPIC_MODEL":      cfg.ZaiModel,
 	}
+	// Модель с суффиксом [1m] (напр. glm-5.2[1m]) = 1M контекста. Без этого окна claude
+	// авто-компактит на ~200K и миллион не используется — поднимаем окно авто-компакта.
+	if strings.Contains(cfg.ZaiModel, "[1m]") {
+		env["CLAUDE_CODE_AUTO_COMPACT_WINDOW"] = "1000000"
+	}
+	return env
 }
